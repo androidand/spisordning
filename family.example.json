@@ -1,0 +1,16 @@
+{
+  "people": [
+    { "id": "mum", "name": "Mum", "weight": 1 },
+    { "id": "dad", "name": "Dad", "weight": 1 },
+    { "id": "kid", "name": "Kid", "weight": 2 }
+  ],
+  "preferences": [
+    { "personId": "kid", "tag": "pasta", "sentiment": 2, "confidence": 0.9 },
+    { "personId": "kid", "tag": "fisk", "sentiment": -2, "confidence": 0.8 },
+    { "personId": "mum", "tag": "fisk", "sentiment": 2, "confidence": 0.7 },
+    { "personId": "dad", "tag": "gryta", "sentiment": 1, "confidence": 0.6 }
+  ],
+  "kitchenEnergy": {
+    "mon": 2, "tue": 2, "wed": 1, "thu": 2, "fri": 1, "sat": 3, "sun": 3
+  }
+}

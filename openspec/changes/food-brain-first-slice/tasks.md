@@ -15,11 +15,16 @@
 
 ## 2. Mealie sync (read-only)
 
-- [ ] 2.1 Mealie client: fetch recipes + foods/units via REST API
-- [ ] 2.2 Store recipe references (`mealie_recipe_id`, normalized ingredients,
-      `last_synced_at`, `raw_mealie_snapshot`); no authoritative copies
+- [x] 2.1 Mealie client: fetch recipes (paged list + full detail) via REST API with token auth
+      (`internal/mealie`, 2 tests; effort derived from totalTime — ≤25 min low, ≤50 medium,
+      else high)
+- [x] 2.2 Recipe references normalized in-memory per plan run (`mealie_recipe_id`, lowercased
+      tags, ingredient lines, `Raw` snapshot); Postgres persistence lands with the food-brain
+      HTTP server — schema is ready in `recipe_ref`/`recipe_ingredient`
 - [ ] 2.3 Seed `ingredient_mappings` for a small curated recipe set (Swedish units → grams →
-      package sizes) + a minimal review surface (CLI or endpoint)
+      package sizes) + a minimal review surface (CLI or endpoint). Interim: plan uses
+      lowercase Mealie food names as canonical ids and the adapter flags low-confidence
+      matches for review
 
 ## 3. Suggestion engine (Go, tested)
 
@@ -27,8 +32,10 @@
       penalty, Skolmaten dedup, Willys campaign bias (`internal/scoring`)
 - [x] 3.2 Unit tests asserting ranking is deterministic and reproducible with no LLM present
       (9 scorer tests incl. reproducibility across repeated runs)
-- [ ] 3.3 Olla integration: vary top-N candidates within constraints + generate explanations;
-      reject any variation that violates a hard constraint
+- [x] 3.3 Olla integration (`internal/llm`, 4 tests): `Explain` (Swedish one-liner grounded in
+      the score breakdown) + `ProposeOrder` (reorder within the feasible set only — invented
+      ids and infeasible candidates are rejected; unparseable output falls back to scorer
+      order, so the LLM is never load-bearing)
 - [x] 3.4 Emit canonical shopping requirements (no retailer ids) (`internal/planning`, 5 tests)
 
 ## 4. willys-adapter service
@@ -41,14 +48,20 @@
       parsing, package counts, match scoring, review flagging)
 - [x] 4.3 `POST /shopping-lists` → per-week Willys wishlist; separate opt-in
       `POST /shopping-lists/:id/to-cart`; no checkout/payment/slot endpoints exist
-- [ ] 4.4 Skolmaten client (read-only) feeding the scorer's dedup input
+- [x] 4.4 Skolmaten client (read-only) feeding the scorer's dedup input (`internal/skolmaten`,
+      3 tests; mirrors the observed /api/4 shape incl. Client-Token header; meal names
+      tokenized into tags with Swedish stopword filtering)
 - [x] 4.5 Go-side `internal/retailer` client for the adapter (`ResolveRequirements`,
       `CreateShoppingList`; 4 httptest tests incl. no-retailer-id-in-payload guard)
 
 ## 5. End-to-end slice
 
-- [ ] 5.1 Wire the pipe: Mealie recipe → plan → approve → shopping requirements → resolve →
-      wishlist; a `spisordning plan` command or endpoint that runs it
+- [x] 5.1 Wire the pipe: `food-brain plan` (cmd/food-brain/plan.go) — Mealie sync → per-day
+      scoring with Skolmaten dedup and in-week repetition avoidance → optional Olla
+      explanations → shopping requirements → adapter resolve → wishlist. Dry-run by default;
+      `--create-wishlist` applies; needs-review items are never silently added. Covered by an
+      end-to-end test against fake Mealie/Skolmaten/Olla/adapter services
+      (cmd/food-brain/plan_test.go)
 - [ ] 5.2 Surface tonight's meal + one-tap reactions via Home Assistant (through homeops MCP /
       HA API)
 - [ ] 5.3 Demote the n8n `weekly-meal-planner` workflow to scheduler/webhook (or retire) once
@@ -56,8 +69,8 @@
 
 ## 6. Verification & docs
 
-- [x] 6.1 `go test ./...` green (14 tests); scorer + requirements covered; `go vet` clean.
-      In-memory demo of the pure pipe: `go run ./cmd/food-brain`
+- [x] 6.1 `go test ./...` green (28 tests across 8 packages incl. the end-to-end plan test);
+      `go vet` clean. In-memory demo: `go run ./cmd/food-brain demo`
 - [ ] 6.2 Integration smoke: run the slice against real Mealie/Olla/Skolmaten/Willys with a
       test wishlist; confirm no cart/payment side effects
 - [x] 6.3 README updated with run instructions; architecture decisions reflected

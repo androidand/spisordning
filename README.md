@@ -181,9 +181,26 @@ while existing apps provide the generic 80%.
 The deterministic planning core is built and tested without any database, LLM, or network:
 
 ```bash
-go test ./...          # scorer + requirements builder (14 tests)
-go run ./cmd/food-brain # in-memory demo: ranks a sample week + prints shopping requirements
+go test ./...                # 28 tests incl. an end-to-end plan test against fake services
+go run ./cmd/food-brain demo # in-memory demo: ranks a sample week + prints requirements
 ```
+
+The live weekly pipe is `food-brain plan` (dry-run by default):
+
+```bash
+cp family.example.json family.json   # people, preferences, weekday kitchen energy
+export MEALIE_BASE_URL=... MEALIE_API_TOKEN=...          # required
+export SKOLMATEN_BASE_URL=... SKOLMATEN_SCHOOL=skolan    # optional: school-lunch dedup
+export OLLA_OPENAI_BASE_URL=... OLLA_MODEL=...           # optional: explanations
+export ADAPTER_URL=http://localhost:8402                 # willys-adapter
+
+go run ./cmd/food-brain plan                    # prints plan + requirements, changes nothing
+go run ./cmd/food-brain plan --create-wishlist  # resolves products, creates "Vecka NN" wishlist
+```
+
+Confidently-resolved products go on the wishlist; anything below the review threshold is
+printed as needing review and **never silently added**. Payment and slot booking stay in the
+Willys app.
 
 The demo shows all five scoring signals at work — preferences (confidence-weighted, per-person
 weight), effort vs. the day's kitchen energy, a repetition penalty, school-lunch dedup, and
@@ -192,7 +209,11 @@ campaign bias — plus hard-constraint feasibility. Layout:
 - `internal/domain` — core value types (people, preferences, candidates, plan context)
 - `internal/scoring` — the pure, deterministic scorer (`Rank`)
 - `internal/planning` — canonical shopping-requirement aggregation
-- `cmd/food-brain` — demo harness (to become the real CLI/service)
+- `internal/mealie` — read-only Mealie recipe sync (references + snapshots, never copies)
+- `internal/skolmaten` — school-lunch menu client + meal-name tokenizer for dedup
+- `internal/llm` — Olla layer: explanations + feasible-set-only reordering (never load-bearing)
+- `internal/retailer` — client for the willys-adapter (resolve, create wishlist)
+- `cmd/food-brain` — the CLI (`demo`, `plan`)
 - `migrations/0001_init.sql` — the durable PostgreSQL schema
 
 The **willys-adapter** is built and lives with its TypeScript dependency in the willys-client
@@ -200,8 +221,8 @@ repo (`apps/willys-adapter`, `npm run adapter`, port 8402); the Go side talks to
 `internal/retailer`. `docker-compose.yml` here runs Postgres (schema auto-applied) + the
 adapter — copy `.env.example` to `.env` first.
 
-Still to wire (need live services): Mealie sync, Olla explanations, Skolmaten input, the
-food-brain HTTP server + end-to-end `plan` command, and Home Assistant surfacing. Tracked in
+Still to wire: Postgres persistence (the schema is ready; `plan` currently syncs per run),
+the ingredient-mapping review surface, and Home Assistant surfacing. Tracked in
 `openspec/changes/food-brain-first-slice/tasks.md`.
 
 ## Related repos
