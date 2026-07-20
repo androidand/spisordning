@@ -154,11 +154,20 @@ func runPlan(args []string) error {
 	for _, s := range chosenSlots {
 		meals = append(meals, ingredientLines[s.winner.Candidate.MealieRecipeID])
 	}
-	reqs := planning.BuildRequirements(meals)
+	allReqs := planning.BuildRequirements(meals)
+	// Drop pantry staples (salt, pepper, oil, …) — assumed on hand, never bought.
+	reqs, staples := planning.PartitionStaples(allReqs)
 
-	fmt.Printf("\nShopping requirements (%d):\n", len(reqs))
+	fmt.Printf("\nShopping requirements (%d; %d assumed-staple item(s) skipped):\n", len(reqs), len(staples))
 	for _, r := range reqs {
 		fmt.Printf("  - %-24s %g %s\n", r.IngredientID, r.Quantity, r.Unit)
+	}
+	if len(staples) > 0 {
+		dropped := make([]string, 0, len(staples))
+		for _, s := range staples {
+			dropped = append(dropped, s.IngredientID)
+		}
+		fmt.Printf("  (skipped staples: %s)\n", strings.Join(dropped, ", "))
 	}
 
 	if !*createWishlist {
