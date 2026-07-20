@@ -14,6 +14,8 @@
 - [x] 2.1 `--watch --watch-interval-sec N`: re-run on a timer, skip unchanged notes via a
       content hash
 - [x] 2.2 Fail loudly with a clear message if the adapter is unreachable
+- [x] 2.3 Multi-mapping watch: no --mapping syncs ALL enabled mappings; per-list change
+      hash + error isolation; config re-read each cycle so adding a list is a config edit
 
 ## 3. Cutover
 
