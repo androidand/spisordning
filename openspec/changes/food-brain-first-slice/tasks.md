@@ -71,8 +71,6 @@
 
 - [x] 6.1 `go test ./...` green (28 tests across 8 packages incl. the end-to-end plan test);
       `go vet` clean. In-memory demo: `go run ./cmd/food-brain demo`
-- [x] 6.2 Integration smoke: ran `food-brain plan --create-wishlist` against real Mealie (4 ICA recipes) + real Willys; created wishlist "Vecka 30". No cart/payment side effects.
-      test wishlist; confirm no cart/payment side effects
+- [x] 6.2 Integration smoke: ran `food-brain plan --create-wishlist` against real Mealie (4 ICA recipes) + real Willys; created wishlist "Vecka 30", no cart/payment side effects
 - [x] 6.3 README updated with run instructions; architecture decisions reflected
-- [x] 6.4 Generated a real week plan and created the Willys wishlist (2026-07-19); owner to eyeball "Vecka 30" in the app. FOUND: confidence model caps correct-but-piece/weight-mismatched matches at 0.65, under the 0.7 review threshold -> wishlist under-filled; see live-findings memory.
-      Willys app
+- [x] 6.4 Generated a real week plan and created the Willys wishlist (2026-07-19); owner to eyeball "Vecka 30" in the app. FOUND: confidence model caps correct-but-piece/weight-mismatched matches at 0.65, under the 0.7 review threshold -> wishlist under-filled; see live-findings memory
