@@ -28,5 +28,5 @@
 
 - [x] 4.1 Jest: bridge maps parsed items → requirements, posts to a fake adapter, adds only
       confident items, honours dry-run
-- [~] 4.2 Bridge logic verified (169 tests) + adapter service live-healthy; live Apple Notes READ blocked from headless shell (osascript needs the GUI session) — owner verifies in-session
+- [x] 4.2 Owner verified live in GUI session (2026-07-21): bridge read "Köp: Testlista" (9 items), resolved via adapter, dry-run clean. Result exposed the name-vs-quantity confidence conflation at full scale (0/9 resolved) -> fixed in follow-up change name-vs-quantity-confidence
 - [x] 4.3 Reloaded launchd on the bridge (service com.andreas.willys-notes-sync now runs notes:bridge:watch; adapter service healthy on :8402)

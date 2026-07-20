@@ -46,9 +46,12 @@ type Resolution struct {
 	ProductName       string  `json:"productName"`
 	Packages          int     `json:"packages"`
 	ResolvedQuantity  *float64 `json:"resolvedQuantity"`
-	MatchType         string  `json:"matchType"` // "exact" | "fuzzy" | "none"
+	MatchType         string  `json:"matchType"` // "pinned" | "pinned-backup" | "exact" | "fuzzy" | "none"
+	// Confidence is name-match confidence only; quantity uncertainty is the
+	// separate QuantityUncertain flag (packages defaults to a safe 1).
 	Confidence        float64 `json:"confidence"`
 	NeedsReview       bool    `json:"needsReview"`
+	QuantityUncertain bool    `json:"quantityUncertain"`
 }
 
 // SearchTerms maps canonical ingredient ids to human search terms (Swedish).
