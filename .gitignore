@@ -35,3 +35,6 @@ tmp/
 
 # OpenSpec cache
 .specsync/
+
+# per-user runtime config (copy of family.example.json)
+family.json

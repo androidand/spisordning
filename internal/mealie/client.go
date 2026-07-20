@@ -5,6 +5,7 @@
 package mealie
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -139,7 +140,67 @@ func (c *Client) fetchRecipe(ctx context.Context, slug string) (*RecipeRef, erro
 		}
 		ref.Ingredients = append(ref.Ingredients, il)
 	}
+
+	// Mealie's URL import stores ingredients as raw text without structured
+	// food/unit/quantity (the common real-world case). Fall back to Mealie's
+	// own ingredient parser for any line that arrived unstructured, so
+	// downstream shopping-requirement resolution has something to work with.
+	c.parseUnstructured(ctx, ref.Ingredients)
 	return &ref, nil
+}
+
+// parseUnstructured fills in FoodName/Unit/Quantity for ingredient lines that
+// Mealie left as raw notes, using Mealie's brute parser. Best-effort: parser
+// failures leave the lines as-is (they get skipped downstream, same as before).
+func (c *Client) parseUnstructured(ctx context.Context, lines []IngredientLine) {
+	type target struct{ idx int }
+	var notes []string
+	var targets []target
+	for i := range lines {
+		if lines[i].FoodName == "" && strings.TrimSpace(lines[i].Note) != "" {
+			notes = append(notes, lines[i].Note)
+			targets = append(targets, target{idx: i})
+		}
+	}
+	if len(notes) == 0 {
+		return
+	}
+
+	body, err := json.Marshal(map[string]any{"parser": "brute", "ingredients": notes})
+	if err != nil {
+		return
+	}
+	raw, err := c.postRaw(ctx, "/api/parser/ingredients", body)
+	if err != nil {
+		return // parser unavailable; leave lines unstructured
+	}
+
+	var parsed []struct {
+		Ingredient struct {
+			Quantity float64 `json:"quantity"`
+			Unit     *struct {
+				Name string `json:"name"`
+			} `json:"unit"`
+			Food *struct {
+				Name string `json:"name"`
+			} `json:"food"`
+		} `json:"ingredient"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil || len(parsed) != len(targets) {
+		return
+	}
+	for n, p := range parsed {
+		i := targets[n].idx
+		if p.Ingredient.Food != nil && p.Ingredient.Food.Name != "" {
+			lines[i].FoodName = p.Ingredient.Food.Name
+		}
+		if p.Ingredient.Unit != nil {
+			lines[i].Unit = p.Ingredient.Unit.Name
+		}
+		if p.Ingredient.Quantity > 0 {
+			lines[i].Quantity = p.Ingredient.Quantity
+		}
+	}
 }
 
 // effortFromTotalTime maps Mealie's free-text totalTime to an effort class.
@@ -197,6 +258,31 @@ func (c *Client) getRaw(ctx context.Context, path string) (json.RawMessage, erro
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Accept", "application/json")
+
+	res, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("mealie: %w", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("mealie: HTTP %d for %s", res.StatusCode, path)
+	}
+
+	var buf json.RawMessage
+	if err := json.NewDecoder(res.Body).Decode(&buf); err != nil {
+		return nil, fmt.Errorf("mealie: decode %s: %w", path, err)
+	}
+	return buf, nil
+}
+
+func (c *Client) postRaw(ctx context.Context, path string, body []byte) (json.RawMessage, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
 
 	res, err := c.http.Do(req)
 	if err != nil {

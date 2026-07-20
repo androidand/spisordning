@@ -39,6 +39,9 @@ func TestSyncRecipes_NormalizesReferences(t *testing.T) {
 					{"quantity":500,"unit":{"name":"g"},"food":{"id":"f-salmon","name":"Laxfilé"},"note":""}
 				]
 			}`))
+		case "/api/parser/ingredients":
+			t.Errorf("parser should not be called: recipe %s had structured foods", r.URL.Path)
+			w.WriteHeader(500)
 		default:
 			t.Errorf("unexpected path %s", r.URL.Path)
 			w.WriteHeader(404)
@@ -74,6 +77,53 @@ func TestSyncRecipes_NormalizesReferences(t *testing.T) {
 
 	if refs[1].Effort != domain.EffortHigh {
 		t.Errorf("1 timme should be high effort, got %d", refs[1].Effort)
+	}
+}
+
+func TestSyncRecipes_ParsesUnstructuredIngredientsViaMealieParser(t *testing.T) {
+	var parserCalled bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/recipes":
+			w.Write([]byte(`{"page":1,"perPage":50,"total":1,"items":[
+				{"id":"r1","slug":"korvstroganoff","name":"Korvstroganoff"}]}`))
+		case "/api/recipes/korvstroganoff":
+			// URL-imported recipe: ingredients are raw notes, no food/unit/quantity.
+			w.Write([]byte(`{
+				"id":"r1","slug":"korvstroganoff","name":"Korvstroganoff","totalTime":"30 minutes",
+				"tags":[],
+				"recipeIngredient":[
+					{"quantity":0,"note":"550 g falukorv"},
+					{"quantity":0,"note":"1 gul lök"}
+				]}`))
+		case "/api/parser/ingredients":
+			parserCalled = true
+			w.Write([]byte(`[
+				{"ingredient":{"quantity":550,"unit":{"name":"g"},"food":{"name":"falukorv"}}},
+				{"ingredient":{"quantity":1,"unit":{"name":"gul"},"food":{"name":"lök"}}}
+			]`))
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	defer srv.Close()
+
+	refs, err := New(srv.URL, "tok").SyncRecipes(context.Background())
+	if err != nil {
+		t.Fatalf("SyncRecipes: %v", err)
+	}
+	if !parserCalled {
+		t.Fatal("expected the Mealie parser to be called for unstructured ingredients")
+	}
+	ings := refs[0].Ingredients
+	if len(ings) != 2 {
+		t.Fatalf("expected 2 ingredients, got %d", len(ings))
+	}
+	if ings[0].FoodName != "falukorv" || ings[0].Quantity != 550 || ings[0].Unit != "g" {
+		t.Errorf("first ingredient not parsed: %+v", ings[0])
+	}
+	if ings[1].FoodName != "lök" {
+		t.Errorf("second ingredient food not parsed: %+v", ings[1])
 	}
 }
 
