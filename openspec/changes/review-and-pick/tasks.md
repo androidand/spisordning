@@ -10,5 +10,6 @@
       additive double-adds)
 - [x] 1.4 Live verified 2026-07-21: queue populated with Majskolvar + Coca cola zero 1,5 L;
       picker renders live hits incl. Coca-cola Zero Läsk Pet; 182 tests green
+- [x] 1.6 "Visa fler sorter": promo hits expand their Välj&blanda variant family in the picker (GET /promotions/:code/products; toProductHit shared normalizer). Live: 9 variants incl. the intended Coca-cola Zero 1,5l
 - [ ] 1.5 Owner picks their defaults on http://localhost:8402/review and confirms the terms
       sync to the wishlist within a watch cycle
