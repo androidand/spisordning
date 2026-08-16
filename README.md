@@ -7,6 +7,11 @@ decides what the family eats this week and gets it into the shopping basket.
 > Status: **design phase**. A working v1 already exists as an n8n workflow (see below);
 > spisordning absorbs and replaces it with a tested Go service. Architecture and the first
 > vertical slice are planned as OpenSpec changes under `openspec/`.
+>
+> **The current mission document is [`PLAN.md`](PLAN.md)** — a much larger relational
+> food-knowledge-graph vision than this README's original "thin wrapper" framing below. Read
+> `PLAN.md` and [`docs/research/current-state.md`](docs/research/current-state.md) first; treat
+> this README as historical context for the first slice, not the target architecture.
 
 ## What already exists (reconciled 2026-07, do not rebuild)
 
