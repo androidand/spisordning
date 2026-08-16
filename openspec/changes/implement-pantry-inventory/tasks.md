@@ -2,12 +2,19 @@
 
 ## 1. Upstream dependencies
 
-- [ ] 1.1 Consume `establish-reference-lab`'s Grocy investigation findings (products, barcodes,
+- [x] 1.1 Consume `establish-reference-lab`'s Grocy investigation findings (products, barcodes,
       locations, stock, stock journal, lots, expiry, purchase, consume, discard, transfer,
       adjust, mark empty, unit conversion) as the primary reference for event semantics before
-      finalizing this change's migration
-- [ ] 1.2 Document explicitly where this change's event semantics diverge from Grocy's, and why
-      — do not mechanically port Grocy's model (`PLAN.md`'s First Principle)
+      finalizing this change's migration — done 2026-08-16, see `docs/research/
+      grocy-inventory-and-stock.md` / `grocy-units-and-planning.md` / `grocy-api-and-database.md`
+      and `design.md` D2/D3/D7
+- [x] 1.2 Document explicitly where this change's event semantics diverge from Grocy's, and why
+      — do not mechanically port Grocy's model (`PLAN.md`'s First Principle). Done in `design.md`
+      D7: `MARK_EMPTY` collapses into `CONSUME` (Grocy has no distinct kind — this design
+      diverges from the literal `PLAN.md` list, not from Grocy); `DISCARD` stays distinct
+      (Grocy's `spoiled`-boolean-on-`CONSUME` is a documented weakness, deliberately not
+      copied); undo is a compensating event, never a mutation of history (Grocy's own "undo"
+      mutates `stock_log` in place — explicitly rejected)
 - [ ] 1.3 Consume `establish-household-and-catalog`'s `Household`, `Person`, `Ingredient`,
       `IngredientForm`, `Unit`, `Product`, and `ProductIdentifier` — do not redefine
       Ingredient-vs-Product modeling here
@@ -36,19 +43,26 @@
 
 ## 5. Inventory events
 
-- [ ] 5.1 Model the literal event kind vocabulary: `PURCHASE`, `CONSUME`, `DISCARD`, `ADJUST`,
-      `TRANSFER`, `MARK_EMPTY`, `OPEN`
-- [ ] 5.2 Use Grocy's stock journal behavior (via `establish-reference-lab`) as the primary
-      reference for each event's semantics and side effects
+- [ ] 5.1 Model the revised six-kind event vocabulary (`design.md` D7): `PURCHASE`, `CONSUME`,
+      `DISCARD`, `ADJUST`, `TRANSFER`, `OPEN` — `MARK_EMPTY` is a command that writes a
+      `CONSUME` event with `source: 'mark_empty'`, not its own `kind`
+- [x] 5.2 Use Grocy's stock journal behavior (via `establish-reference-lab`) as the primary
+      reference for each event's semantics and side effects — done, see `docs/research/
+      grocy-inventory-and-stock.md`
 - [ ] 5.3 Define per-event-kind required fields and concrete typed FK references (lot, product,
       from/to location) — no generic `entity_type`/`entity_id`/`value` table (`design.md` D5,
       `PLAN.md`'s "Do Not Use Generic Polymorphism Carelessly")
 - [ ] 5.4 Define `PURCHASE`'s lot-creation semantics (an event with no pre-existing lot)
 - [ ] 5.5 Define `TRANSFER`'s partial-quantity and cross-location semantics
-- [ ] 5.6 Define `MARK_EMPTY`'s closing semantics (does it delete/archive the lot, or zero its
-      quantity and retain it for history?)
+- [x] 5.6 Define `MARK_EMPTY`'s closing semantics — resolved in `design.md` D7: it's a `CONSUME`
+      event for the lot's full remaining quantity (retains the lot's history like any other
+      `CONSUME`; does not delete the lot row)
 - [ ] 5.7 Reserve the target shape for a future `implement-shopping-and-commerce` order
       completion to create a `PURCHASE` event, without implementing that write path here
+- [ ] 5.8 Implement undo as a compensating event referencing the event it reverses (`reason` or
+      a future `corrects_event_id` column, `source` carrying an `'undo'`-flavored value) —
+      never an `UPDATE`/`DELETE` on the original `inventory_event` row (`design.md` D7,
+      explicit divergence from Grocy's mutate-history undo behavior)
 
 ## 6. Inventory confidence / uncertainty
 
@@ -91,7 +105,18 @@
       `PURCHASE` lot creation and `TRANSFER` cross-location effects)
 - [ ] 9.2 Domain unit tests for the confidence transition table
 - [ ] 9.3 Reference-behavior tests for Grocy edge cases worth deliberately preserving (not bugs
-      — `PLAN.md`: "Do not preserve reference-system bugs merely because they exist")
+      — `PLAN.md`: "Do not preserve reference-system bugs merely because they exist"):
+      FIFO lot selection on partial `CONSUME` when multiple lots of the same product exist
+      (Grocy's actual default consumption order, worth matching); a `TRANSFER` that moves only
+      part of a lot's quantity leaves the source lot's remaining quantity correct and the
+      destination as a distinct lot, not a merge. Explicitly test AGAINST (assert Spisordning
+      does NOT reproduce) Grocy's zero-quantity row deletion and its mutate-history undo —
+      these are the bugs, not behavior to preserve
+- [ ] 9.6 Unit conversion collision regression test, coordinated with
+      `establish-household-and-catalog`: creating a product whose purchase unit differs from
+      its stock unit, then explicitly setting a conversion factor, must never silently retain
+      or collide with an auto-inserted default — reproduces the exact failure mode found live
+      in Grocy (`docs/research/grocy-units-and-planning.md`)
 - [ ] 9.4 Barcode normalization unit tests (valid/invalid check digits, GTIN-8/12/13/14
       canonicalization)
 - [ ] 9.5 `openspec validate implement-pantry-inventory`

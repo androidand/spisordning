@@ -21,3 +21,11 @@ conversion, shopping, recipes, meal planning, cost tracking, API, database, migr
 `implement-pantry-inventory`'s inventory-event vocabulary
 (PURCHASE/CONSUME/DISCARD/ADJUST/TRANSFER/MARK_EMPTY/OPEN), which explicitly names Grocy's
 behavior as its primary reference.
+
+## See also
+
+That investigation is complete — see `grocy-inventory-and-stock.md` (products, barcodes,
+locations, stock, stock journal, lots, expiry, purchase/consume/discard/transfer/adjust/
+mark-empty), `grocy-units-and-planning.md` (units, unit conversion, product-specific conversion,
+shopping, recipes, meal planning, cost tracking), and `grocy-api-and-database.md` (API, database,
+migrations, tests, full database archaeology, and a Mermaid ER diagram).

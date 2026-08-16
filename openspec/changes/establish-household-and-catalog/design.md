@@ -20,6 +20,11 @@ allergy/restriction model separate from `person_preference`, ingredient forms,
 directional substitution, a real unit table, and household-facing `product`), and reconciles
 naming rather than silently replacing what's there.
 
+**Update (2026-08-16): `establish-reference-lab`'s Mealie and Grocy investigations are both
+complete** — see `docs/research/mealie-*.md` and `docs/research/grocy-*.md`. Findings relevant
+to this change are cited inline below (Steps 1 and 6) rather than collected in one place, since
+they land on specific decisions already made here, not on the design as a whole.
+
 ## Step 1 — Vocabulary
 
 | Term | Definition |
@@ -34,7 +39,7 @@ naming rather than silently replacing what's there.
 | **IngredientForm** | A preparation/preservation state of an Ingredient (fresh, dried, canned, frozen) that changes how it's used and measured. |
 | **IngredientSubstitution** | A directed, categorized relationship from one Ingredient(+Form) to another, with a non-implied 1:1 quantity ratio. |
 | **Unit** | A universal, dimensioned measure (mass/volume/count) — g, kg, ml, dl, l, piece, tbsp, tsp, pinch, package, can. |
-| **UnitConversion** | A conversion between two Units. Universal within a dimension (1 dl = 100 ml); cross-dimension (volume→mass) only ever ingredient-specific, never a global density. |
+| **UnitConversion** | A conversion between two Units. Universal within a dimension (1 dl = 100 ml); cross-dimension (volume→mass) only ever ingredient-specific, never a global density. **No reference-system prior art to copy here**: `docs/research/mealie-api-and-database.md` found Mealie has no unit-conversion system at all (quantities are stored but never converted between units); `docs/research/grocy-units-and-planning.md` found Grocy has one, but a buggy one — see invariant 11 below. This table is being designed with less safety net than most of this change's other concepts. |
 | **Product** | A concrete, purchasable good ("Garant Kycklingfilé 900g"), household-facing and retailer-agnostic. Distinct from `RetailerProduct`/`StoreOffer` (Epic F), which attach a specific retailer SKU and price to a Product. |
 | **ProductIngredientMapping** | The link from a Product to the canonical Ingredient(s) it represents, e.g. for shopping-list resolution. |
 
@@ -155,7 +160,12 @@ Key relationship decisions:
 
 1. **Login identity is never conflated with household Person.** `Account` and `Person` are
    separate tables with an optional FK; a Person may exist with no Account (a child); deleting
-   an Account SHALL NOT delete a Person or their history.
+   an Account SHALL NOT delete a Person or their history. **Validated by
+   `establish-reference-lab`'s Mealie findings**: `docs/research/mealie-planning-and-search.md`
+   confirms Mealie's `users` table conflates login credential and food-domain person with no
+   separation — Mealie literally cannot model a child household member without giving them a
+   login account. This is not a hypothetical risk this invariant guards against; it's an
+   observed limitation in the reference system this project is explicitly designing past.
 2. **A restriction is never scored as a preference.** `PersonRestriction` (ALLERGY/HARD
    RESTRICTION) SHALL be a distinct table/model from `PersonPreference`
    (LIKE/DISLIKE). The system SHALL NOT use a restriction as positive or negative input to a
@@ -182,6 +192,21 @@ Key relationship decisions:
    Ingredient (and optionally Form) — the system SHALL NOT invent or apply a universal density.
 10. **Household membership has history.** Ending a membership SHALL NOT delete the `Person` or
     their preference/restriction/meal history — it closes the `HouseholdMembership` row.
+11. **A `UnitConversion` (universal or ingredient-specific) is never silently auto-created.**
+    Every conversion row is written only via an explicit `DefineUnitConversion` /
+    `DefineIngredientUnitConversion` command; no write path (trigger, default-fill, or
+    application code reacting to "purchase unit differs from stock unit") is allowed to insert
+    a placeholder/default conversion on the side. **Added directly because of a reproduced
+    Grocy bug**: `docs/research/grocy-units-and-planning.md` found that creating a Grocy
+    product whose purchase unit differs from its stock unit silently auto-inserts a wrong 1:1
+    conversion via a trigger stub, which then *collides* if a correct factor is set
+    afterward — a genuine inventory-accuracy hazard, reproduced live during that research
+    session, in software with years of production use. `DefineUnitConversion`/
+    `DefineIngredientUnitConversion` (Step 5) SHALL be the only path that ever inserts a
+    `unit_conversion`/`ingredient_unit_conversion` row; `RegisterProduct` (Step 5) SHALL NOT
+    have any side effect on conversion tables even when the product's purchase and stock units
+    differ — the absence of a conversion is a valid, queryable state (surfaced to the user as
+    "no conversion defined yet"), not something to paper over automatically.
 
 ## Persistence sketch (bridging to Step 7, detailed in tasks.md/spec deltas)
 

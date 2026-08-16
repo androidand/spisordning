@@ -25,3 +25,16 @@ Investigate recipe model, editing, import, parsing, structured ingredients, food
 servings, scaling, images, tags, categories, cookbooks, search, meal plans, shopping,
 households, users, API, database, migrations, tests, provenance — see that change's `tasks.md`
 for the full PLAN.md-derived checklist.
+
+## See also
+
+The investigation above is written up in full in three companion documents, each covering a
+slice of `establish-reference-lab` task 2 (items 2.1–2.24) against this same live instance,
+plus PLAN.md's Phase 2 database archaeology and a Mermaid ER diagram:
+
+- `mealie-recipe-model.md` — recipe model, editing, import, parsing, structured ingredients,
+  foods, units, servings, scaling, images, tags, categories, cookbooks (2.1–2.13).
+- `mealie-planning-and-search.md` — search, meal plans, shopping, households, users, ratings
+  (2.14–2.19).
+- `mealie-api-and-database.md` — API, database, migrations, tests, provenance, full database
+  archaeology, and the ER diagram (2.20–2.24).

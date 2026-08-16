@@ -59,9 +59,13 @@
 
 ## 6. Unit system
 
-- [ ] 6.1 Study both Mealie's and Grocy's unit models (already investigated in
-      `docs/research/` reference-lab material where available; re-verify against
-      `docs/research/current-state.md`) for their unit/conversion representations.
+- [x] 6.1 Study both Mealie's and Grocy's unit models — done 2026-08-16. Mealie has **no unit
+      conversion system at all** (`docs/research/mealie-api-and-database.md`) — no prior art to
+      lean on there. Grocy has one, with a confirmed live bug: creating a product whose
+      purchase unit differs from its stock unit silently auto-inserts a wrong 1:1 conversion
+      via a trigger, which then collides with an explicit factor set afterward
+      (`docs/research/grocy-units-and-planning.md`). See `design.md` invariant 11, added
+      directly in response.
 - [ ] 6.2 Define the universal unit set PLAN.md lists: g, kg, ml, dl, l, piece, tbsp, tsp,
       pinch, package, can — with explicit dimension (mass/volume/count) per unit.
 - [ ] 6.3 Keep universal same-dimension conversions (kg↔g, l↔dl↔ml) distinct from
@@ -70,6 +74,13 @@
 - [ ] 6.4 Decide migration path for the free-text `unit TEXT` columns already in
       `recipe_ingredient` and `shopping_requirement` — this change defines the `unit` table;
       wiring those columns to it is scoped to whichever change next touches recipes/planning.
+- [ ] 6.5 Implement `design.md` invariant 11 as a real constraint, not just documentation:
+      `RegisterProduct` has no code path that writes to `unit_conversion`/
+      `ingredient_unit_conversion`; only `DefineUnitConversion`/`DefineIngredientUnitConversion`
+      do. Add a regression test reproducing Grocy's exact scenario (product with differing
+      purchase/stock units, then an explicit conversion factor set) and asserting no collision
+      or silent default — coordinate with `implement-pantry-inventory` task 9.6, which expects
+      this test to exist.
 
 ## 7. Product (household-facing only)
 

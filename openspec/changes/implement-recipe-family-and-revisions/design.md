@@ -14,6 +14,20 @@ This change does not decide whether recipe content itself keeps living in Mealie
 a prerequisite question answered in Step 2 below, because it changes what a "revision" even
 contains.
 
+**Validated by `establish-reference-lab`'s Mealie findings (2026-08-16):** `docs/research/
+mealie-recipe-model.md` confirms Mealie has **zero revision/version history anywhere in its
+62-table schema** — every edit overwrites in place, with nothing recording what a recipe looked
+like before. This change's entire premise (immutable revisions, variant lineage) is filling a
+real, confirmed gap, not solving a problem Mealie already handles adequately. The same
+investigation live-reproduced a concrete failure mode of mutate-in-place editing worth citing
+directly: a `PATCH` request on a recipe silently dropped nested `unit`/`food` objects (only
+`PUT` preserved them), and a separate malformed nested payload committed a partial database
+write *before* the API's own response validation failed — leaving the recipe unreadable via
+both `GET` and `DELETE` until it was fixed with a direct SQL repair. An architecture built on
+mutate-in-place editing produced an unrecoverable-via-API corrupted record; immutable revisions
+(this change's model) make that class of failure structurally impossible — a bad edit is a new,
+inspectable, discardable revision, never a destructive overwrite of the only copy.
+
 ## Step 1 — Vocabulary
 
 | Term | Definition |

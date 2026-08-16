@@ -26,6 +26,18 @@ capability needs already exists; this change does not touch recipe modeling itse
 model — this change works against whatever structured-ingredient shape is current at
 implementation time, `recipe_ingredient` or its successor).
 
+**Validated by `establish-reference-lab`'s Grocy findings (2026-08-16):** Grocy has a recipe
+fulfillment/cost feature covering the same conceptual ground this change owns, but
+`docs/research/grocy-units-and-planning.md` found it's implemented as ~100-line nested SQL
+views computing a `possible_servings` figure with no per-ingredient breakdown surfaced anywhere
+— a household member sees "you can make 0 servings" with no way to see which ingredient is
+short or why. That's the concrete, real-world version of the failure this proposal already
+commits to avoiding (line 42-43, "not an opaque score") — it's the single clearest example
+found across both reference systems of a feature that exists but isn't explainable, and it
+sharpens this change's non-negotiable: the per-ingredient reason breakdown is not a nice-to-have
+UI layer bolted onto an aggregate number, it must be the actual computation's primary output,
+with the recipe-level verdict derived from it — never the other way around.
+
 ## What Changes
 
 - Given a recipe's structured ingredient lines and required quantities, and a household's

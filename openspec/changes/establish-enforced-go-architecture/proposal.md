@@ -38,6 +38,20 @@ an optional, non-load-bearing observer. All of `PLAN.md`'s later vertical-slice 
 (`establish-household-and-catalog`, `implement-recipe-family-and-revisions`, etc.) assume this
 foundation exists.
 
+**Cautionary evidence from `establish-reference-lab`'s Grocy findings (2026-08-16):**
+`docs/research/grocy-api-and-database.md` found that Grocy — software with years of real
+production use across a large user base — has **zero declared foreign keys anywhere in its
+schema** (`PRAGMA foreign_keys=0`, confirmed empty on every table checked) and **no automated
+test suite at all** (no `tests/` directory, no CI workflow, no PHPUnit dependency). It works
+despite this, but the same investigation separately reproduced a live data-integrity bug (a
+unit-conversion trigger that silently inserts a wrong default and then collides with an
+explicit value — see `establish-household-and-catalog` design.md invariant 11) of exactly the
+kind FK constraints and test coverage exist to catch early rather than discover live. This
+change's CI-enforced layering, real FKs throughout (`PLAN.md`'s own repeated guidance), and
+test-suite requirements are not process for its own sake — they are the concrete difference
+between finding that class of bug in a test run versus finding it, as this project did, by
+hand while manually exercising a reference system.
+
 ## What Changes
 
 - **Real persistence**: a Postgres repository layer (`internal/persistence` or similar) that

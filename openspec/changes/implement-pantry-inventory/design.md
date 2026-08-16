@@ -17,10 +17,12 @@ already contains one directly analogous pattern (`person_preference`, a derived 
 paired with `preference_observation`, an append-only evidence ledger), and this design
 deliberately reuses that shape rather than inventing a new one.
 
-This design also assumes, but does not perform, `establish-reference-lab`'s Grocy investigation
-(stock, stock journal, lots, expiry, purchase/consume/discard/transfer/adjust/mark-empty). Where
-Grocy's actual behavior may refine a decision below, this is flagged explicitly so
-implementation revisits it against real findings rather than this document's assumptions alone.
+**Update (2026-08-16): `establish-reference-lab`'s Grocy investigation is now complete** — see
+`docs/research/grocy-inventory-and-stock.md`, `grocy-units-and-planning.md`, and
+`grocy-api-and-database.md`. The cross-check flagged throughout this document as a future
+revisit has been performed; see the new "Findings from establish-reference-lab" section below,
+and D7. The original text below is left intact as the reasoning trail; only D7 and the Risks
+section reflect the update.
 
 ## Goals / Non-Goals
 
@@ -158,8 +160,10 @@ extensible) — because `source` is the raw material Step 6's confidence rule us
 - `inventory_lot(id, product_id FK, location_id FK, quantity, unit, confidence CHECK IN (...),
   best_before NULL, opened_at NULL, created_at, updated_at)`
 - `inventory_event(id, kind CHECK IN ('PURCHASE','CONSUME','DISCARD','ADJUST','TRANSFER',
-  'MARK_EMPTY','OPEN'), lot_id FK NULL, product_id FK NULL, from_location_id FK NULL,
+  'OPEN'), lot_id FK NULL, product_id FK NULL, from_location_id FK NULL,
   to_location_id FK NULL, quantity_delta, reason NULL, source NOT NULL, recorded_at)`
+  — **six kinds, not seven: see D7.** `MARK_EMPTY` is a `RecordMarkEmpty` *command* (Step 5)
+  that writes a `CONSUME` event with `source: 'mark_empty'`, not its own `kind` value.
 - `product_identifier` — reused from `establish-household-and-catalog`, not redefined here; this
   change adds the GTIN normalization/lookup application logic on top (Open Food Facts client,
   retailer fallback, manual entry) as `internal/pantry/barcode` (or equivalent), not a new table.
@@ -202,6 +206,14 @@ Every command in Step 5 is implemented as: insert one `inventory_event` row, the
 insert-or-update the corresponding `inventory_lot` row, in one database transaction. The lot can
 always be rebuilt from the event history if it ever needs to be (a recovery/consistency-check
 path), but that is a fallback, not the primary read path.
+
+**Validated by Grocy's real design (2026-08-16):** `docs/research/grocy-api-and-database.md`
+confirms Grocy's `stock` table — its current-state projection — genuinely `DELETE`s a lot's row
+once its quantity reaches zero; only the separate `stock_log` table preserves any history of
+that lot ever existing. This is a live instance of exactly the option-(a) failure this design
+rejected ("can't answer why is the milk gone") — not a hypothetical. It directly supports
+choosing (c) over (a): a projection alone, even a well-intentioned one, degrades to lossy
+current-state the moment nothing forces it to keep a durable, append-only counterpart.
 
 ### D3: Confidence placement — stored on the lot, justified per-event (the combination option)
 
@@ -253,6 +265,14 @@ for queryability) plus provenance (event, for auditability) plus a stated, deter
 transition function (not ad hoc), and an explicit decision that even automatic decay stays
 inside the append-only-event discipline rather than becoming a silent mutation exception.
 
+**Cross-checked against Grocy (2026-08-16):** Grocy has **no uncertainty/confidence modeling of
+any kind** — `docs/research/grocy-inventory-and-stock.md` confirms every stock quantity Grocy
+records is treated as exactly known, with no tier, no "estimated" flag, nothing. This decision
+therefore has no reference-system precedent to validate or contradict it either way; it stands
+entirely on `PLAN.md`'s own reasoning above. Recorded explicitly so implementation doesn't
+mistake silence in the research docs for agreement — it's absence of a comparison, not
+confirmation.
+
 ### D4: Why not full event sourcing (elaboration on D2's rejected option (b))
 
 Beyond the machinery cost, full replay-based event sourcing would also complicate the exact
@@ -282,13 +302,67 @@ manual fallback (a person types in what it is). Whichever step resolves, the res
 the same barcode resolves instantly next time. No table in this change's scope stores a raw
 GTIN as a join key for inventory — `InventoryLot`/`InventoryEvent` always reference `product_id`.
 
+### D7: `MARK_EMPTY` collapses into `CONSUME`; `DISCARD` stays distinct; undo is a compensating event (revised after Grocy findings, 2026-08-16)
+
+D1 committed to the literal `PURCHASE`/`CONSUME`/`DISCARD`/`ADJUST`/`TRANSFER`/`MARK_EMPTY`/
+`OPEN` vocabulary from `PLAN.md`, pending the Grocy cross-check. That cross-check
+(`docs/research/grocy-inventory-and-stock.md`) is now done and changes one part of the
+persistence-layer design, confirms another, and adds a hard divergence:
+
+- **`MARK_EMPTY` is not a distinct transaction kind in Grocy at all.** Grocy has no
+  `mark-as-empty` API endpoint or stock-log transaction type — "mark empty" in its UI is sugar
+  that pre-fills a `CONSUME` call with the lot's full remaining quantity. There is no Grocy
+  behavior to reference for a separate kind because none exists.
+  **Revision:** `RecordMarkEmpty(lotId, source)` (Step 5) stays as a command — it's genuine,
+  useful UX (one tap, no need to know or estimate the exact remaining quantity) — but it no
+  longer emits its own `inventory_event.kind`. It emits a `CONSUME` event with
+  `quantity_delta` set to the lot's full current quantity. The event-kind enum in Step 7
+  shrinks to `PURCHASE`/`CONSUME`/`DISCARD`/`ADJUST`/`TRANSFER`/`OPEN` (six, not seven).
+  Distinguishing "consumed via mark-empty" from an ordinary partial `CONSUME` (useful for
+  future analytics — e.g. "the household keeps under-buying milk") is carried on `source`
+  (add `'mark_empty'` to the extensible `source` vocabulary in Step 5), not on `kind`. This
+  keeps the event table's core discriminator (`kind`) matched to genuinely distinct *effects*,
+  not UI entry points — the same reasoning D5 already applies to keep FKs concrete rather than
+  generic; here it's the mirror move, collapsing a kind that turned out not to be one.
+- **`DISCARD` stays distinct — validated, not revised.** Grocy models discard as `CONSUME` with
+  a `spoiled` boolean rather than its own kind, which the research doc flags as a real Grocy
+  limitation (spoilage is analytically important — "how much do we waste and why" — and
+  deserves to be a first-class, queryable kind, not a flag buried on the general consume path).
+  This design already keeps `DISCARD` distinct with its own `reason` field (Step 5); Grocy's
+  choice here is a documented weakness to avoid copying, not evidence to follow.
+- **Undo must be a compensating event, never a mutation of history — this is a deliberate
+  divergence from Grocy, not an oversight.** `docs/research/grocy-api-and-database.md` found
+  that Grocy's own "undo last transaction" feature works by mutating the historical
+  `stock_log` row it's undoing, rather than writing a new, opposing entry. That directly
+  contradicts this design's invariant 2 (`InventoryEvent` rows are immutable once written).
+  Grocy's approach is easy to build and immediately wrong for exactly the auditability goal
+  `PLAN.md` states for this domain ("needs careful history/audit design") — a lot's event
+  history should truthfully show that a purchase was recorded and then undone, not show only
+  that nothing happened. **Decision:** if/when an "undo" command ships, it is implemented as
+  `RecordAdjust`-or-kind-appropriate-compensating-event with `source` carrying an
+  `'undo'`-flavored value and a reference (in `reason` or a future `corrects_event_id` column)
+  back to the event it reverses — never as an `UPDATE`/`DELETE` on the original row. This is a
+  `tasks.md` item (undo is not in this change's Step 5 command list today) but the invariant is
+  locked in now so it isn't accidentally built the Grocy way later.
+
 ## Risks / Trade-offs
 
-- **Depends on two changes not yet complete** (`establish-reference-lab`'s Grocy findings,
-  `establish-household-and-catalog`'s Product/Ingredient model) — the event-kind semantics and
-  confidence-transition table above are this design's best reasoning from `PLAN.md` alone, not
-  yet cross-checked against Grocy's actual stock-journal edge cases. Flagged as a `tasks.md`
-  revisit item.
+- **Still depends on `establish-household-and-catalog`'s Product/Ingredient model** (not yet
+  complete). The Grocy cross-check itself is now done (see "Findings from
+  establish-reference-lab" inline in D2/D3/D7 above) — the confidence-transition table (D3)
+  is confirmed to have no reference-system precedent either way, the ledger-plus-projection
+  shape (D2) is validated by a concrete Grocy failure mode, and the event-kind vocabulary (D7)
+  is revised from seven kinds to six with an explicit divergence on undo semantics.
+- **Unit conversion is a live risk, not just a modeling question.** `docs/research/
+  grocy-units-and-planning.md` found a real, reproduced Grocy bug: creating a product whose
+  purchase unit differs from its stock unit silently auto-inserts a wrong 1:1 conversion via a
+  trigger, which then collides if a correct factor is set afterward — a genuine
+  inventory-accuracy hazard in a years-old, widely-used system. `implement-pantry-inventory`
+  doesn't own unit conversion (`establish-household-and-catalog` does), but every quantity this
+  change records depends on it being right. Action: `establish-household-and-catalog`'s task
+  list should include a test asserting this exact scenario (create a product with differing
+  purchase/stock units, then set an explicit conversion factor) never silently produces a wrong
+  factor — flagged here so the dependency is visible from this side too.
 - **Decay-by-event vs. decay-by-job**: choosing to route even automatic confidence decay through
   the event ledger (D3) is more consistent but means decay must be triggered by something (a
   scheduled reconciliation job that *writes* events, not one that silently updates rows) — the

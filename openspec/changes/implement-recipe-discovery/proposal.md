@@ -28,7 +28,15 @@ the research-and-scaffold step, not a promise to integrate every source.
 - Define the "external recipe → cookbook" provenance and review lifecycle: an externally
   sourced recipe is imported as a candidate, and only becomes part of the household cookbook
   (a `RecipeFamily`/`RecipeVariant`/`RecipeRevision`, per `implement-recipe-family-and-revisions`)
-  after being planned/cooked and reviewed — not auto-imported wholesale.
+  after being planned/cooked and reviewed — not auto-imported wholesale. **This needs a real
+  membership relationship, not a saved filter** — `establish-reference-lab`'s Mealie findings
+  (`docs/research/mealie-recipe-model.md`) found Mealie's "cookbook" is purely a saved search
+  filter with no recipe-membership table at all, which structurally cannot represent "this
+  recipe was reviewed and accepted into the household cookbook" as a fact about the recipe —
+  it can only re-run a query. That's adequate for organizing an existing library but cannot
+  support this section's cooked-and-reviewed-then-added flow; there is no reference-system
+  prior art to lean on for this specific piece, it has to be designed here from PLAN.md's
+  reasoning alone.
 - Record source provenance (source URL, license, import date, external id) on any imported
   recipe so attribution and later re-sync/removal remain possible.
 

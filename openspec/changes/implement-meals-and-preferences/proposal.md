@@ -14,6 +14,16 @@ per-person rating separate from the existing coarse reaction), and defines how r
 aggregate to the recipe level — without renaming or breaking the existing scorer's use of
 `meal_event`/`meal_reaction`.
 
+**Validated by `establish-reference-lab`'s Mealie findings (2026-08-16):** this is not a
+hypothetical design preference. `docs/research/mealie-planning-and-search.md` found that Mealie
+originally shipped a group-wide `recipes.rating` column and had to retrofit per-user scoping
+later (migration `2024-03-18_migrate_favorites_and_ratings_to_user_`), with the migration's own
+committed comment reading *"Since we don't know who rated the recipe initially, we copy the
+rating to all users"* — a real, permanent, fabricated-data incident baked into every Mealie
+instance that existed before that migration ran. Person-scoped `MealReview` from day one (this
+change) is specifically the thing that incident would have prevented; it's cited here as the
+concrete reason this isn't over-engineering.
+
 ## What Changes
 
 - Reconcile naming: keep `meal_event` (already exists, already consumed by
