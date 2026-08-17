@@ -228,3 +228,52 @@ is the sole deliverable, per `research-and-integrate-ica`'s own proposal scope.
 Sources: `gh repo view`/`gh api` against `svendahlstrand/ica-api` and `LazyTarget/ha-ica-todo`
 (repo metadata, commit history, README, `ICA+Grocy.md`, `authenticator.py`, `const.py`,
 `manifest.json`), and `svendahlstrand/ica-api#26` (issue thread, 2024-04-06 to 2025-06-25).
+
+## Update — a sibling `ica-client` scaffold has started (2026-08-18)
+
+The line above ("no adapter code, no new repo, and no client scaffolding were created in this
+session") is now stale. `~/dev/willys/ica-client` exists as an untracked, in-progress
+TypeScript package — read directly from source on disk, not from a commit message or README, so
+treat the specifics below as a snapshot, not a stable interface:
+
+- **Structurally, it is exactly the sibling-repo shape this document already recommended**: its
+  own `package.json`, a layered `IcaClient` composing `HttpClient` + `GraphQLClient` +
+  per-concern `*Service` classes (`auth`, `config`, `customer`, `favorites`, `search`, `cart`),
+  built by close analogy to `~/dev/willys/willys-client`'s own architecture (same
+  `fetch-cookie`/`tough-cookie` cookie-jar pattern, same `ecom-request-source` header, same
+  `x-csrf-token`-stripping helper, same per-concern service-class layout). This validates the
+  "mirror `willys-client`'s pattern" structural call made above.
+- **It targets a different ICA surface than the one this document verified.** Everything above
+  (auth flow, capability map) is sourced from `ha-ica-todo`, which reverse-engineers the
+  **mobile-app API**: OAuth2 Authorization Code + PKCE against a Curity identity server at
+  `ims.icagruppen.se`, data calls at `apimgw-pub.ica.se/sverige/digx/...`. The `ica-client`
+  scaffold instead targets `https://handlaprivatkund.ica.se` — ICA's **web storefront** — with
+  cookie/session-based auth (no OAuth2/PKCE in sight) and a GraphQL endpoint at
+  `/stores/{storeId}/graphql` alongside REST under `/stores/{storeId}/api/...` and top-level
+  `/api/...` (e.g. `/api/customer/v1/customer`, `/api/config/v1/config`). **These are two
+  distinct integration paths with two different auth models** — a future `integrate-ica` change
+  must not conflate "ICA API access" as one thing; it should decide explicitly whether it targets
+  the mobile surface (documented above, auth flow verified-on-paper via `ha-ica-todo`), the web
+  storefront surface (being scaffolded now, auth flow not yet solved), or both.
+- **Auth is an explicit unresolved stub on the web-storefront path**: `AuthService.login()`
+  always returns `{ success: false }`, with its own comment marking it "a placeholder until the
+  login endpoint is reverse-engineered." So gate #1 from this document's recommendation ("verify
+  the auth flow live") is **not yet satisfied** by this scaffold — if anything it opens a second,
+  still-unverified auth question alongside the mobile-API one. No BankID handling is attempted
+  either.
+- **Scaffolded-but-unverified endpoints** (shapes appear inferred from `willys-client`'s own
+  discovered Axfood API conventions, not yet confirmed against live ICA traffic): active cart +
+  cart-status (`/stores/{storeId}/api/cart/v1/...`), product search
+  (`/stores/{storeId}/api/search/v1/products`), customer profile, config, and a GraphQL
+  favorites/adverts query (`GetAdvertsAndModulesForFavoritesPage`) whose shape —
+  `retailerProductId`/`productId` pairing, `__typename`-driven fragments, advert
+  modules/styles — closely resembles patterns already seen in Willys's own storefront. That
+  resemblance is suggestive of a shared commerce-platform vendor pattern across Nordic grocery
+  e-commerce sites, not confirmed proof of one; worth a specific verification pass if/when this
+  path is pursued.
+- **Earlier-stage than `willys-client`'s own first commit**: no tests (the `tests/` directory is
+  empty), no `openapi.yaml`, no `docs/api-discovery.md`-equivalent findings doc yet.
+- **Net effect on this document's recommendation**: still **viable to design toward, not yet to
+  build**, but the "which surface" question is now a precondition alongside the three gates
+  already listed, and the web-storefront path's own auth question needs the same live-verification
+  treatment given to the mobile path before either can be considered a solved prerequisite.

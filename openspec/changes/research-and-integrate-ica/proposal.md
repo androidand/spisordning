@@ -76,3 +76,10 @@ verified rather than invented answers.
   ICA adapter should follow (pinning, review queue, confidence/quantity-uncertainty split, no
   automated checkout) rather than reinventing those invariants per retailer.
 - Part of Epic F: Retailer, Pricing & Commerce (tracking issue #6).
+- **Update (2026-08-18)**: a new sibling `~/dev/willys/ica-client` scaffold has independently
+  started, mirroring `willys-client`'s architecture but targeting a different ICA surface (the
+  web storefront, not the mobile API this research verified) with auth still unresolved. Tracked
+  as an addendum in `docs/research/ica-current-api.md` rather than reopening this change's
+  tasks, since it doesn't change this change's own completed scope — but a future `integrate-ica`
+  change should read that addendum before assuming this document alone settles which ICA surface
+  to build against.
