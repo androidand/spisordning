@@ -21,10 +21,13 @@
 - [x] 2.2 Recipe references normalized in-memory per plan run (`mealie_recipe_id`, lowercased
       tags, ingredient lines, `Raw` snapshot); Postgres persistence lands with the food-brain
       HTTP server — schema is ready in `recipe_ref`/`recipe_ingredient`
-- [ ] 2.3 Seed `ingredient_mappings` for a small curated recipe set (Swedish units → grams →
+- [x] 2.3 Seed `ingredient_mappings` for a small curated recipe set (Swedish units → grams →
       package sizes) + a minimal review surface (CLI or endpoint). Interim: plan uses
       lowercase Mealie food names as canonical ids and the adapter flags low-confidence
-      matches for review
+      matches for review — seed at `migrations/seed/ingredient_mappings.sql` (4 curated
+      dl/msk/tsk/förp → g → package rows, `PLACEHOLDER-*` mealie_food_ids, all needs_review),
+      mirrored in-memory at `internal/ingredients/seed.go`; review surface is the
+      `food-brain ingredients` CLI command (2 tests; `go build`/`go vet`/`go test` green)
 
 ## 3. Suggestion engine (Go, tested)
 
