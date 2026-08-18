@@ -15,14 +15,21 @@ import (
 // Weights tune the relative pull of each signal. They live in a struct so a
 // caller (or a test) can hold them fixed; DefaultWeights is the baseline.
 type Weights struct {
-	Preference float64
-	Effort     float64
-	Repetition float64
+	Preference  float64
+	Effort      float64
+	Repetition  float64
 	SchoolDedup float64
-	Campaign   float64
+	Campaign    float64
+	// Familiarity weights the novelty/familiarity axis. Positive values pull
+	// toward known, frequently-cooked favorites; negative values pull toward
+	// discovery (recipes the household has rarely or never cooked). A mode
+	// (safe choice / surprise me) is a deterministic re-weighting of this field.
+	Familiarity float64
 }
 
 // DefaultWeights is the baseline tuning. Preference dominates; the others nudge.
+// Familiarity is a moderate positive pull so the default leans slightly toward
+// known favorites while still leaving room for discovery.
 func DefaultWeights() Weights {
 	return Weights{
 		Preference:  1.0,
@@ -30,22 +37,80 @@ func DefaultWeights() Weights {
 		Repetition:  0.8,
 		SchoolDedup: 0.7,
 		Campaign:    0.4,
+		Familiarity: 0.5,
 	}
+}
+
+// Mode is a user-facing recommendation control mode. Each mode is a
+// deterministic transformation of the scorer's Weights over the same underlying
+// scorer - never a separate scoring algorithm and never an LLM decision. The
+// four modes are the user controls PLAN.md's "Recommendation Inspiration"
+// section names.
+type Mode string
+
+const (
+	// ModeSafeChoice leans hard toward known, low-effort favorites and accepts
+	// repeats.
+	ModeSafeChoice Mode = "safe choice"
+	// ModeSomethingSimilar leans toward what the household already likes and
+	// cooks, with room for discovery. It is the default.
+	ModeSomethingSimilar Mode = "something similar"
+	// ModeSurpriseMe pulls toward novelty while keeping preference and
+	// feasibility in play.
+	ModeSurpriseMe Mode = "surprise me"
+	// ModeCompletelyNew maximizes novelty, pulling hard toward candidates the
+	// household has not cooked.
+	ModeCompletelyNew Mode = "something completely new"
+)
+
+// DefaultMode is the mode used when the caller does not specify one. It is the
+// "something similar" mode: a gentle lean toward known favorites that still
+// leaves room for discovery.
+const DefaultMode Mode = ModeSomethingSimilar
+
+// Modes lists every supported mode in a stable order.
+func Modes() []Mode {
+	return []Mode{ModeSafeChoice, ModeSomethingSimilar, ModeSurpriseMe, ModeCompletelyNew}
+}
+
+// WeightsFor returns the deterministic Weights a mode applies, derived from
+// DefaultWeights. Each mode is a pure re-weighting of the same signals; the
+// underlying scorer and its feasibility rule are unchanged. An unknown mode
+// falls back to DefaultWeights.
+func (m Mode) WeightsFor() Weights {
+	w := DefaultWeights()
+	switch m {
+	case ModeSafeChoice:
+		w.Preference = 1.2
+		w.Effort = 1.0
+		w.Repetition = 0.3
+		w.Familiarity = 1.0
+	case ModeSomethingSimilar:
+		w.Familiarity = 0.8
+	case ModeSurpriseMe:
+		w.Preference = 0.7
+		w.Familiarity = -0.6
+	case ModeCompletelyNew:
+		w.Preference = 0.5
+		w.Familiarity = -1.0
+	}
+	return w
 }
 
 // Breakdown is the per-signal contribution to a candidate's score, retained so
 // the plan can be explained (by code or, later, by the LLM in prose).
 type Breakdown struct {
-	Preference float64
-	Effort     float64
-	Repetition float64
+	Preference  float64
+	Effort      float64
+	Repetition  float64
 	SchoolDedup float64
-	Campaign   float64
+	Campaign    float64
+	Familiarity float64
 }
 
 // Total sums the breakdown.
 func (b Breakdown) Total() float64 {
-	return b.Preference + b.Effort + b.Repetition + b.SchoolDedup + b.Campaign
+	return b.Preference + b.Effort + b.Repetition + b.SchoolDedup + b.Campaign + b.Familiarity
 }
 
 // ScoredCandidate is a candidate with its computed score and feasibility.
@@ -83,22 +148,106 @@ func Rank(candidates []domain.Candidate, ctx domain.PlanContext, w Weights) []Sc
 	return out
 }
 
+// RankWithMode ranks candidates under the given control mode. It is the same
+// deterministic Rank with the mode's weight transformation applied - the mode
+// is a pure re-weighting, so feasibility and the underlying scorer are
+// unchanged. An empty mode uses DefaultMode. The meal-planning API threads the
+// user-selected mode here (see implement-meal-planning); until that lands the
+// CLI passes DefaultMode.
+func RankWithMode(candidates []domain.Candidate, ctx domain.PlanContext, m Mode) []ScoredCandidate {
+	if m == "" {
+		m = DefaultMode
+	}
+	return Rank(candidates, ctx, m.WeightsFor())
+}
+
+// SelectBatch returns the top n candidates from a mode-ranked list, enforcing
+// the balance guarantee: when the pool contains both known favorites and
+// discovery candidates, the batch includes at least one of each. It reorders
+// (never re-scores) the ranked candidates, so the deterministic ranking is
+// preserved and only the batch composition is adjusted. n <= 0 returns nil;
+// n >= len(ranked) returns the full ranked list; a 1-slot batch cannot hold a
+// mix and is returned as-is.
+func SelectBatch(ranked []ScoredCandidate, ctx domain.PlanContext, n int) []ScoredCandidate {
+	if n <= 0 || len(ranked) == 0 {
+		return nil
+	}
+	if n >= len(ranked) {
+		return ranked
+	}
+	batch := append([]ScoredCandidate(nil), ranked[:n]...)
+	if n < 2 {
+		return batch
+	}
+	rest := ranked[n:]
+
+	batchFav, batchNovel := groupsPresent(batch, ctx)
+	poolFav, poolNovel := groupsPresent(ranked, ctx)
+
+	// slot is the next lowest-ranked batch slot to replace.
+	slot := len(batch) - 1
+	swapIn := func(pred func(ScoredCandidate) bool) {
+		for _, sc := range rest {
+			if pred(sc) {
+				batch[slot] = sc
+				slot--
+				return
+			}
+		}
+	}
+	if poolFav && !batchFav {
+		swapIn(func(sc ScoredCandidate) bool { return IsKnownFavorite(sc.Candidate, ctx) })
+	}
+	if poolNovel && !batchNovel {
+		swapIn(func(sc ScoredCandidate) bool { return IsDiscovery(sc.Candidate, ctx) })
+	}
+	return batch
+}
+
+// groupsPresent reports whether the given candidates include at least one known
+// favorite and/or at least one discovery candidate.
+func groupsPresent(cands []ScoredCandidate, ctx domain.PlanContext) (fav, novel bool) {
+	for _, sc := range cands {
+		if !fav && IsKnownFavorite(sc.Candidate, ctx) {
+			fav = true
+		}
+		if !novel && IsDiscovery(sc.Candidate, ctx) {
+			novel = true
+		}
+		if fav && novel {
+			return true, true
+		}
+	}
+	return fav, novel
+}
+
 func score(c domain.Candidate, ctx domain.PlanContext, w Weights) ScoredCandidate {
+	// The meal-history count is scanned once per candidate and shared by every
+	// familiarity signal, rather than each helper re-scanning RecentMealIDs.
+	cooks := cookCount(c, ctx)
 	b := Breakdown{
 		Preference:  w.Preference * preferenceScore(c, ctx),
 		Effort:      w.Effort * effortScore(c, ctx),
 		Repetition:  w.Repetition * repetitionPenalty(c, ctx),
 		SchoolDedup: w.SchoolDedup * schoolDedupPenalty(c, ctx),
 		Campaign:    w.Campaign * campaignBonus(c, ctx),
+		Familiarity: w.Familiarity * familiarityScore(c, ctx, cooks),
 	}
 
 	feasible, reason := feasibility(c, ctx)
+	// The Reason states the candidate's novelty/familiarity classification (the
+	// explainable face of the Familiarity dimension); when infeasible it is
+	// prefixed with the hard-constraint note so both are visible.
+	fullReason := familiarityReason(c, ctx, cooks)
+	if !feasible {
+		fullReason = reason + "; " + fullReason
+	}
 	return ScoredCandidate{
 		Candidate: c,
 		Score:     b.Total(),
 		Breakdown: b,
 		Feasible:  feasible,
-		Reason:    reason,
+		Reason:    fullReason,
 	}
 }
 
@@ -222,6 +371,115 @@ func campaignBonus(c domain.Candidate, ctx domain.PlanContext) float64 {
 		}
 	}
 	return float64(onSale) / float64(len(c.Ingredients))
+}
+
+// cookCount is how many times the recipe appears in the household's meal history.
+func cookCount(c domain.Candidate, ctx domain.PlanContext) int {
+	n := 0
+	for _, m := range ctx.RecentMealIDs {
+		if m.MealieRecipeID == c.MealieRecipeID {
+			n++
+		}
+	}
+	return n
+}
+
+// familiarityScore is the novelty/familiarity axis, derived purely from the
+// household's meal history (how often this recipe has been cooked). It returns
+// a value in [-1, 1]:
+//
+//	+1  heavily cooked — a known, familiar favorite
+//	 0  neutral / no basis (no meal history at all)
+//	-1  never cooked — a discovery candidate
+//
+// cooks is the precomputed cookCount for the candidate. It is separate from
+// the Preference dimension, which captures *sentiment*; this dimension captures
+// *frequency*. A positive Familiarity weight therefore pulls toward known
+// favorites, while a negative weight pulls toward discovery. It returns 0 when
+// there is no meal history to base the signal on, so a candidate in an
+// otherwise-empty context still scores 0 (see TestRank_EmptyInputs).
+func familiarityScore(c domain.Candidate, ctx domain.PlanContext, cooks int) float64 {
+	if len(ctx.RecentMealIDs) == 0 {
+		return 0
+	}
+	// Saturating familiarity in [0,1]: 0 when never cooked, approaching 1 as the
+	// recipe is cooked more. k=3 makes a thrice-cooked recipe feel "familiar".
+	const k = 3.0
+	fam := float64(cooks) / (float64(cooks) + k)
+	// Center on 0 → [-1, 1].
+	return 2*fam - 1
+}
+
+// favoriteMinCooks is the minimum number of times a recipe must appear in the
+// household's meal history before it can count as a "known" favorite. A recipe
+// the family loves but has never (or barely) cooked is a prospect, not a known
+// favorite — "known" means the household has actually cooked it.
+const favoriteMinCooks = 2
+
+// IsKnownFavorite reports whether the recipe is a known household favorite. It is
+// a deterministic rule over the two signals PLAN.md's Recommendation Domain names
+// for "known favorites": the family's aggregate confidence-weighted preference
+// (sentiment) and the recipe's meal-history frequency. Both must hold:
+//
+//   - the family's net sentiment toward the recipe's tags is positive, and
+//   - the recipe has been cooked at least favoriteMinCooks times.
+//
+// A frequently-cooked recipe the family dislikes is a habit, not a favorite; a
+// well-liked recipe that has never been cooked is a prospect, not yet known.
+func IsKnownFavorite(c domain.Candidate, ctx domain.PlanContext) bool {
+	return isKnownFavorite(c, ctx, cookCount(c, ctx))
+}
+
+func isKnownFavorite(c domain.Candidate, ctx domain.PlanContext, cooks int) bool {
+	return cooks >= favoriteMinCooks && preferenceScore(c, ctx) > 0
+}
+
+// discoveryMaxCooks is the maximum number of times a recipe may appear in the
+// household's meal history before it stops counting as a discovery/novel
+// candidate. A recipe the family has never (or barely) cooked is novel — a
+// candidate for discovery; one it has cooked regularly is familiar, not new.
+// It is the mirror of favoriteMinCooks: a recipe is either still novel
+// (cooked <= discoveryMaxCooks times) or no longer is (cooked >=
+// favoriteMinCooks times), with the two thresholds meeting cleanly.
+const discoveryMaxCooks = 1
+
+// IsDiscovery reports whether the recipe is a discovery/novel candidate: one
+// the household has no or minimal meal history for (cooked at most
+// discoveryMaxCooks times). This is the novelty side of PLAN.md's
+// Recommendation Inspiration balance — the counterpart to IsKnownFavorite.
+//
+// The rule is deliberately preference-agnostic: a recipe is novel because the
+// family has not yet cooked it, regardless of how much they like its tags. A
+// well-liked recipe that has never been cooked is a discovery prospect, not a
+// known favorite. (A future recipe-discovery capability may also flag freshly
+// added external recipes as discovery; that is out of scope here and would OR
+// into this rule.)
+func IsDiscovery(c domain.Candidate, ctx domain.PlanContext) bool {
+	return isDiscovery(cookCount(c, ctx))
+}
+
+func isDiscovery(cooks int) bool {
+	return cooks <= discoveryMaxCooks
+}
+
+// familiarityReason returns a short, deterministic phrase explaining the
+// candidate's position on the novelty/familiarity axis, in the same
+// machine-generated-note shape as the feasibility reason. It is derived purely
+// from meal history and preference data — never the LLM — so the novelty
+// dimension is explainable in the same Breakdown/Reason shape as every other
+// signal the scorer already produces. cooks is the precomputed cookCount.
+func familiarityReason(c domain.Candidate, ctx domain.PlanContext, cooks int) string {
+	switch {
+	case isDiscovery(cooks):
+		if cooks == 0 {
+			return "novel (never cooked)"
+		}
+		return "novel (rarely cooked)"
+	case isKnownFavorite(c, ctx, cooks):
+		return "known favorite"
+	default:
+		return "familiar"
+	}
 }
 
 func toSet(items []string) map[string]bool {

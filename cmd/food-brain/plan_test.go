@@ -10,12 +10,15 @@ import (
 	"testing"
 )
 
-// TestRunPlan_EndToEnd drives the complete pipe against fake services:
-// Mealie (2 recipes) → scorer with Skolmaten dedup (fish at school Monday) →
-// Olla (returns prose; plan proceeds on scorer order) → adapter resolution →
-// wishlist creation. Asserts the wishlist request contains the confidently
-// resolved product and excludes the needs-review one.
-func TestRunPlan_EndToEnd(t *testing.T) {
+// newTestEnv wires the complete pipe against fake services (Mealie with 2
+// recipes, Skolmaten with fish at school on Monday of 2026-W31, a fake adapter
+// that resolves ingredients and captures wishlist creation) plus a family
+// config. The Olla behavior is the caller's choice (prose reply, hard failure,
+// ...) via ollaHandler. It returns the family file path and a thread-safe
+// accessor for the last wishlist body the fake adapter received.
+func newTestEnv(t *testing.T, ollaHandler http.HandlerFunc) (familyPath string, wishlistBody func() map[string]any) {
+	t.Helper()
+
 	// ── Fake Mealie ────────────────────────────────────────────────────────────
 	fakeMealie := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -35,7 +38,7 @@ func TestRunPlan_EndToEnd(t *testing.T) {
 			w.WriteHeader(404)
 		}
 	}))
-	defer fakeMealie.Close()
+	t.Cleanup(fakeMealie.Close)
 
 	// ── Fake Skolmaten: fish served at school on Monday of 2026-W31 ───────────
 	fakeSkolmaten := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -43,19 +46,15 @@ func TestRunPlan_EndToEnd(t *testing.T) {
 			{"date":"2026-07-27T00:00:00Z","Meals":[{"id":"a","name":"Stekt fisk"}]}
 		]},"School":{"id":"s","name":"Skolan"}}`))
 	}))
-	defer fakeSkolmaten.Close()
+	t.Cleanup(fakeSkolmaten.Close)
 
-	// ── Fake Olla: returns prose (unparseable) — pipe must proceed anyway ─────
-	fakeOlla := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"choices": []map[string]any{{"message": map[string]string{"role": "assistant", "content": "Ät gott!"}}},
-		})
-	}))
-	defer fakeOlla.Close()
+	// ── Fake Olla ──────────────────────────────────────────────────────────────
+	fakeOlla := httptest.NewServer(ollaHandler)
+	t.Cleanup(fakeOlla.Close)
 
 	// ── Fake adapter: resolve + capture the wishlist creation ────────────────
 	var mu sync.Mutex
-	var wishlistBody map[string]any
+	var lastWishlist map[string]any
 	fakeAdapter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/resolve":
@@ -83,7 +82,7 @@ func TestRunPlan_EndToEnd(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"resolutions": resolutions})
 		case "/shopping-lists":
 			mu.Lock()
-			_ = json.NewDecoder(r.Body).Decode(&wishlistBody)
+			_ = json.NewDecoder(r.Body).Decode(&lastWishlist)
 			mu.Unlock()
 			w.WriteHeader(201)
 			_ = json.NewEncoder(w).Encode(map[string]string{"wishlistId": "wl-1", "name": "Vecka 31"})
@@ -91,11 +90,11 @@ func TestRunPlan_EndToEnd(t *testing.T) {
 			w.WriteHeader(404)
 		}
 	}))
-	defer fakeAdapter.Close()
+	t.Cleanup(fakeAdapter.Close)
 
 	// ── Family config in a temp dir ───────────────────────────────────────────
 	dir := t.TempDir()
-	familyPath := filepath.Join(dir, "family.json")
+	familyPath = filepath.Join(dir, "family.json")
 	familyJSON := `{
 		"people":[{"id":"kid","name":"Kid","weight":2}],
 		"preferences":[{"personId":"kid","tag":"pasta","sentiment":2,"confidence":0.9},
@@ -114,6 +113,48 @@ func TestRunPlan_EndToEnd(t *testing.T) {
 	t.Setenv("OLLA_MODEL", "test-model")
 	t.Setenv("ADAPTER_URL", fakeAdapter.URL)
 
+	return familyPath, func() map[string]any {
+		mu.Lock()
+		defer mu.Unlock()
+		return lastWishlist
+	}
+}
+
+// assertWishlist checks the wishlist the fake adapter received: one item, the
+// confidently-resolved köttfärs product, and nothing silently added for the
+// needs-review ingredient.
+func assertWishlist(t *testing.T, body map[string]any, run int) {
+	t.Helper()
+	if body == nil {
+		t.Fatal("no wishlist was created")
+	}
+	if body["name"] != "Vecka 31" {
+		t.Errorf("run %d: unexpected wishlist name %v", run, body["name"])
+	}
+	items, _ := body["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("run %d: expected exactly 1 confidently-resolved item, got %d (%v)", run, len(items), items)
+	}
+	item := items[0].(map[string]any)
+	if item["productCode"] != "willys-1" {
+		t.Errorf("run %d: expected willys-1 in wishlist, got %v", run, item["productCode"])
+	}
+}
+
+// TestRunPlan_EndToEnd drives the complete pipe against fake services:
+// Mealie (2 recipes) → scorer with Skolmaten dedup (fish at school Monday) →
+// Olla (returns prose; plan proceeds on scorer order) → adapter resolution →
+// wishlist creation. Asserts the wishlist request contains the confidently
+// resolved product and excludes the needs-review one.
+func TestRunPlan_EndToEnd(t *testing.T) {
+	// Fake Olla returns prose (unparseable) — pipe must proceed anyway.
+	proseOlla := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{"role": "assistant", "content": "Ät gott!"}}},
+		})
+	})
+	familyPath, wishlistBody := newTestEnv(t, proseOlla)
+
 	err := runPlan([]string{
 		"--family", familyPath,
 		"--school", "skolan",
@@ -124,22 +165,29 @@ func TestRunPlan_EndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runPlan: %v", err)
 	}
+	assertWishlist(t, wishlistBody(), 0)
+}
 
-	mu.Lock()
-	defer mu.Unlock()
-	if wishlistBody == nil {
-		t.Fatal("no wishlist was created")
+// TestRunPlan_EndToEnd_OllaUnavailable asserts implement-recommendations task
+// 6.2: with the LLM down, ranking and the resulting plan are identical across
+// repeated runs — the pipe proceeds on the deterministic scorer order.
+func TestRunPlan_EndToEnd_OllaUnavailable(t *testing.T) {
+	downOlla := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	familyPath, wishlistBody := newTestEnv(t, downOlla)
+
+	args := []string{
+		"--family", familyPath,
+		"--school", "skolan",
+		"--week", "2026-W31",
+		"--days", "2",
+		"--create-wishlist",
 	}
-	if wishlistBody["name"] != "Vecka 31" {
-		t.Errorf("unexpected wishlist name %v", wishlistBody["name"])
+	for run := 0; run < 2; run++ {
+		if err := runPlan(args); err != nil {
+			t.Fatalf("runPlan (run %d): %v", run, err)
+		}
+		assertWishlist(t, wishlistBody(), run)
 	}
-	items, _ := wishlistBody["items"].([]any)
-	if len(items) != 1 {
-		t.Fatalf("expected exactly 1 confidently-resolved item, got %d (%v)", len(items), items)
-	}
-	item := items[0].(map[string]any)
-	if item["productCode"] != "willys-1" {
-		t.Errorf("expected willys-1 in wishlist, got %v", item["productCode"])
-	}
-	// laxfilé was needs-review and must NOT have been silently added.
 }

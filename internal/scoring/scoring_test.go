@@ -191,3 +191,205 @@ func TestRank_EmptyInputs(t *testing.T) {
 		t.Errorf("candidate should be feasible when kitchen energy is unspecified")
 	}
 }
+
+// history builds a PlanContext whose RecentMealIDs contain the given recipe ids.
+func history(ids ...string) domain.PlanContext {
+	ctx := baseCtx()
+	for _, id := range ids {
+		ctx.RecentMealIDs = append(ctx.RecentMealIDs, domain.RecentMeal{MealieRecipeID: id, Served: day.AddDate(0, 0, -30)})
+	}
+	return ctx
+}
+
+func TestFamiliarity_FrequentCookIsFamiliar(t *testing.T) {
+	c := domain.Candidate{MealieRecipeID: "r"}
+	// Cooked 9 times → strongly familiar (positive signal).
+	ctx := history("r", "r", "r", "r", "r", "r", "r", "r", "r")
+	got := Rank([]domain.Candidate{c}, ctx, DefaultWeights())[0].Breakdown.Familiarity
+	if got <= 0 {
+		t.Errorf("a frequently-cooked recipe should carry a positive familiarity contribution, got %.3f", got)
+	}
+}
+
+func TestFamiliarity_NeverCookedIsNovel(t *testing.T) {
+	// The household has a meal history, but this recipe was never in it → novel.
+	other := domain.Candidate{MealieRecipeID: "other"}
+	novel := domain.Candidate{MealieRecipeID: "novel"}
+	ctx := history("other", "other", "other", "other", "other", "other")
+
+	ranked := Rank([]domain.Candidate{other, novel}, ctx, DefaultWeights())
+	byID := map[string]float64{}
+	for _, r := range ranked {
+		byID[r.Candidate.MealieRecipeID] = r.Breakdown.Familiarity
+	}
+	// The known recipe is familiar (positive); the untried one is novel (negative).
+	if byID["other"] <= 0 {
+		t.Errorf("a cooked recipe should be familiar (positive), got %.3f", byID["other"])
+	}
+	if byID["novel"] >= 0 {
+		t.Errorf("a never-cooked recipe should be novel (negative), got %.3f", byID["novel"])
+	}
+}
+
+func TestFamiliarity_NoHistoryIsNeutral(t *testing.T) {
+	c := domain.Candidate{MealieRecipeID: "r"}
+	// No meal history at all → no basis for the signal → 0.
+	ctx := baseCtx()
+	got := Rank([]domain.Candidate{c}, ctx, DefaultWeights())[0].Breakdown.Familiarity
+	if got != 0 {
+		t.Errorf("with no meal history the familiarity signal should be 0, got %.3f", got)
+	}
+}
+
+func TestFamiliarity_Deterministic(t *testing.T) {
+	c := domain.Candidate{MealieRecipeID: "r"}
+	ctx := history("r", "r", "other")
+	w := DefaultWeights()
+	first := Rank([]domain.Candidate{c}, ctx, w)[0].Breakdown.Familiarity
+	for i := range 5 {
+		again := Rank([]domain.Candidate{c}, ctx, w)[0].Breakdown.Familiarity
+		if again != first {
+			t.Fatalf("run %d familiarity differs: %.3f vs %.3f", i, again, first)
+		}
+	}
+}
+
+// favCtx builds a single-person context where the person has the given sentiment
+// toward tag (full confidence) and recipe "r" has been cooked cookTimes times,
+// spaced 30+ days apart so the repetition penalty stays out of the picture.
+func favCtx(tag string, sentiment domain.Sentiment, cookTimes int) domain.PlanContext {
+	ctx := baseCtx()
+	ctx.People = []domain.Person{person("kid", 1)}
+	ctx.Preferences = []domain.Preference{{PersonID: "kid", Tag: tag, Sentiment: sentiment, Confidence: 1.0}}
+	for i := 0; i < cookTimes; i++ {
+		ctx.RecentMealIDs = append(ctx.RecentMealIDs, domain.RecentMeal{MealieRecipeID: "r", Served: day.AddDate(0, 0, -(30 + i*30))})
+	}
+	return ctx
+}
+
+func TestIsKnownFavorite_LikedAndCooked(t *testing.T) {
+	c := domain.Candidate{MealieRecipeID: "r", Tags: []string{"pasta"}}
+	if !IsKnownFavorite(c, favCtx("pasta", domain.Loves, 2)) {
+		t.Errorf("a well-liked, twice-cooked recipe should be a known favorite")
+	}
+}
+
+func TestIsKnownFavorite_LikedButNeverCooked(t *testing.T) {
+	c := domain.Candidate{MealieRecipeID: "r", Tags: []string{"pasta"}}
+	if IsKnownFavorite(c, favCtx("pasta", domain.Loves, 0)) {
+		t.Errorf("a liked recipe with no meal history should not be a known favorite")
+	}
+}
+
+func TestIsKnownFavorite_CookedButDisliked(t *testing.T) {
+	c := domain.Candidate{MealieRecipeID: "r", Tags: []string{"broccoli"}}
+	if IsKnownFavorite(c, favCtx("broccoli", domain.Hates, 3)) {
+		t.Errorf("a frequently-cooked recipe the family hates should not be a known favorite")
+	}
+}
+
+func TestIsKnownFavorite_Deterministic(t *testing.T) {
+	c := domain.Candidate{MealieRecipeID: "r", Tags: []string{"pasta"}}
+	ctx := favCtx("pasta", domain.Likes, 2)
+	first := IsKnownFavorite(c, ctx)
+	for i := range 5 {
+		if again := IsKnownFavorite(c, ctx); again != first {
+			t.Fatalf("run %d differs: %v vs %v", i, again, first)
+		}
+	}
+}
+
+func TestIsDiscovery_NeverCooked(t *testing.T) {
+	c := domain.Candidate{MealieRecipeID: "r"}
+	// No meal history at all → never cooked → a discovery candidate.
+	if !IsDiscovery(c, baseCtx()) {
+		t.Errorf("a never-cooked recipe should be a discovery candidate")
+	}
+}
+
+func TestIsDiscovery_CookedOnceIsStillDiscovery(t *testing.T) {
+	c := domain.Candidate{MealieRecipeID: "r"}
+	ctx := history("r") // cooked once → still minimal history
+	if !IsDiscovery(c, ctx) {
+		t.Errorf("a once-cooked recipe should still be a discovery candidate")
+	}
+}
+
+func TestIsDiscovery_RegularlyCookedIsNotDiscovery(t *testing.T) {
+	c := domain.Candidate{MealieRecipeID: "r"}
+	ctx := history("r", "r", "r") // cooked 3 times → familiar, not novel
+	if IsDiscovery(c, ctx) {
+		t.Errorf("a regularly-cooked recipe should not be a discovery candidate")
+	}
+}
+
+func TestIsDiscovery_IgnoresPreference(t *testing.T) {
+	// Novelty is preference-agnostic: a strongly disliked recipe the family has
+	// never cooked is still a discovery candidate.
+	c := domain.Candidate{MealieRecipeID: "r", Tags: []string{"pasta"}}
+	ctx := favCtx("pasta", domain.Dislikes, 0)
+	if !IsDiscovery(c, ctx) {
+		t.Errorf("discovery should not depend on preference sentiment")
+	}
+}
+
+func TestIsDiscovery_Deterministic(t *testing.T) {
+	c := domain.Candidate{MealieRecipeID: "r"}
+	ctx := history("r")
+	first := IsDiscovery(c, ctx)
+	for i := range 5 {
+		if again := IsDiscovery(c, ctx); again != first {
+			t.Fatalf("run %d differs: %v vs %v", i, again, first)
+		}
+	}
+}
+
+func TestFamiliarityReason_NeverCooked(t *testing.T) {
+	c := domain.Candidate{MealieRecipeID: "r"}
+	if got := familiarityReason(c, baseCtx(), 0); got != "novel (never cooked)" {
+		t.Errorf("never-cooked reason = %q, want %q", got, "novel (never cooked)")
+	}
+}
+
+func TestFamiliarityReason_RarelyCooked(t *testing.T) {
+	c := domain.Candidate{MealieRecipeID: "r"}
+	if got := familiarityReason(c, history("r"), 1); got != "novel (rarely cooked)" {
+		t.Errorf("rarely-cooked reason = %q, want %q", got, "novel (rarely cooked)")
+	}
+}
+
+func TestFamiliarityReason_KnownFavorite(t *testing.T) {
+	c := domain.Candidate{MealieRecipeID: "r", Tags: []string{"pasta"}}
+	if got := familiarityReason(c, favCtx("pasta", domain.Loves, 3), 3); got != "known favorite" {
+		t.Errorf("favorite reason = %q, want %q", got, "known favorite")
+	}
+}
+
+func TestFamiliarityReason_FamiliarNotFavorite(t *testing.T) {
+	// Cooked regularly but disliked → familiar, not a known favorite.
+	c := domain.Candidate{MealieRecipeID: "r", Tags: []string{"broccoli"}}
+	if got := familiarityReason(c, favCtx("broccoli", domain.Hates, 3), 3); got != "familiar" {
+		t.Errorf("familiar reason = %q, want %q", got, "familiar")
+	}
+}
+
+func TestScore_ReasonStatesNoveltyWhenFeasible(t *testing.T) {
+	// A feasible, never-cooked candidate's Reason states its novelty.
+	c := domain.Candidate{MealieRecipeID: "r"}
+	if got := score(c, baseCtx(), DefaultWeights()).Reason; got != "novel (never cooked)" {
+		t.Errorf("feasible reason = %q, want %q", got, "novel (never cooked)")
+	}
+}
+
+func TestScore_ReasonKeepsFeasibilityWhenInfeasible(t *testing.T) {
+	// An infeasible candidate's Reason keeps the hard-constraint note AND the
+	// novelty/familiarity classification.
+	c := domain.Candidate{MealieRecipeID: "big", Effort: domain.EffortHigh}
+	ctx := baseCtx()
+	ctx.KitchenEnergy = domain.EffortLow // force infeasible
+	got := score(c, ctx, DefaultWeights()).Reason
+	want := "needs more effort than the cook has today; novel (never cooked)"
+	if got != want {
+		t.Errorf("infeasible reason = %q, want %q", got, want)
+	}
+}

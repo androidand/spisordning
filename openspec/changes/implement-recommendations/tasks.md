@@ -2,19 +2,33 @@
 
 ## 1. Consume the existing scorer, don't replace it
 
-- [ ] 1.1 Extend `internal/scoring/scoring.go`'s `Weights`/`Breakdown` with novelty/familiarity
+- [x] 1.1 Extend `internal/scoring/scoring.go`'s `Weights`/`Breakdown` with novelty/familiarity
       dimensions rather than forking a parallel scorer
-- [ ] 1.2 Preserve existing dimensions and their current weights/tests unchanged: preferences+
+- [x] 1.2 Preserve existing dimensions and their current weights/tests unchanged: preferences+
       confidence, effort budget, repetition penalty, Skolmaten dedup, Willys campaign bias
+      (verified: all 5 original dimensions + weights intact in Weights/Breakdown — Preference 1.0,
+      Effort 0.6, Repetition 0.8, SchoolDedup 0.7, Campaign 0.4; scoring_test.go diff is
+      additions-only so the 9 original tests are byte-for-byte unchanged; go test ./... = 87 pass)
 
 ## 2. Familiarity vs. novelty vocabulary
 
-- [ ] 2.1 Define "known favorite": derived from aggregate `person_preference` sentiment/
+- [x] 2.1 Define "known favorite": derived from aggregate `person_preference` sentiment/
       confidence plus `meal_event` frequency for a recipe
-- [ ] 2.2 Define "discovery/novelty": recipes with no or minimal `meal_event` history for the
+      (implemented `scoring.IsKnownFavorite`: net-positive confidence-weighted preferenceScore AND
+      cookCount >= favoriteMinCooks(2); extracted `cookCount` helper reused by familiarityScore;
+      4 tests — liked+cooked=favorite, liked+never-cooked=no, cooked+disliked=no, deterministic;
+      go test ./... = 91 pass)
+ - [x] 2.2 Define "discovery/novelty": recipes with no or minimal `meal_event` history for the
       household, or recently added via a future recipe-discovery capability
-- [ ] 2.3 Define a novelty score dimension analogous to the existing `Breakdown` fields —
+      (verified: `scoring.IsDiscovery` — novel iff `cookCount <= discoveryMaxCooks`(1), the
+      preference-agnostic mirror of `favoriteMinCooks`; 5 tests incl. never/once/regularly-cooked
+      and preference-independence; `go test ./...` 96 pass, `openspec validate` valid)
+- [x] 2.3 Define a novelty score dimension analogous to the existing `Breakdown` fields —
       deterministic, and explainable in the same `Breakdown`/`Reason` shape as today's scorer
+      (verified: `Familiarity` Breakdown field is the novelty dimension; added `familiarityReason`
+      — a deterministic, LLM-free note (novel (never/rarely cooked) / known favorite / familiar) —
+      wired into `ScoredCandidate.Reason` (feasibility note prefixed when infeasible); 6 tests;
+      `go test ./...` 102 pass, `openspec validate` valid)
 
 ## 3. User-facing control modes
 
@@ -48,18 +62,22 @@
 
 ## 6. Never merely an LLM response
 
-- [ ] 6.1 Reaffirm and extend `food-brain-first-slice`'s existing rule (its D2/D3 design
+- [x] 6.1 Reaffirm and extend `food-brain-first-slice`'s existing rule (its D2/D3 design
       decisions): the LLM may vary within the deterministic candidate set and generate prose
       explanations, but MUST NOT decide feasibility, novelty classification, or ranking
-- [ ] 6.2 Assert this with a test analogous to the existing scorer reproducibility test: ranking
+      (encoded in `integrate-ai` design/spec; enforced by `TestProviderError_Propagates`,
+      `TestScore_ReasonKeepsFeasibilityWhenInfeasible`, and the Olla-down E2E test)
+- [x] 6.2 Assert this with a test analogous to the existing scorer reproducibility test: ranking
       and mode selection are identical across repeated runs with Olla unavailable
+      (`TestRunPlan_EndToEnd_OllaUnavailable` in cmd/food-brain/plan_test.go)
 
 ## 7. Verification
 
-- [ ] 7.1 Unit tests: novelty/familiarity scoring is deterministic and reproducible without the
-      LLM present
+- [x] 7.1 Unit tests: novelty/familiarity scoring is deterministic and reproducible without the
+      LLM present (`TestFamiliarity_Deterministic`, `TestIsKnownFavorite_Deterministic`,
+      `TestIsDiscovery_Deterministic`, `TestRank_DeterministicAndReproducible`)
 - [ ] 7.2 Unit tests: each control mode produces a distinct, deterministic weight/filter
       transformation from the same candidate pool
 - [ ] 7.3 Unit tests: the balance guarantee (task 4.1) holds across a representative candidate
       pool mix
-- [ ] 7.4 `openspec validate implement-recommendations`
+- [x] 7.4 `openspec validate implement-recommendations`
