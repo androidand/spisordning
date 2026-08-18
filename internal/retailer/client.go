@@ -5,28 +5,21 @@
 package retailer
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
-	"net/http"
 	"time"
 
+	"github.com/androidand/spisordning/internal/httpclient"
 	"github.com/androidand/spisordning/internal/planning"
 )
 
 // Client talks to a running willys-adapter instance.
 type Client struct {
-	baseURL string
-	http    *http.Client
+	http *httpclient.Client
 }
 
 // New returns a Client for the adapter at baseURL (e.g. "http://localhost:8402").
 func New(baseURL string) *Client {
-	return &Client{
-		baseURL: baseURL,
-		http:    &http.Client{Timeout: 60 * time.Second},
-	}
+	return &Client{http: httpclient.New(baseURL, "adapter", 60*time.Second)}
 }
 
 // requirementPayload mirrors the adapter's Requirement JSON shape.
@@ -41,12 +34,12 @@ type requirementPayload struct {
 
 // Resolution mirrors the adapter's resolution JSON shape.
 type Resolution struct {
-	IngredientID      string  `json:"ingredientId"`
-	RetailerProductID *string `json:"retailerProductId"`
-	ProductName       string  `json:"productName"`
-	Packages          int     `json:"packages"`
+	IngredientID      string   `json:"ingredientId"`
+	RetailerProductID *string  `json:"retailerProductId"`
+	ProductName       string   `json:"productName"`
+	Packages          int      `json:"packages"`
 	ResolvedQuantity  *float64 `json:"resolvedQuantity"`
-	MatchType         string  `json:"matchType"` // "pinned" | "pinned-backup" | "exact" | "fuzzy" | "none"
+	MatchType         string   `json:"matchType"` // "pinned" | "pinned-backup" | "exact" | "fuzzy" | "none"
 	// Confidence is name-match confidence only; quantity uncertainty is the
 	// separate QuantityUncertain flag (packages defaults to a safe 1).
 	Confidence        float64 `json:"confidence"`
@@ -82,7 +75,7 @@ func (c *Client) ResolveRequirements(
 	var out struct {
 		Resolutions []Resolution `json:"resolutions"`
 	}
-	if err := c.post(ctx, "/resolve", payload, &out); err != nil {
+	if err := c.http.PostJSON(ctx, "/resolve", payload, &out, nil); err != nil {
 		return nil, err
 	}
 	return out.Resolutions, nil
@@ -112,35 +105,8 @@ func (c *Client) CreateShoppingList(
 	}{Name: name, Items: items}
 
 	var out CreatedList
-	if err := c.post(ctx, "/shopping-lists", payload, &out); err != nil {
+	if err := c.http.PostJSON(ctx, "/shopping-lists", payload, &out, nil); err != nil {
 		return nil, err
 	}
 	return &out, nil
-}
-
-func (c *Client) post(ctx context.Context, path string, body, out any) error {
-	buf, err := json.Marshal(body)
-	if err != nil {
-		return fmt.Errorf("marshal %s payload: %w", path, err)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(buf))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("content-type", "application/json")
-
-	res, err := c.http.Do(req)
-	if err != nil {
-		return fmt.Errorf("adapter %s: %w", path, err)
-	}
-	defer res.Body.Close()
-
-	if res.StatusCode < 200 || res.StatusCode > 299 {
-		var apiErr struct {
-			Error string `json:"error"`
-		}
-		_ = json.NewDecoder(res.Body).Decode(&apiErr)
-		return fmt.Errorf("adapter %s: HTTP %d: %s", path, res.StatusCode, apiErr.Error)
-	}
-	return json.NewDecoder(res.Body).Decode(out)
 }

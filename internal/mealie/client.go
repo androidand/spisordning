@@ -5,7 +5,6 @@
 package mealie
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -14,25 +13,33 @@ import (
 	"time"
 
 	"github.com/androidand/spisordning/internal/domain"
+	"github.com/androidand/spisordning/internal/httpclient"
 )
 
 // Client talks to a Mealie instance (e.g. the tengil-deployed hlab-mealie).
 type Client struct {
-	baseURL string
-	token   string
-	http    *http.Client
+	token string
+	http  *httpclient.Client
 }
 
 // New returns a Client for the Mealie at baseURL using an API token.
 func New(baseURL, token string) *Client {
 	return &Client{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		token:   token,
-		http:    &http.Client{Timeout: 60 * time.Second},
+		token: token,
+		http:  httpclient.New(baseURL, "mealie", 60*time.Second),
 	}
 }
 
-// IngredientLine is one normalized ingredient row from a Mealie recipe.
+// authHeaders attaches the bearer token every Mealie request needs.
+func (c *Client) authHeaders(req *http.Request) {
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Accept", "application/json")
+}
+
+// IngredientLine is one normalized ingredient row from a Mealie recipe — the
+// SOURCE shape, naming the food as Mealie spells it. Downstream consumers map
+// it onto the canonical domain.Ingredient (id via domain.CanonicalIngredientID);
+// it is deliberately not the canonical type.
 type IngredientLine struct {
 	FoodID   string
 	FoodName string
@@ -166,11 +173,7 @@ func (c *Client) parseUnstructured(ctx context.Context, lines []IngredientLine) 
 		return
 	}
 
-	body, err := json.Marshal(map[string]any{"parser": "brute", "ingredients": notes})
-	if err != nil {
-		return
-	}
-	raw, err := c.postRaw(ctx, "/api/parser/ingredients", body)
+	raw, err := c.postRaw(ctx, "/api/parser/ingredients", map[string]any{"parser": "brute", "ingredients": notes})
 	if err != nil {
 		return // parser unavailable; leave lines unstructured
 	}
@@ -252,50 +255,17 @@ func (c *Client) get(ctx context.Context, path string, out any) error {
 }
 
 func (c *Client) getRaw(ctx context.Context, path string) (json.RawMessage, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
-	if err != nil {
+	var raw json.RawMessage
+	if err := c.http.GetJSON(ctx, path, &raw, c.authHeaders); err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
-	req.Header.Set("Accept", "application/json")
-
-	res, err := c.http.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("mealie: %w", err)
-	}
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("mealie: HTTP %d for %s", res.StatusCode, path)
-	}
-
-	var buf json.RawMessage
-	if err := json.NewDecoder(res.Body).Decode(&buf); err != nil {
-		return nil, fmt.Errorf("mealie: decode %s: %w", path, err)
-	}
-	return buf, nil
+	return raw, nil
 }
 
-func (c *Client) postRaw(ctx context.Context, path string, body []byte) (json.RawMessage, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(body))
-	if err != nil {
+func (c *Client) postRaw(ctx context.Context, path string, payload any) (json.RawMessage, error) {
+	var raw json.RawMessage
+	if err := c.http.PostJSON(ctx, path, payload, &raw, c.authHeaders); err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Content-Type", "application/json")
-
-	res, err := c.http.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("mealie: %w", err)
-	}
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("mealie: HTTP %d for %s", res.StatusCode, path)
-	}
-
-	var buf json.RawMessage
-	if err := json.NewDecoder(res.Body).Decode(&buf); err != nil {
-		return nil, fmt.Errorf("mealie: decode %s: %w", path, err)
-	}
-	return buf, nil
+	return raw, nil
 }

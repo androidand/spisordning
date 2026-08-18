@@ -6,26 +6,25 @@ package skolmaten
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/androidand/spisordning/internal/httpclient"
 )
 
 // Client fetches weekly menus from a skolmaten-compatible API.
 type Client struct {
-	baseURL string
-	token   string // optional Client-Token header
-	http    *http.Client
+	token string // optional Client-Token header
+	http  *httpclient.Client
 }
 
 // New returns a Client for the service at baseURL (e.g. "http://192.168.1.120:8787").
 func New(baseURL, token string) *Client {
 	return &Client{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		token:   token,
-		http:    &http.Client{Timeout: 30 * time.Second},
+		token: token,
+		http:  httpclient.New(baseURL, "skolmaten", 30*time.Second),
 	}
 }
 
@@ -52,27 +51,15 @@ type menuResponse struct {
 // WeekMenu fetches the menu for an ISO year/week. A week with no published
 // menu returns an empty slice, not an error.
 func (c *Client) WeekMenu(ctx context.Context, school string, year, week int) ([]DayMenu, error) {
-	url := fmt.Sprintf("%s/api/4/menu/school/%s?year=%d&week=%d", c.baseURL, school, year, week)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	if c.token != "" {
-		req.Header.Set("Client-Token", c.token)
-	}
-
-	res, err := c.http.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("skolmaten: %w", err)
-	}
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("skolmaten: HTTP %d for %s", res.StatusCode, url)
-	}
-
+	path := fmt.Sprintf("/api/4/menu/school/%s?year=%d&week=%d", school, year, week)
 	var body menuResponse
-	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
-		return nil, fmt.Errorf("skolmaten: decode: %w", err)
+	headers := func(req *http.Request) {
+		if c.token != "" {
+			req.Header.Set("Client-Token", c.token)
+		}
+	}
+	if err := c.http.GetJSON(ctx, path, &body, headers); err != nil {
+		return nil, err
 	}
 	if body.WeekState == nil {
 		return nil, nil // no published menu for this week

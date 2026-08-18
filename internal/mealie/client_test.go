@@ -136,7 +136,7 @@ func TestEffortFromTotalTime(t *testing.T) {
 		{"25 minuter", domain.EffortLow},
 		{"40 min", domain.EffortMedium},
 		{"1 timme 30 minuter", domain.EffortHigh},
-		{"", domain.EffortMedium},     // unknown defaults to medium
+		{"", domain.EffortMedium}, // unknown defaults to medium
 		{"snabbt", domain.EffortMedium},
 	}
 	for _, c := range cases {
