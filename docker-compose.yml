@@ -40,8 +40,24 @@ services:
     ports:
       - '8402:8402'
 
-  # food-brain joins here once it grows an HTTP server (currently a CLI demo:
-  # `go run ./cmd/food-brain`). Planned in the same openspec change.
+  food-brain:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # food-brain reads postgres + homelab services from .env; see .env.example.
+      DATABASE_URL: postgres://spisordning:${POSTGRES_PASSWORD}@postgres:5432/spisordning?sslmode=disable
+      MEALIE_BASE_URL: ${MEALIE_BASE_URL:-http://hlab-mealie:9000}
+      MEALIE_API_TOKEN: ${MEALIE_API_TOKEN:-}
+      OLLA_OPENAI_BASE_URL: ${OLLA_OPENAI_BASE_URL:-}
+      SKOLMATEN_BASE_URL: ${SKOLMATEN_BASE_URL:-}
+      ADAPTER_URL: ${ADAPTER_URL:-http://willys-adapter:8402}
+    ports:
+      - '8080:8080'
 
 volumes:
   pgdata:

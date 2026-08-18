@@ -1,0 +1,425 @@
+openapi: 3.0.3
+
+info:
+  title: Spisordning API
+  version: 0.1.0
+  description: >
+    Household food knowledge service: recipe management with git-like evolution,
+    weekly meal planning, recommendations, pantry/inventory, and shopping
+    requirements. This is the design-first contract; generated server/client code
+    is derived from this file and never hand-edited. Migration owner: the
+    `migrations/` directory under the repo root — Directus or any other tool must
+    not schema-edit here.
+
+servers:
+  - url: http://localhost:8080
+    description: local docker-compose stack (`food-brain` service)
+
+# Every schema change is authorized through this single, documented surface.
+x-layer-policy:
+  domain:        internal/domain
+  application:   internal/planning
+  persistence:   internal/persistence
+  httpapi:       internal/httpapi
+  composition:   cmd/food-brain
+
+paths:
+  /health:
+    get:
+      summary: Liveness/ready probe
+      operationId: getHealth
+      tags: [system]
+      responses:
+        '200':
+          description: service is up
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+
+  /people:
+    get:
+      summary: List household people
+      operationId: listPeople
+      tags: [people]
+      responses:
+        '200':
+          description: people
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Person' }
+    post:
+      summary: Create a person
+      operationId: createPerson
+      tags: [people]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PersonNew' }
+      responses:
+        '201':
+          description: created
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Person' } }
+
+  /people/{personId}:
+    parameters:
+      - $ref: '#/components/parameters/PersonId'
+    get:
+      summary: Fetch one person
+      operationId: getPerson
+      tags: [people]
+      responses:
+        '200': { description: a person, content: { application/json: { schema: { $ref: '#/components/schemas/Person' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /preferences:
+    get:
+      summary: List all preferences
+      operationId: listPreferences
+      tags: [preferences]
+      parameters:
+        - name: personId
+          in: query
+          schema: { type: string }
+          description: filter to one person
+      responses:
+        '200':
+          description: preferences
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PersonPreference' }
+
+  /recipes:
+    get:
+      summary: List known recipe refs
+      operationId: listRecipes
+      tags: [recipes]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/RecipeRef' }
+
+  /meals:
+    post:
+      summary: Record a served meal (optionally with reactions)
+      operationId: createMealEvent
+      tags: [meals]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MealEventNew' }
+      responses:
+        '201': { description: meal event created, content: { application/json: { schema: { $ref: '#/components/schemas/MealEvent' } } } }
+
+  /plans:
+    get:
+      summary: List meal plans
+      operationId: listPlans
+      tags: [plans]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/MealPlan' }
+    post:
+      summary: Create a meal plan for a week (status=draft)
+      operationId: createPlan
+      tags: [plans]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MealPlanNew' }
+      responses:
+        '201': { description: plan created, content: { application/json: { schema: { $ref: '#/components/schemas/MealPlan' } } } }
+
+  /plans/{planId}:
+    parameters:
+      - $ref: '#/components/parameters/PlanId'
+    get:
+      summary: Fetch a plan with its ranked candidates
+      operationId: getPlan
+      tags: [plans]
+      responses:
+        '200': { description: plan + candidates, content: { application/json: { schema: { $ref: '#/components/schemas/MealPlanView' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      summary: Update a plan's status (e.g. approve or archive)
+      operationId: updatePlan
+      tags: [plans]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/MealPlanUpdate' } } }
+      responses:
+        '200': { description: updated plan, content: { application/json: { schema: { $ref: '#/components/schemas/MealPlan' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /plans/{planId}/decisions:
+    parameters:
+      - $ref: '#/components/parameters/PlanId'
+    post:
+      summary: Commit the slot decisions for an approved plan
+      operationId: setDecisions
+      tags: [plans]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items: { $ref: '#/components/schemas/MealPlanDecision' }
+      responses:
+        '200': { description: decisions persisted, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/MealPlanDecision' } } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /plans/{planId}/shopping-requirements:
+    parameters:
+      - $ref: '#/components/parameters/PlanId'
+    get:
+      summary: The canonical shopping requirements derived from a plan's decisions
+      operationId: listShoppingRequirements
+      tags: [shopping]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ShoppingRequirement' }
+
+  /ingredient-mappings/{ingredient}:
+    parameters:
+      - name: ingredient
+        in: path
+        required: true
+        description: canonical ingredient id (lowercase, trimmed)
+        schema: { type: string }
+    get:
+      summary: Fetch a mapping, including needs_review flag
+      operationId: getIngredientMapping
+      tags: [mappings]
+      responses:
+        '200': { description: mapping, content: { application/json: { schema: { $ref: '#/components/schemas/IngredientMapping' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      summary: Resolve a needs_review mapping to a canonical ingredient (review surface)
+      operationId: resolveIngredientMapping
+      tags: [mappings]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IngredientMappingResolve' }
+      responses:
+        '200': { description: updated, content: { application/json: { schema: { $ref: '#/components/schemas/IngredientMapping' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+components:
+  parameters:
+    PersonId:
+      name: personId
+      in: path
+      required: true
+      schema: { type: string }
+    PlanId:
+      name: planId
+      in: path
+      required: true
+      schema: { type: integer }
+
+  responses:
+    NotFound:
+      description: resource not found
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Conflict:
+      description: state conflict (e.g. decisions on a non-approved plan)
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+
+  schemas:
+    Error:
+      type: object
+      required: [message]
+      properties:
+        message: { type: string }
+
+    Health:
+      type: object
+      properties:
+        status: { type: string, enum: [ok], default: ok }
+
+    Person:
+      type: object
+      required: [id, name, weight, created_at]
+      properties:
+        id: { type: string, description: canonical id }
+        name: { type: string }
+        weight: { type: number, format: double, default: 1.0, exclusiveMinimum: 0 }
+        created_at: { type: string, format: date-time }
+
+    PersonNew:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        weight: { type: number, format: double, default: 1.0, exclusiveMinimum: 0 }
+
+    PersonPreference:
+      type: object
+      required: [person_id, tag, sentiment, confidence, updated_at]
+      properties:
+        person_id: { type: string }
+        tag: { type: string }
+        sentiment: { type: integer, minimum: -2, maximum: 2, description: -2 (strongly dislike) to 2 (love) }
+        confidence: { type: number, format: double, minimum: 0, maximum: 1 }
+        updated_at: { type: string, format: date-time }
+
+    RecipeRef:
+      type: object
+      required: [mealie_recipe_id, title, tags, effort, last_synced_at]
+      properties:
+        mealie_recipe_id: { type: string }
+        title: { type: string }
+        tags: { type: array, items: { type: string } }
+        effort: { type: integer, minimum: 1, maximum: 3, description: 1 (quick) to 3 (intense) }
+        last_synced_at: { type: string, format: date-time }
+
+    Ingredient:
+      type: object
+      required: [id, display]
+      properties:
+        id: { type: string, description: canonical id, e.g. cauliflower }
+        display: { type: string, description: human-friendly name }
+
+    IngredientMapping:
+      type: object
+      required: [mealie_food_id, ingredient_id, source_name, needs_review, updated_at]
+      properties:
+        mealie_food_id: { type: string }
+        ingredient_id: { type: string, $ref: '#/components/schemas/Ingredient/properties/id' }
+        source_name: { type: string }
+        external_id: { type: string, nullable: true }
+        needs_review: { type: boolean, default: true }
+        updated_at: { type: string, format: date-time }
+
+    IngredientMappingResolve:
+      type: object
+      required: [ingredient_id]
+      properties:
+        ingredient_id: { type: string }
+        acceptable_forms: { type: array, items: { type: string } }
+        preferred_form: { type: string, nullable: true }
+
+    MealEvent:
+      type: object
+      required: [id, mealie_recipe_id, served_on, created_at, reactions]
+      properties:
+        id: { type: integer }
+        mealie_recipe_id: { type: string }
+        served_on: { type: string, format: date }
+        created_at: { type: string, format: date-time }
+        reactions:
+          type: array
+          items: { $ref: '#/components/schemas/MealReaction' }
+
+    MealReaction:
+      type: object
+      required: [person_id, sentiment]
+      properties:
+        person_id: { type: string }
+        sentiment: { type: integer, minimum: -2, maximum: 2 }
+
+    MealEventNew:
+      type: object
+      required: [mealie_recipe_id, served_on]
+      properties:
+        mealie_recipe_id: { type: string }
+        served_on: { type: string, format: date }
+        reactions:
+          type: array
+          items: { $ref: '#/components/schemas/MealReaction' }
+
+    MealPlan:
+      type: object
+      required: [id, week_start, status, created_at]
+      properties:
+        id: { type: integer }
+        week_start: { type: string, format: date, description: Monday of the planned week }
+        status: { type: string, enum: [draft, approved, archived], default: draft }
+        created_at: { type: string, format: date-time }
+
+    MealPlanNew:
+      type: object
+      required: [week_start]
+      properties:
+        week_start: { type: string, format: date }
+
+    MealPlanUpdate:
+      type: object
+      properties:
+        status: { type: string, enum: [draft, approved, archived] }
+
+    MealPlanCandidate:
+      type: object
+      required: [id, recipe, slot_date, score, breakdown, feasible, rank]
+      properties:
+        id: { type: integer }
+        recipe: { $ref: '#/components/schemas/RecipeRef' }
+        slot_date: { type: string, format: date }
+        score: { type: number, format: double }
+        breakdown:
+          type: object
+          description: per-signal score breakdown (pref, effort, repeat, school, campaign, familiarity, novelty)
+          additionalProperties: { type: number, format: double }
+        feasible: { type: boolean }
+        rank: { type: integer, minimum: 0 }
+
+    MealPlanDecision:
+      type: object
+      required: [plan_id, slot_date, mealie_recipe_id]
+      properties:
+        plan_id: { type: integer }
+        slot_date: { type: string, format: date }
+        mealie_recipe_id: { type: string }
+        decided_at: { type: string, format: date-time, nullable: true }
+
+    MealPlanView:
+      type: object
+      required: [plan, candidates]
+      properties:
+        plan: { $ref: '#/components/schemas/MealPlan' }
+        candidates:
+          type: array
+          items: { $ref: '#/components/schemas/MealPlanCandidate' }
+        decisions:
+          type: array
+          items: { $ref: '#/components/schemas/MealPlanDecision' }
+
+    ShoppingRequirement:
+      type: object
+      required: [id, ingredient_id, quantity, unit, acceptable_forms, preferred_form]
+      properties:
+        id: { type: integer }
+        ingredient_id: { type: string }
+        quantity: { type: number, format: double }
+        unit: { type: string }
+        acceptable_forms: { type: array, items: { type: string } }
+        preferred_form: { type: string, nullable: true }
+
+    EffortProfile:
+      type: object
+      required: [weekday, kitchen_energy]
+      properties:
+        weekday: { type: integer, minimum: 0, maximum: 6, description: 0=Sunday .. 6=Saturday }
+        kitchen_energy: { type: integer, minimum: 1, maximum: 3 }

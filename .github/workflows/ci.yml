@@ -1,0 +1,58 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CGO_ENABLED: 0
+
+jobs:
+  test:
+    name: test + vet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.1'
+          cache: true
+      - name: go build
+        run: go build ./...
+      - name: go vet
+        run: go vet ./...
+      - name: go test (incl. architecture-enforcement gate)
+        # internal/architecturetest walks `go list -deps` and fails the build on
+        # any layer-boundary violation — see establish-enforced-go-architecture.
+        run: go test -count=1 ./...
+
+  migrations:
+    name: migrations apply cleanly
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: spisordning
+          POSTGRES_USER: spisordning
+          POSTGRES_PASSWORD: change-me
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd 'pg_isready -U spisordning'
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: install psql (for migration checks)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client
+      - name: apply migrations 0001-0007 in order (must all succeed)
+        run: |
+          set -euo pipefail
+          for f in $(ls migrations/*.sql | sort); do
+            echo "=== applying $f ==="
+            PGPASSWORD=change-me psql -h localhost -U spisordning -d spisordning \
+              -v ON_ERROR_STOP=1 -f "$f"
+          done

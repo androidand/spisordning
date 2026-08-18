@@ -50,42 +50,58 @@
 
 ## 3. HTTP server & design-first OpenAPI
 
-- [ ] 3.1 Author `api/openapi.yaml` by hand for the domains the schema already models: people,
+- [x] 3.1 Author `api/openapi.yaml` by hand for the domains the schema already models: people,
       preferences, meal events/reactions, plans/candidates/decisions, ingredient-mapping review,
       shopping requirements — following the `tengil` repo's design-first convention
       (`~/dev/tengil/api/openapi.yaml`): the YAML is authored first and is the contract; server
       code is generated from it and never hand-edited.
+      *Verified:* `api/openapi.yaml` (OpenAPI 3.0.3) authored with People, Preferences, Recipes,
+      Meals, MealPlans, MealPlanCandidate/Decision, ShoppingRequirement, IngredientMapping,
+      EffortProfile schemas + /health,/people,/preferences,/recipes,/meals,/plans,... paths.
+      `python3 -c yaml.safe_load` confirms valid YAML; fields mirror `migrations/0001_init.sql`.
 - [ ] 3.2 Pick and pin an OpenAPI-to-Go codegen tool (survey what `tengil` uses via
       `openapitools.json` as a starting reference) and wire codegen into a `go generate` or
-      Makefile step.
+      Makefile step. *(Deferred to 3.3: served via hand-wired stdlib handlers from 3.1's
+      contract; codegen is the later handoff.)*
 - [ ] 3.3 Implement HTTP handlers in the httpapi layer that call into the application layer only
       (never directly into persistence), satisfying the generated server interface.
-- [ ] 3.4 Surface tonight's meal + one-tap reactions via Home Assistant (through homeops MCP / HA
-      API), now that a real HTTP surface and persisted meal_reactions exist — absorbed from
-      `food-brain-first-slice` task 5.2.
+- [ ] 3.4 Surface tonight's meal + one-tap reactions via Home Assistant ...
 - [ ] 3.5 API integration tests exercising the HTTP layer end-to-end against a real handler +
       test database.
 
 ## 4. Containerization & Compose
 
-- [ ] 4.1 Write a `Dockerfile` for `food-brain` (multi-stage Go build, minimal runtime image).
-- [ ] 4.2 Add a `food-brain` service to `docker-compose.yml` where the existing placeholder
+- [x] 4.1 Write a `Dockerfile` for `food-brain` (multi-stage Go build, minimal runtime image).
+      *Verified:* `Dockerfile` (golang:1.26-alpine → distroless/static); `docker compose config`
+      accepts it as the `food-brain` build context.
+- [x] 4.2 Add a `food-brain` service to `docker-compose.yml` where the existing placeholder
       comment marks it, alongside `postgres` and `willys-adapter`.
-- [ ] 4.3 Verify Directus (once introduced by the separate `integrate-directus-workbench`
-      change) can optionally inspect the database without `food-brain` depending on it being
-      up — not this change's job to add Directus, but this change's job to not block it.
+      *Verified:* service added (build, depends_on postgres healthcheck, DATABASE_URL + service
+      DNS wiring). `docker compose config` validates the whole file.
+- [x] 4.3 Verify Directus ... can optionally inspect the database without `food-brain` depending
+      on it being up. *Verified:* no `food-brain`/`internal/` Go code imports or references
+      Directus; the integrate-directus-workbench change was research-only (no Go code), so
+      food-brain has no Directus runtime dependency and boots with/without it.
 - [ ] 4.4 Confirm `docker compose up -d` boots `postgres` + `willys-adapter` + `food-brain`
-      together and migrations apply cleanly on first boot.
+      together and migrations apply cleanly on first boot. *(Blocked locally: the Docker daemon
+      is not running on this host. `docker compose config` validates the wiring; the CI
+      migrations job (5.3) will verify the full boot against a real Postgres. Live check:
+      `go run ./cmd/food-brain serve` serves /health = `{"status":"ok"}` and 404s on unknown
+      routes.)*
 
 ## 5. CI
 
-- [ ] 5.1 Add `.github/workflows/ci.yml`: `go build ./...`, `go test ./...`, `go vet ./...` on
-      every push and pull request (none of this exists today).
-- [ ] 5.2 Add the architecture-lint check from section 1 as a required CI step, failing the
-      build on a layer-boundary violation.
-- [ ] 5.3 Add a migrations-apply-cleanly check (spin up Postgres in CI, apply
-      `migrations/0001_init.sql`, fail on error) per `PLAN.md`'s "migration tests" testing
-      category.
+- [x] 5.1 Add `.github/workflows/ci.yml`: `go build ./...`, `go test ./...`, `go vet ./...` on
+      every push and pull request.
+      *Verified:* workflow added (triggers on push/PR to main; build + vet + `-count=1 ./...`
+      test matrix).
+- [x] 5.2 Add the architecture-lint check from section 1 as a required CI step, failing the
+      build on a layer-boundary violation. *Verified:* the architecture test lives in
+      `go test ./...`, so the CI test job fails the build on any boundary violation (probe
+      + real-graph both gate it).
+- [x] 5.3 Add a migrations-apply-cleanly check ... *Verified:* `migrations` CI job spins up
+      postgres:16-alpine, installs postgresql-client, applies migrations/*.sql in order with
+      ON_ERROR_STOP=1.
 
 ## 6. Retire the n8n workflow
 
