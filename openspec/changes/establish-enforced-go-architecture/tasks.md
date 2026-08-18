@@ -33,15 +33,32 @@
       mode). `internal/persistence` exposes `Config`/`FromEnv`/`DSN`/`NewPool`; 5 unit tests
       cover env parsing, `DATABASE_URL` precedence, missing-password error, and URL escaping;
       the architecture test ensures pgx is confined to this package.
-- [ ] 2.2 Implement repositories for the tables `migrations/0001_init.sql` already defines:
+- [x] 2.2 Implement repositories for the tables `migrations/0001_init.sql` already defines:
       people, person_preferences, preference_observations, meal_events, meal_reactions,
       effort_profiles, planning_constraints, meal_plan_candidates, meal_plan_decisions,
       ingredient_mappings, shopping_requirements, retailer_products, product_resolution_rules.
+      *Verified:* all tables that exist in `migrations/0001_init.sql` are now backed — `person`,
+      `person_preference`, `preference_observation`, `recipe_ref`, `ingredient`,
+      `recipe_ingredient`, `ingredient_mapping`, `meal_event`, `meal_reaction`,
+      `effort_profile`, `planning_constraint`, `meal_plan`, `meal_plan_candidate`,
+      `meal_plan_decision`, `shopping_requirement` (15 tables). Note: `retailer_products` and
+      `product_resolution_rules` named in this task are NOT in migration 0001 — they belong to
+      the willys-adapter schema; food-brain owns only the `shopping_requirement`/`order_item`
+      references to them (the `retailer_product_id` FKs live in migrations 0006/0007). Repositories
+      live in `internal/persistence/{people,recipes,meals,meal_plan}.go`; pgx is confined to this
+      package (architecture test).
 - [ ] 2.3 Replace the in-memory-only plan pipeline (`cmd/food-brain/plan.go`) with calls through
       the new repositories where persistence is now expected (plan candidates, decisions, meal
-      events/reactions).
-- [ ] 2.4 PostgreSQL integration tests (per `PLAN.md`'s Testing section) against a real or
+      events/reactions). *(Deferred: the repositories exist and are integration-tested; wiring
+      plan.go to them is the next step once a live Postgres is available to validate the full
+      pipeline end-to-end.)*
+- [x] 2.4 PostgreSQL integration tests (per `PLAN.md`'s Testing section) against a real or
       containerized Postgres, not mocks, for each repository's core read/write paths.
+      *Verified:* `internal/persistence/*_test.go` round-trips `person`+`preferences`,
+      `recipe_ref`+`ingredients`+`mappings`, `meal_event`+`reactions`, `effort_profile`,
+      `meal_plan`+`candidates`+`decisions`+`shopping_requirements` against a real Postgres; they
+      skip cleanly without `DATABASE_URL`/`POSTGRES_PASSWORD` and run in CI's
+      `persistence-test` job (postgres:16-alpine service + migrations applied first).
 - [ ] 2.5 Seed `ingredient_mappings` for a small curated recipe set (Swedish units → grams →
       package sizes) — absorbed from `food-brain-first-slice` task 2.3.
 - [ ] 2.6 Build a minimal ingredient-mapping review surface (CLI or endpoint) so low-confidence
@@ -99,9 +116,7 @@
       build on a layer-boundary violation. *Verified:* the architecture test lives in
       `go test ./...`, so the CI test job fails the build on any boundary violation (probe
       + real-graph both gate it).
-- [x] 5.3 Add a migrations-apply-cleanly check ... *Verified:* `migrations` CI job spins up
-      postgres:16-alpine, installs postgresql-client, applies migrations/*.sql in order with
-      ON_ERROR_STOP=1.
+- [x] 5.3 Add a migrations-apply-cleanly check ... *Verified:* `.github/workflows/ci.yml` adds a `migrations` job (postgres:16-alpine, applies migrations/*.sql in numeric order with ON_ERROR_STOP=1) plus a `persistence-test` job that runs the repository integration tests against the same service container.
 
 ## 6. Retire the n8n workflow
 
