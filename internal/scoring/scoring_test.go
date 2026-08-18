@@ -393,3 +393,183 @@ func TestScore_ReasonKeepsFeasibilityWhenInfeasible(t *testing.T) {
 		t.Errorf("infeasible reason = %q, want %q", got, want)
 	}
 }
+
+// mixedPool is a pool with one loved, thrice-cooked favorite and one loved,
+// never-cooked discovery candidate. Preference is equal for both, so the mode's
+// Familiarity weight is the only differentiator.
+func mixedPool() ([]domain.Candidate, domain.PlanContext) {
+	candidates := []domain.Candidate{
+		{MealieRecipeID: "fav", Title: "Pasta", Tags: []string{"pasta"}, Effort: domain.EffortLow},
+		{MealieRecipeID: "novel", Title: "Curry", Tags: []string{"curry"}, Effort: domain.EffortLow},
+	}
+	ctx := baseCtx()
+	ctx.Preferences = []domain.Preference{
+		{PersonID: "kid", Tag: "pasta", Sentiment: domain.Loves, Confidence: 1.0},
+		{PersonID: "kid", Tag: "curry", Sentiment: domain.Loves, Confidence: 1.0},
+	}
+	for i := 0; i < 3; i++ {
+		ctx.RecentMealIDs = append(ctx.RecentMealIDs, domain.RecentMeal{MealieRecipeID: "fav", Served: day.AddDate(0, 0, -(30 + i*30))})
+	}
+	return candidates, ctx
+}
+
+func TestMode_WeightsDistinct(t *testing.T) {
+	seen := map[Weights]bool{}
+	for _, m := range Modes() {
+		w := m.WeightsFor()
+		if seen[w] {
+			t.Errorf("mode %q produces duplicate weights %v", m, w)
+		}
+		seen[w] = true
+	}
+}
+
+func TestMode_RankingDistinct(t *testing.T) {
+	candidates, ctx := mixedPool()
+	top := func(m Mode) string {
+		return RankWithMode(candidates, ctx, m)[0].Candidate.MealieRecipeID
+	}
+	if got := top(ModeSafeChoice); got != "fav" {
+		t.Errorf("safe choice top = %q, want fav", got)
+	}
+	if got := top(ModeSomethingSimilar); got != "fav" {
+		t.Errorf("something similar top = %q, want fav", got)
+	}
+	if got := top(ModeSurpriseMe); got != "novel" {
+		t.Errorf("surprise me top = %q, want novel", got)
+	}
+	if got := top(ModeCompletelyNew); got != "novel" {
+		t.Errorf("completely new top = %q, want novel", got)
+	}
+}
+
+func TestMode_Deterministic(t *testing.T) {
+	candidates, ctx := mixedPool()
+	for _, m := range Modes() {
+		first := RankWithMode(candidates, ctx, m)
+		for i := range 5 {
+			again := RankWithMode(candidates, ctx, m)
+			if len(again) != len(first) {
+				t.Fatalf("mode %q: length changed between runs", m)
+			}
+			for j := range first {
+				if again[j].Candidate.MealieRecipeID != first[j].Candidate.MealieRecipeID ||
+					again[j].Score != first[j].Score {
+					t.Fatalf("mode %q run %d differs at %d", m, i, j)
+				}
+			}
+		}
+	}
+}
+
+func TestModeSelection_DeterministicWithoutLLM(t *testing.T) {
+	// The scorer is a pure function: it never imports or calls the LLM (Olla).
+	// Repeated runs with Olla unavailable produce identical rankings and mode
+	// selections - the LLM-invariance rule (tasks 6.1/6.2).
+	candidates, ctx := mixedPool()
+	for _, m := range Modes() {
+		first := RankWithMode(candidates, ctx, m)
+		for i := range 5 {
+			again := RankWithMode(candidates, ctx, m)
+			for j := range first {
+				if again[j].Candidate.MealieRecipeID != first[j].Candidate.MealieRecipeID ||
+					again[j].Score != first[j].Score {
+					t.Fatalf("mode %q run %d differs at %d", m, i, j)
+				}
+			}
+		}
+	}
+}
+
+func TestRankWithMode_EmptyUsesDefault(t *testing.T) {
+	candidates, ctx := mixedPool()
+	empty := RankWithMode(candidates, ctx, "")
+	def := RankWithMode(candidates, ctx, DefaultMode)
+	if empty[0].Score != def[0].Score {
+		t.Errorf("empty mode should use DefaultMode: %.3f vs %.3f", empty[0].Score, def[0].Score)
+	}
+}
+
+func TestMode_SurpriseMeRespectsFeasibility(t *testing.T) {
+	// Even in surprise me mode, an infeasible candidate ranks last.
+	ctx := baseCtx()
+	ctx.KitchenEnergy = domain.EffortLow // exhausted cook
+	candidates := []domain.Candidate{
+		{MealieRecipeID: "easyNovel", Tags: []string{"curry"}, Effort: domain.EffortLow},
+		{MealieRecipeID: "bigNovel", Tags: []string{"tacos"}, Effort: domain.EffortHigh},
+	}
+	ranked := RankWithMode(candidates, ctx, ModeSurpriseMe)
+	if ranked[0].Candidate.MealieRecipeID != "easyNovel" {
+		t.Errorf("feasible meal should rank first under surprise me, got %s", ranked[0].Candidate.MealieRecipeID)
+	}
+	for _, r := range ranked {
+		if r.Candidate.MealieRecipeID == "bigNovel" && r.Feasible {
+			t.Errorf("high-effort meal should be infeasible on a low-energy day")
+		}
+	}
+}
+
+// favPool builds a pool of cooked, loved favorites plus never-cooked discovery
+// candidates. The favorites rank above the novel ones under safe choice, so a
+// small top-n batch would be all favorites without the balance guarantee.
+func favPool(novelIDs []string) ([]domain.Candidate, domain.PlanContext) {
+	favIDs := []string{"fav1", "fav2", "fav3", "fav4"}
+	tags := map[string]string{"fav1": "pasta", "fav2": "fish", "fav3": "stew", "fav4": "rice"}
+	candidates := make([]domain.Candidate, 0, len(favIDs)+len(novelIDs))
+	for _, id := range favIDs {
+		candidates = append(candidates, domain.Candidate{MealieRecipeID: id, Tags: []string{tags[id]}, Effort: domain.EffortLow})
+	}
+	for _, id := range novelIDs {
+		candidates = append(candidates, domain.Candidate{MealieRecipeID: id, Tags: []string{id}, Effort: domain.EffortLow})
+	}
+	ctx := baseCtx()
+	ctx.People = []domain.Person{person("kid", 1)}
+	for _, id := range favIDs {
+		ctx.Preferences = append(ctx.Preferences, domain.Preference{PersonID: "kid", Tag: tags[id], Sentiment: domain.Loves, Confidence: 1.0})
+		for i := 0; i < 3; i++ {
+			ctx.RecentMealIDs = append(ctx.RecentMealIDs, domain.RecentMeal{MealieRecipeID: id, Served: day.AddDate(0, 0, -(30 + i*30))})
+		}
+	}
+	return candidates, ctx
+}
+
+func TestSelectBatch_BalanceGuarantee(t *testing.T) {
+	candidates, ctx := favPool([]string{"novel1", "novel2"})
+	ranked := RankWithMode(candidates, ctx, ModeSafeChoice)
+	batch := SelectBatch(ranked, ctx, 3)
+	if len(batch) != 3 {
+		t.Fatalf("batch size = %d, want 3", len(batch))
+	}
+	fav, novel := groupsPresent(batch, ctx)
+	if !fav {
+		t.Errorf("batch should include at least one known favorite")
+	}
+	if !novel {
+		t.Errorf("balance guarantee: batch should include at least one discovery candidate")
+	}
+}
+
+func TestSelectBatch_AllFavorites(t *testing.T) {
+	candidates, ctx := favPool(nil)
+	ranked := RankWithMode(candidates, ctx, ModeSafeChoice)
+	batch := SelectBatch(ranked, ctx, 2)
+	fav, novel := groupsPresent(batch, ctx)
+	if !fav {
+		t.Errorf("all-favorites pool should yield a favorites batch")
+	}
+	if novel {
+		t.Errorf("all-favorites pool should not fabricate a discovery candidate")
+	}
+}
+
+func TestSelectBatch_SmallBatch(t *testing.T) {
+	candidates, ctx := favPool([]string{"novel1"})
+	ranked := RankWithMode(candidates, ctx, ModeSafeChoice)
+	batch := SelectBatch(ranked, ctx, 1)
+	if len(batch) != 1 {
+		t.Fatalf("1-slot batch size = %d, want 1", len(batch))
+	}
+	if batch[0].Candidate.MealieRecipeID != "fav1" {
+		t.Errorf("1-slot batch top = %q, want fav1", batch[0].Candidate.MealieRecipeID)
+	}
+}

@@ -32,33 +32,64 @@
 
 ## 3. User-facing control modes
 
-- [ ] 3.1 Model the four candidate modes PLAN.md names: `safe choice`, `something similar`,
+- [x] 3.1 Model the four candidate modes PLAN.md names: `safe choice`, `something similar`,
       `surprise me`, `something completely new`
-- [ ] 3.2 Define each mode as a deterministic transformation of scorer weights and/or candidate-
+      (implemented `scoring.Mode` type + `ModeSafeChoice`/`ModeSomethingSimilar`/`ModeSurpriseMe`/
+      `ModeCompletelyNew` constants and `Modes()`; go test ./... = 124 pass)
+- [x] 3.2 Define each mode as a deterministic transformation of scorer weights and/or candidate-
       pool filtering — never a separate scoring algorithm and never an LLM decision
-- [ ] 3.3 Decide the default mode and how the selected mode is threaded through the
+      (implemented `Mode.WeightsFor()`: each mode is a pure re-weighting of `DefaultWeights` over
+      the same scorer — safe choice raises Preference/Effort/Familiarity and lowers Repetition;
+      surprise me/completely new flip Familiarity negative to pull toward novelty; no separate
+      algorithm, no LLM; `TestMode_WeightsDistinct` proves the four transformations are distinct)
+- [x] 3.3 Decide the default mode and how the selected mode is threaded through the
       `implement-meal-planning` API into the scorer
+      (default is `DefaultMode` = `something similar`; `RankWithMode(candidates, ctx, mode)` is the
+      single entry point that applies the mode's weights — an empty mode falls back to
+      `DefaultMode`. The meal-planning API threads the user-selected mode here; until that lands
+      the CLI passes `DefaultMode`. `TestRankWithMode_EmptyUsesDefault` pins the fallback)
 
 ## 4. Balance guarantee
 
-- [ ] 4.1 Decide whether a recommendation batch includes a minimum mix of favorites and novel
+- [x] 4.1 Decide whether a recommendation batch includes a minimum mix of favorites and novel
       candidates by default, and how `safe choice` vs. `surprise me` shift that ratio
-- [ ] 4.2 Explainability: each candidate's reason SHALL state whether it was surfaced for
+      (implemented `SelectBatch(ranked, ctx, n)`: when the pool has both known favorites and
+      discovery candidates, the batch includes at least one of each — it reorders (never
+      re-scores) the mode-ranked list, so the deterministic ranking is preserved. The mix ratio is
+      driven by the mode's weights (safe choice leans familiar, surprise me leans novel); the
+      guarantee only prevents a degenerate all-one-group batch. `TestSelectBatch_BalanceGuarantee`,
+      `TestSelectBatch_AllFavorites`, `TestSelectBatch_SmallBatch` cover the guarantee, the honest
+      all-favorites case, and the 1-slot edge case)
+- [x] 4.2 Explainability: each candidate's reason SHALL state whether it was surfaced for
       familiarity or for novelty
+      (verified: `familiarityReason` — a deterministic, LLM-free note (novel (never/rarely cooked) /
+      known favorite / familiar) — is wired into `ScoredCandidate.Reason` (feasibility note
+      prefixed when infeasible); `TestScore_ReasonKeepsFeasibilityWhenInfeasible` pins the
+      combined note)
 
 ## 5. Full Recommendation Domain input surface (PLAN.md list)
 
-- [ ] 5.1 Audit the full input list: people eating, allergies, preferences, ratings, meal
+- [x] 5.1 Audit the full input list: people eating, allergies, preferences, ratings, meal
       history, recent meals, pantry availability, expiry, substitutions, effort, time, price,
       shopping requirements — record which this change wires and which remain deferred
+      (audited against `domain.PlanContext`. WIRED by this change: people eating (People),
+      preferences (Preferences), meal history + recent meals (RecentMealIDs -> cookCount/repetition),
+      effort (KitchenEnergy + candidate.Effort), time (Day -> repetition window), Skolmaten dedup
+      (SchoolLunchTags), Willys campaign bias (CampaignIngredients). DEFERRED: allergies (5.3),
+      ratings/favorites (5.4), pantry availability + expiry + substitutions (5.2), price (5.5),
+      shopping requirements (implement-shopping-and-commerce). No input is silently dropped — each
+      deferred input has a named owning change)
 - [ ] 5.2 Wire pantry availability, expiry, and substitutions once `implement-recipe-
-      availability` / `implement-pantry-inventory` land — not implemented in this change until
-      those exist
+      availability` / `implement-pantry-inventory` land — **DEFERRED** (out of scope here; those
+      capabilities do not exist yet)
 - [ ] 5.3 Wire allergies as a hard filter — never a scored, negotiable dimension — once
-      `establish-household-and-catalog`'s `PersonRestriction` model lands
+      `establish-household-and-catalog`'s `PersonRestriction` model lands — **DEFERRED** (out of
+      scope here; the restriction model does not exist yet)
 - [ ] 5.4 Wire ratings/favorites once `implement-meals-and-preferences`'s `MealReview`/
-      `Favorite` model lands
-- [ ] 5.5 Wire price once a future price-intelligence capability exists (deferred, later epic)
+      `Favorite` model lands — **DEFERRED** (out of scope here; the review/favorite model does not
+      exist yet)
+- [ ] 5.5 Wire price once a future price-intelligence capability exists — **DEFERRED** (later
+      epic; no price-intelligence capability exists yet)
 
 ## 6. Never merely an LLM response
 
@@ -76,8 +107,16 @@
 - [x] 7.1 Unit tests: novelty/familiarity scoring is deterministic and reproducible without the
       LLM present (`TestFamiliarity_Deterministic`, `TestIsKnownFavorite_Deterministic`,
       `TestIsDiscovery_Deterministic`, `TestRank_DeterministicAndReproducible`)
-- [ ] 7.2 Unit tests: each control mode produces a distinct, deterministic weight/filter
+- [x] 7.2 Unit tests: each control mode produces a distinct, deterministic weight/filter
       transformation from the same candidate pool
-- [ ] 7.3 Unit tests: the balance guarantee (task 4.1) holds across a representative candidate
+      (`TestMode_WeightsDistinct` — the four modes yield four distinct `Weights`;
+      `TestMode_RankingDistinct` — familiarity-seeking modes top the known favorite, novelty-seeking
+      modes top the discovery candidate; `TestMode_Deterministic` — each mode is reproducible across
+      5 runs; go test ./... = 124 pass)
+- [x] 7.3 Unit tests: the balance guarantee (task 4.1) holds across a representative candidate
       pool mix
+      (`TestSelectBatch_BalanceGuarantee` — a 3-slot batch over a 4-favorite/2-novel pool includes at
+      least one of each; `TestSelectBatch_AllFavorites` — an all-favorites pool yields an honest
+      all-favorites batch; `TestSelectBatch_SmallBatch` — a 1-slot batch returns the top candidate
+      as-is)
 - [x] 7.4 `openspec validate implement-recommendations`
