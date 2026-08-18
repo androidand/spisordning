@@ -236,6 +236,7 @@ the ingredient-mapping review surface, and Home Assistant surfacing. Tracked in
 
 ## Related repos
 
-- [`willys`](../willys) — the Willys API client (TypeScript) this system wraps.
+- [`willys`](../willys) — retailer API clients (TypeScript): `willys-client` (Willys, live) and
+  `ica-client` (ICA, early-stage — see `docs/research/ica-current-api.md`).
 - [`tengil`](../tengil) — Proxmox app/container control plane; candidate deployment mechanism.
 - [`homelab`](../homelab) — existing homelab stack (n8n, Home Assistant, etc.).

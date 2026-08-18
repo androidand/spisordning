@@ -30,6 +30,14 @@ New work must acknowledge and build on that slice, not silently re-derive it.
   check it before touching anything retailer-related. See
   `docs/research/willys-capabilities.md` for the full capability map and
   `docs/research/current-state.md` for the detailed as-of inventory.
+- A second retailer client is taking shape alongside it, in the same `~/dev/willys/` directory:
+  **`~/dev/willys/ica-client`** — a standalone TypeScript ICA client, structurally mirroring
+  `willys-client`. Early-stage and not yet stable (see `docs/research/ica-current-api.md` §5 for
+  the current snapshot — check it before assuming any capability listed there still holds, it
+  drifts fast). Spisordning's own tracking for wrapping it once stable is
+  `openspec/changes/integrate-ica/` — gated on the client's stabilization, not yet
+  implementation-ready. Research on the two external seed repos (`ica-api`, `ha-ica-todo`) that
+  informed it lives in `docs/research/ica-current-api.md`.
 - Full infra/access details (Proxmox, Tengil, GitHub): `docs/infrastructure/deployment-and-access.md`.
 
 ## OpenSpec / specsync workflow
