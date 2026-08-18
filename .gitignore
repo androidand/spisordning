@@ -37,7 +37,11 @@ tmp/
 .specsync/
 
 # Skein runtime state (machine-local, not project source)
-.skein/
+# Exception: the testing policy and test command ARE project source — commit them
+# so the verify/debugger gate can read the correct (Go) test command in every worktree.
+.skein/*
+!.skein/steering/
+!.skein/test-command.txt
 logs/
 
 # per-user runtime config (copy of family.example.json)
