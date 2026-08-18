@@ -1,0 +1,61 @@
+# Disposable Directus Research Spike environment (integrate-directus-workbench).
+#
+# THIS IS A SPIKE-ONLY, NON-PRODUCTION ENVIRONMENT. It is NOT part of
+# spisordning's runtime and must never become a required dependency. Tear it
+# down (and delete its isolated persistence) with:
+#
+#   docker compose -f docker-compose.directus-spike.yml down -v
+#
+# It stands up:
+#   - spike-postgres: a NON-PRODUCTION copy of spisordning's Postgres schema
+#                     (migrations/ applied on first boot, isolated volume).
+#   - directus:       a Directus instance pointed at spike-postgres, used to
+#                     answer PLAN.md's Directus Research Spike questions.
+#
+# Per PLAN.md's reference-lab discipline: isolated persistence, disposable,
+# and stopping/removing Directus must never affect spisordning itself.
+
+services:
+  spike-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: spisordning
+      POSTGRES_USER: spisordning
+      POSTGRES_PASSWORD: spike
+    volumes:
+      - spike_pgdata:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    ports:
+      # 5434 (not 5433, which the main docker-compose.yml uses) to avoid
+      # colliding with a running spisordning dev stack.
+      - '5434:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U spisordning']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  directus:
+    image: directus/directus:11
+    environment:
+      DB_CLIENT: pg
+      DB_HOST: spike-postgres
+      DB_PORT: '5432'
+      DB_DATABASE: spisordning
+      DB_USER: spisordning
+      DB_PASSWORD: spike
+      KEY: '0123456789abcdef0123456789abcdef'
+      SECRET: 'fedcba9876543210fedcba9876543210'
+      ADMIN_EMAIL: admin@example.com
+      ADMIN_PASSWORD: 'spike-admin-password'
+      PUBLIC_URL: http://localhost:8056
+      LOG_LEVEL: info
+    ports:
+      # 8056 (not 8055, which the Tengil reference-lab Directus uses).
+      - '8056:8055'
+    depends_on:
+      spike-postgres:
+        condition: service_healthy
+
+volumes:
+  spike_pgdata:

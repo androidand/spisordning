@@ -1,4 +1,4 @@
-# Current state (as of 2026-08-16)
+# Current state (as of 2026-08-18)
 
 This is the Phase 0 "inspect existing Spisordning" deliverable `PLAN.md` asks for. It records
 what actually exists today, distinct from what `PLAN.md` envisions, so new OpenSpec changes
@@ -10,18 +10,21 @@ build on reality rather than re-deriving or contradicting it.
 cmd/food-brain/        main.go, demo.go, plan.go, plan_test.go — CLI only, no HTTP server
 internal/
   domain/               core types
-  llm/olla.go           Olla (local OpenAI-compatible LLM) client
+  httpclient/           shared JSON-over-HTTP transport used by every backend client
+  llm/                  AI provider abstraction (Provider interface); Olla (Client) is the
+                        primary OpenAI-compatible implementation
   mealie/client.go       read-only Mealie sync client (real, tested)
-  planning/              requirements.go, staples.go
+  planning/              requirements.go, staples.go, week.go (PlanWeek planner loop)
   retailer/client.go     Go-side client for the willys-adapter HTTP service
   scoring/scoring.go     deterministic candidate scorer
   skolmaten/client.go    school-lunch client
-migrations/0001_init.sql  Postgres schema — applied by docker-compose, not yet written to
+migrations/0001-0007      Postgres schema (0001 first-slice … 0007 order) — applied by
+                          docker-compose; Go persistence still pending (establish-enforced-go-architecture)
 openspec/                 see below
 ```
 
 `go.mod`: `github.com/androidand/spisordning`, Go 1.26.1, **stdlib-only** (zero third-party
-Go dependencies). `go build ./... && go test ./...` passes: 31 tests across 8 packages.
+Go dependencies). `go build ./... && go test ./...` passes: 114 tests across 11 packages.
 
 No `AGENTS.md`/`CLAUDE.md` existed before this change. No `docs/` existed before this change.
 
@@ -83,9 +86,27 @@ See `docs/research/willys-capabilities.md` for the full capability map.
 
 `migrations/0001_init.sql` defines the full first-slice schema (person, preferences,
 recipe_ref, ingredient, ingredient_mapping, meal_event/reaction, effort_profile,
-planning_constraint, meal_plan/candidate/decision, shopping_requirement) and is applied by
-docker-compose's Postgres. **Nothing in the Go code writes to it yet** — this is tracked,
-known, open work, not a hidden gap.
+planning_constraint, meal_plan/candidate/decision, shopping_requirement). Later migrations
+extend it:
+
+- `0002_recipe_discovery.sql` — `external_recipe_source`, `recipe_import_candidate`,
+  `recipe_import_candidate_ingredient`.
+- `0003_recipe_family.sql` — `recipe_family`, `recipe_variant`, `recipe_revision`,
+  `recipe_revision_parent`.
+- `0004_shopping_list.sql` — `shopping_list` + `shopping_list_item` (household shopping list,
+  seeded from `meal_plan`'s `shopping_requirement`s; no retailer product id per D1; a
+  `CHECK` enforces at least one of requirement/ingredient/label per item).
+- `0005_retailer_list_binding.sql` — `retailer_list_binding` (outbound-only binding of a
+  `shopping_list` to a retailer wishlist; push is additive, not idempotent).
+- `0006_shopping_cart.sql` — `shopping_cart` + `shopping_cart_item` (a checkpoint record of a
+  to-cart call, not a mirror of live retailer cart state).
+- `0007_order.sql` — `order` + `order_item` (actual purchase record; `source` is an explicit
+  enum `'manual'|'retailer_api'|'receipt_import'`; `order_item.substituted_for_item_id` is a
+  self-reference; forward extension point for a future `inventory_event(kind='PURCHASE')`).
+
+All migrations are applied by docker-compose's Postgres. **Nothing in the Go code writes to the
+new shopping/order tables yet** — that persistence is tracked, known, open work gated on
+`establish-enforced-go-architecture` (see `implement-shopping-and-commerce` tasks 2.2, 3.2, 6.1–6.4).
 
 ## CI / Docker
 

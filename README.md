@@ -186,7 +186,7 @@ while existing apps provide the generic 80%.
 The deterministic planning core is built and tested without any database, LLM, or network:
 
 ```bash
-go test ./...                # 28 tests incl. an end-to-end plan test against fake services
+go test ./...                # 114 tests incl. an end-to-end plan test against fake services
 go run ./cmd/food-brain demo # in-memory demo: ranks a sample week + prints requirements
 ```
 
@@ -207,19 +207,23 @@ Confidently-resolved products go on the wishlist; anything below the review thre
 printed as needing review and **never silently added**. Payment and slot booking stay in the
 Willys app.
 
-The demo shows all five scoring signals at work — preferences (confidence-weighted, per-person
-weight), effort vs. the day's kitchen energy, a repetition penalty, school-lunch dedup, and
-campaign bias — plus hard-constraint feasibility. Layout:
+The demo shows all six scoring signals at work — preferences (confidence-weighted, per-person
+weight), effort vs. the day's kitchen energy, a repetition penalty, school-lunch dedup,
+campaign bias, and novelty/familiarity (whether the household has cooked it before) — plus
+hard-constraint feasibility. Layout:
 
-- `internal/domain` — core value types (people, preferences, candidates, plan context)
+- `internal/domain` — core value types (people, preferences, candidates, canonical ingredients, plan context)
 - `internal/scoring` — the pure, deterministic scorer (`Rank`)
-- `internal/planning` — canonical shopping-requirement aggregation
+- `internal/planning` — the weekly planner loop (`PlanWeek`) + canonical shopping-requirement aggregation
 - `internal/mealie` — read-only Mealie recipe sync (references + snapshots, never copies)
 - `internal/skolmaten` — school-lunch menu client + meal-name tokenizer for dedup
-- `internal/llm` — Olla layer: explanations + feasible-set-only reordering (never load-bearing)
+- `internal/llm` — AI provider abstraction: Olla is the primary implementation; explanations + feasible-set-only reordering (never load-bearing)
 - `internal/retailer` — client for the willys-adapter (resolve, create wishlist)
+- `internal/recipefamily` — in-memory recipe-family/revision DAG core (immutable revisions)
+- `internal/recipeimport` — external recipe JSON-LD import into review candidates
+- `internal/httpclient` — shared JSON-over-HTTP transport for every backend client
 - `cmd/food-brain` — the CLI (`demo`, `plan`)
-- `migrations/0001_init.sql` — the durable PostgreSQL schema
+- `migrations/0001-0007` — the durable PostgreSQL schema
 
 The **willys-adapter** is built and lives with its TypeScript dependency in the willys-client
 repo (`apps/willys-adapter`, `npm run adapter`, port 8402); the Go side talks to it through

@@ -1,0 +1,7 @@
+# Spike-only override: point Directus at the restricted role (directus_ro)
+# for the DB-permission-boundary test (task 4.2). Disposable.
+services:
+  directus:
+    environment:
+      DB_USER: directus_ro
+      DB_PASSWORD: ro-password
