@@ -1,37 +1,48 @@
-// Package llm integrates the local Olla proxy (OpenAI-compatible) as the
-// ADDITIVE layer of the suggestion engine: it writes human-readable
-// explanations and proposes orderings among already-feasible candidates. Per
-// spec, it can never gate feasibility — every LLM proposal is validated against
-// the deterministic scorer's feasible set, and anything unknown or infeasible
-// is rejected. The planner works fully without this package (Available=false).
+// Package llm provides the AI provider abstraction for the suggestion engine's
+// ADDITIVE layer. A Provider is the transport-only seam for any OpenAI-compatible
+// chat-completion endpoint; the local Olla proxy (Client) is the primary
+// implementation. Above the provider, Explain and ProposeOrder build Swedish
+// prompts and validate LLM output against the deterministic scorer's feasible
+// set — the LLM can never gate feasibility, and the planner works fully without
+// this package (Available=false).
 package llm
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
+	"github.com/androidand/spisordning/internal/httpclient"
 	"github.com/androidand/spisordning/internal/scoring"
 )
 
-// Client talks to an OpenAI-compatible chat completions endpoint (Olla).
+// Provider is the transport-only seam for an OpenAI-compatible chat-completion
+// endpoint. It is deliberately backend-agnostic: a local Olla proxy, a
+// llama-skein endpoint, or a future cloud provider all satisfy it by
+// implementing Chat. Everything domain-specific (Swedish prompt-building,
+// feasible-set validation) lives above it — see Explain and ProposeOrder — so a
+// non-Olla provider never needs to know about scoring.ScoredCandidate.
+type Provider interface {
+	// Chat sends a system + user message to the endpoint and returns the
+	// assistant's content.
+	Chat(ctx context.Context, system, user string) (string, error)
+}
+
+// Client is the Olla implementation of Provider: it talks to an
+// OpenAI-compatible chat completions endpoint (Olla).
 type Client struct {
-	baseURL string
-	model   string
-	http    *http.Client
+	model string
+	http  *httpclient.Client
 }
 
 // New returns a Client for the endpoint at baseURL (e.g.
 // "http://192.168.1.240:40114/olla/openai/v1") using the given model name.
 func New(baseURL, model string) *Client {
 	return &Client{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		model:   model,
-		http:    &http.Client{Timeout: 120 * time.Second},
+		model: model,
+		http:  httpclient.New(baseURL, "olla", 120*time.Second),
 	}
 }
 
@@ -51,35 +62,20 @@ type chatResponse struct {
 	} `json:"choices"`
 }
 
-func (c *Client) chat(ctx context.Context, system, user string) (string, error) {
-	body, err := json.Marshal(chatRequest{
+// Chat implements Provider. It marshals an OpenAI chat-completions request and
+// POSTs it to baseURL + "/chat/completions". Every error is wrapped with an
+// "olla:" prefix (backend-specific, not part of the Provider contract);
+// non-2xx → "olla: HTTP %d"; empty choices → "olla: empty response".
+func (c *Client) Chat(ctx context.Context, system, user string) (string, error) {
+	var out chatResponse
+	if err := c.http.PostJSON(ctx, "/chat/completions", chatRequest{
 		Model: c.model,
 		Messages: []chatMessage{
 			{Role: "system", Content: system},
 			{Role: "user", Content: user},
 		},
-	})
-	if err != nil {
+	}, &out, nil); err != nil {
 		return "", err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		c.baseURL+"/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("content-type", "application/json")
-
-	res, err := c.http.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("olla: %w", err)
-	}
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("olla: HTTP %d", res.StatusCode)
-	}
-	var out chatResponse
-	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
-		return "", fmt.Errorf("olla: decode: %w", err)
 	}
 	if len(out.Choices) == 0 {
 		return "", fmt.Errorf("olla: empty response")
@@ -88,16 +84,19 @@ func (c *Client) chat(ctx context.Context, system, user string) (string, error) 
 }
 
 // Explain asks the LLM for a one-sentence Swedish explanation of why a meal
-// was chosen, grounded in the scorer's breakdown. Failure is non-fatal: the
-// caller falls back to the scorer's machine reason.
-func (c *Client) Explain(ctx context.Context, sc scoring.ScoredCandidate) (string, error) {
+// was chosen, grounded in the scorer's breakdown. It is an application-layer
+// helper above the transport-only Provider: it builds the Swedish prompt and
+// calls p.Chat. Failure is non-fatal: the caller falls back to the scorer's
+// machine reason.
+func Explain(p Provider, ctx context.Context, sc scoring.ScoredCandidate) (string, error) {
 	user := fmt.Sprintf(
-		"Rätt: %s. Poäng: preferens %+.2f, energi %+.2f, upprepning %+.2f, skollunch-krock %+.2f, kampanj %+.2f. "+
+		"Rätt: %s. Poäng: preferens %+.2f, energi %+.2f, upprepning %+.2f, skollunch-krock %+.2f, kampanj %+.2f, familiaritet %+.2f. "+
 			"Förklara på en mening, vardaglig svenska, varför denna rätt passar ikväll.",
 		sc.Candidate.Title, sc.Breakdown.Preference, sc.Breakdown.Effort,
 		sc.Breakdown.Repetition, sc.Breakdown.SchoolDedup, sc.Breakdown.Campaign,
+		sc.Breakdown.Familiarity,
 	)
-	return c.chat(ctx, "Du är en hjälpsam matplanerare för en familj.", user)
+	return p.Chat(ctx, "Du är en hjälpsam matplanerare för en familj.", user)
 }
 
 // proposal is the JSON shape the LLM must answer with in ProposeOrder.
@@ -114,7 +113,8 @@ type proposal struct {
 //
 // So the output is always a permutation of the feasible input — the LLM can
 // reorder within the feasible set, nothing more.
-func (c *Client) ProposeOrder(
+func ProposeOrder(
+	p Provider,
 	ctx context.Context,
 	ranked []scoring.ScoredCandidate,
 ) ([]scoring.ScoredCandidate, error) {
@@ -141,7 +141,7 @@ func (c *Client) ProposeOrder(
 		menu.String(),
 	)
 
-	answer, err := c.chat(ctx, "Du är en matplanerare. Svara alltid med giltig JSON.", user)
+	answer, err := p.Chat(ctx, "Du är en matplanerare. Svara alltid med giltig JSON.", user)
 	if err != nil {
 		return feasible, err // caller keeps scorer order
 	}
@@ -154,15 +154,15 @@ func (c *Client) ProposeOrder(
 	// Validate: only known feasible ids, no duplicates, omissions appended.
 	var out []scoring.ScoredCandidate
 	used := map[string]bool{}
-	for _, p := range proposals {
-		sc, ok := byID[p.MealieRecipeID]
-		if !ok || used[p.MealieRecipeID] {
+	for _, prop := range proposals {
+		sc, ok := byID[prop.MealieRecipeID]
+		if !ok || used[prop.MealieRecipeID] {
 			continue // invented or duplicated id: rejected
 		}
-		if p.Reason != "" {
-			sc.Reason = p.Reason
+		if prop.Reason != "" {
+			sc.Reason = prop.Reason
 		}
-		used[p.MealieRecipeID] = true
+		used[prop.MealieRecipeID] = true
 		out = append(out, sc)
 	}
 	for _, sc := range feasible {

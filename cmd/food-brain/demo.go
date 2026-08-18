@@ -60,9 +60,9 @@ func runDemo() {
 			flag = "  [infeasible: " + r.Reason + "]"
 		}
 		fmt.Printf("%d. %-24s score %+.3f%s\n", i+1, r.Candidate.Title, r.Score, flag)
-		fmt.Printf("     pref %+.2f  effort %+.2f  repeat %+.2f  school %+.2f  campaign %+.2f\n",
+		fmt.Printf("     pref %+.2f  effort %+.2f  repeat %+.2f  school %+.2f  campaign %+.2f  familiar %+.2f\n",
 			r.Breakdown.Preference, r.Breakdown.Effort, r.Breakdown.Repetition,
-			r.Breakdown.SchoolDedup, r.Breakdown.Campaign)
+			r.Breakdown.SchoolDedup, r.Breakdown.Campaign, r.Breakdown.Familiarity)
 	}
 
 	var winner *scoring.ScoredCandidate
@@ -80,7 +80,7 @@ func runDemo() {
 
 	chosen := planning.ChosenMeal{MealieRecipeID: winner.Candidate.MealieRecipeID}
 	for _, ing := range winner.Candidate.Ingredients {
-		chosen.Ingredients = append(chosen.Ingredients, planning.RecipeIngredient{
+		chosen.Ingredients = append(chosen.Ingredients, domain.Ingredient{
 			IngredientID: ing, Quantity: 1, Unit: "st", PreferredForm: "fresh",
 		})
 	}

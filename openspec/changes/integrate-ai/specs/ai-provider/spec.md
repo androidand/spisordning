@@ -21,7 +21,7 @@ The system SHALL define an AI provider interface that any OpenAI-compatible chat
 
 ### Requirement: AI SHALL only call application-layer tools, never raw SQL
 
-The AI provider abstraction SHALL NOT expose, accept, or construct a direct database connection or raw SQL execution path. Any action an AI-driven feature takes against Spisordning's data SHALL go through application-layer tools (owned by Epic A's `implement-mcp-server`), never through unrestricted SQL access.
+The AI provider abstraction SHALL NOT expose, accept, or construct a direct database connection or raw SQL execution path. Any action an AI-driven feature takes against Spisordning's data SHALL go through application-layer tools (owned by Epic A's `implement-mcp-server`), never through unrestricted SQL access. This is the same rule as `implement-mcp-server`'s "MCP tools never execute raw SQL" requirement; the two SHALL be kept in lockstep and neither redefines what counts as an application-layer tool.
 
 #### Scenario: No SQL execution path exists in the provider package
 

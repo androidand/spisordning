@@ -90,69 +90,59 @@ func runPlan(args []string) error {
 		}
 	}
 
-	var olla *llm.Client
+	var olla llm.Provider
 	if base := os.Getenv("OLLA_OPENAI_BASE_URL"); base != "" && os.Getenv("OLLA_MODEL") != "" {
 		olla = llm.New(base, os.Getenv("OLLA_MODEL"))
 	}
 
 	// ── Per-day planning ──────────────────────────────────────────────────────
-	type slot struct {
-		date   time.Time
-		winner scoring.ScoredCandidate
-	}
-	var chosenSlots []slot
-	var recent []domain.RecentMeal // chosen days feed the next day's repetition penalty
-
-	for i := 0; i < *days; i++ {
-		date := monday.AddDate(0, 0, i)
-		energy := domain.Effort(fam.KitchenEnergy[weekdayKeys[int(date.Weekday())]])
-
-		pctx := domain.PlanContext{
-			Day:             date,
-			People:          fam.People,
-			Preferences:     fam.Preferences,
-			KitchenEnergy:   energy,
-			RecentMealIDs:   recent,
-			SchoolLunchTags: schoolTags[date.Format("2006-01-02")],
-		}
-		ranked := scoring.Rank(candidates, pctx, scoring.DefaultWeights())
-
-		if olla != nil {
-			if reordered, err := olla.ProposeOrder(ctx, ranked); err == nil && len(reordered) > 0 {
-				ranked = reordered
+	planned := planning.PlanWeek(ctx, planning.WeekConfig{
+		Candidates:  candidates,
+		People:      fam.People,
+		Preferences: fam.Preferences,
+		EnergyFor: func(date time.Time) domain.Effort {
+			return domain.Effort(fam.KitchenEnergy[weekdayKeys[int(date.Weekday())]])
+		},
+		SchoolTagsFor: func(date time.Time) []string {
+			return schoolTags[date.Format("2006-01-02")]
+		},
+		Reorder: func(ctx context.Context, ranked []scoring.ScoredCandidate) []scoring.ScoredCandidate {
+			if olla == nil {
+				return ranked
 			}
-		}
-
-		picked := false
-		for _, sc := range ranked {
-			if sc.Feasible {
-				chosenSlots = append(chosenSlots, slot{date: date, winner: sc})
-				recent = append(recent, domain.RecentMeal{MealieRecipeID: sc.Candidate.MealieRecipeID, Served: date})
-				picked = true
-				break
+			if reordered, err := llm.ProposeOrder(olla, ctx, ranked); err == nil && len(reordered) > 0 {
+				return reordered
 			}
-		}
-		if !picked {
-			fmt.Printf("  %s: no feasible meal (take-away night?)\n", date.Format("Mon 2006-01-02"))
-		}
-	}
+			return ranked
+		},
+	}, monday, *days)
 
 	// ── Present the plan ──────────────────────────────────────────────────────
 	fmt.Println("\nProposed week:")
-	for _, s := range chosenSlots {
-		reason := s.winner.Reason
+	byDate := make(map[string]planning.PlannedSlot, len(planned))
+	for _, s := range planned {
+		byDate[s.Date.Format("2006-01-02")] = s
+	}
+	for i := 0; i < *days; i++ {
+		date := monday.AddDate(0, 0, i)
+		s, ok := byDate[date.Format("2006-01-02")]
+		if !ok {
+			fmt.Printf("  %s: no feasible meal (take-away night?)\n", date.Format("Mon 2006-01-02"))
+			continue
+		}
+		reason := s.Winner.Reason
 		if olla != nil {
-			if expl, err := olla.Explain(ctx, s.winner); err == nil && expl != "" {
+			if expl, err := llm.Explain(olla, ctx, s.Winner); err == nil && expl != "" {
 				reason = strings.TrimSpace(expl)
 			}
 		}
-		fmt.Printf("  %s  %-30s %s\n", s.date.Format("Mon 02/01"), s.winner.Candidate.Title, reason)
+		fmt.Printf("  %s  %-30s %s\n", date.Format("Mon 02/01"), s.Winner.Candidate.Title, reason)
 	}
 
 	// ── Shopping requirements ─────────────────────────────────────────────────
 	var meals []planning.ChosenMeal
-	for _, s := range chosenSlots {
-		meals = append(meals, ingredientLines[s.winner.Candidate.MealieRecipeID])
+	for _, s := range planned {
+		meals = append(meals, ingredientLines[s.Winner.Candidate.MealieRecipeID])
 	}
 	allReqs := planning.BuildRequirements(meals)
 	// Drop pantry staples (salt, pepper, oil, …) — assumed on hand, never bought.
@@ -237,7 +227,7 @@ func candidatesFromRefs(refs []mealie.RecipeRef) ([]domain.Candidate, map[string
 				continue // unmapped free-text line; ingredient_mapping review picks these up
 			}
 			// Canonical id: lowercase food name until the mapping table refines it.
-			id := strings.ToLower(strings.TrimSpace(ing.FoodName))
+			id := domain.CanonicalIngredientID(ing.FoodName)
 			c.Ingredients = append(c.Ingredients, id)
 			qty := ing.Quantity
 			if qty <= 0 {
@@ -247,7 +237,7 @@ func candidatesFromRefs(refs []mealie.RecipeRef) ([]domain.Candidate, map[string
 			if unit == "" {
 				unit = "st"
 			}
-			meal.Ingredients = append(meal.Ingredients, planning.RecipeIngredient{
+			meal.Ingredients = append(meal.Ingredients, domain.Ingredient{
 				IngredientID: id, Quantity: qty, Unit: unit,
 			})
 		}
