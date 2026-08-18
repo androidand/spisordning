@@ -2,21 +2,37 @@
 
 ## 1. Layering & import-boundary design
 
-- [ ] 1.1 Define the layer set explicitly: domain (pure, no I/O), application (use cases /
+- [x] 1.1 Define the layer set explicitly: domain (pure, no I/O), application (use cases /
       orchestration), persistence (Postgres repositories), httpapi (HTTP handlers/wiring). Write
       the allowed-dependency direction down (httpapi → application → domain;
       persistence → domain; nothing imports httpapi or persistence from domain/application).
-- [ ] 1.2 Evaluate `go-arch-lint` (declarative YAML allowed-imports config, existing Go tool) vs.
+      *Verified:* design.md §1 defines the five layers + composition root and the allowed
+      import directions; the rules are mechanically enforced by the architecture test (1.3).
+      `scoring` is classified as domain (pure, no-I/O domain service); `internal/planning` is
+      the sole application package today.
+- [x] 1.2 Evaluate `go-arch-lint` (declarative YAML allowed-imports config, existing Go tool) vs.
       a hand-rolled architecture test using `go list -deps`/`golang.org/x/tools/go/packages` to
       walk the import graph per package.
-- [ ] 1.3 Adopt one; wire it to fail the build on a boundary violation; document the decision and
+- [x] 1.3 Adopt one; wire it to fail the build on a boundary violation; document the decision and
       rejected alternative briefly (feeds a future ADR — "modular Clean Architecture" and
       "architecture enforcement" are both listed in `PLAN.md`'s ADR backlog).
+      *Verified:* design.md §2 records the comparison and the decision (hand-rolled test; zero
+      new dependencies; clearer edge-named failures; `go list -deps` is stable). Implementation:
+      `internal/architecturetest/` — `checker.go` (pure layer/rule logic, 6 unit tests on
+      synthetic graphs) + `architecture_test.go` (walks the real module graph with
+      `go list -deps` from the module root). `go test ./...` now fails on any boundary
+      violation (probe-verified: an unclassified internal package and pre-existing
+      `llm → scoring` / `retailer → planning` edges were caught and fixed).
 
 ## 2. Real persistence
 
-- [ ] 2.1 Choose and pin a Postgres driver (e.g. `pgx`); this is the module's first non-stdlib
+- [x] 2.1 Choose and pin a Postgres driver (e.g. `pgx`); this is the module's first non-stdlib
       dependency — record why in the proposal/impact, not silently.
+      *Verified:* `go.mod` pins `github.com/jackc/pgx/v5 v5.10.0`; design.md §3 records the
+      rationale (pgx is maintained, pgxpool, database/sql-compatible; lib/pq in maintenance
+      mode). `internal/persistence` exposes `Config`/`FromEnv`/`DSN`/`NewPool`; 5 unit tests
+      cover env parsing, `DATABASE_URL` precedence, missing-password error, and URL escaping;
+      the architecture test ensures pgx is confined to this package.
 - [ ] 2.2 Implement repositories for the tables `migrations/0001_init.sql` already defines:
       people, person_preferences, preference_observations, meal_events, meal_reactions,
       effort_profiles, planning_constraints, meal_plan_candidates, meal_plan_decisions,
