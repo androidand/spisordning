@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+
+	"github.com/androidand/spisordning/internal/ambient"
 )
 
 // TestRunPlan_EndToEnd drives the complete pipe against fake services:
@@ -114,15 +116,36 @@ func TestRunPlan_EndToEnd(t *testing.T) {
 	t.Setenv("OLLA_MODEL", "test-model")
 	t.Setenv("ADAPTER_URL", fakeAdapter.URL)
 
+	tonightPath := filepath.Join(dir, "tonight.json")
 	err := runPlan([]string{
 		"--family", familyPath,
 		"--school", "skolan",
 		"--week", "2026-W31",
 		"--days", "2",
 		"--create-wishlist",
+		"--write-tonight", tonightPath,
 	})
 	if err != nil {
 		t.Fatalf("runPlan: %v", err)
+	}
+
+	// The ambient projection (task 5.2) must be written and carry the planned dinners.
+	projBuf, err := os.ReadFile(tonightPath)
+	if err != nil {
+		t.Fatalf("tonight projection not written: %v", err)
+	}
+	var proj ambient.PlanFile
+	if err := json.Unmarshal(projBuf, &proj); err != nil {
+		t.Fatalf("parse tonight projection: %v", err)
+	}
+	if proj.Week != "2026-W31" {
+		t.Errorf("unexpected projection week %q", proj.Week)
+	}
+	if len(proj.Slots) != 2 {
+		t.Fatalf("expected 2 projected dinners, got %d", len(proj.Slots))
+	}
+	if proj.Slots[0].Tags == nil || proj.Slots[0].Title == "" {
+		t.Errorf("projected slot missing title/tags: %+v", proj.Slots[0])
 	}
 
 	mu.Lock()

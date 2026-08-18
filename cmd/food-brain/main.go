@@ -5,6 +5,8 @@
 //	                          shopping requirements → willys-adapter (optional wishlist)
 //	food-brain ingredients  — review surface: show the curated Swedish-unit → grams →
 //	                          package-size ingredient mappings (task 2.3)
+//	food-brain tonight      — ambient surface: show tonight's meal + record one-tap
+//	                          reactions (task 5.2; driven by Home Assistant / homeops)
 //
 // Running with no arguments is equivalent to `demo`.
 package main
@@ -30,8 +32,13 @@ func main() {
 		}
 	case "ingredients":
 		runIngredients()
+	case "tonight":
+		if err := runTonight(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "❌", err)
+			os.Exit(1)
+		}
 	default:
-		fmt.Fprintf(os.Stderr, "unknown command %q (want: demo, plan, ingredients)\n", cmd)
+		fmt.Fprintf(os.Stderr, "unknown command %q (want: demo, plan, ingredients, tonight)\n", cmd)
 		os.Exit(2)
 	}
 }

@@ -1,0 +1,53 @@
+{
+  "id": "weekly-meal-planner",
+  "name": "Weekly Meal Planner (demoted: thin scheduler -> food-brain)",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": ["monday"],
+              "triggerAtHour": 18,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "weekly-schedule",
+      "name": "Weekly schedule (Mon 18:00)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "command": "/opt/spisordning/food-brain plan --write-tonight /opt/spisordning/tonight.json --create-wishlist"
+      },
+      "id": "run-food-brain-plan",
+      "name": "Run food-brain plan (Go pipe)",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [520, 300]
+    }
+  ],
+  "connections": {
+    "Weekly schedule (Mon 18:00)": {
+      "main": [
+        [
+          {
+            "node": "Run food-brain plan (Go pipe)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

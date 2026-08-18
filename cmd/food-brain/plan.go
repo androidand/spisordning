@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/androidand/spisordning/internal/ambient"
 	"github.com/androidand/spisordning/internal/domain"
 	"github.com/androidand/spisordning/internal/llm"
 	"github.com/androidand/spisordning/internal/mealie"
@@ -40,6 +41,7 @@ func runPlan(args []string) error {
 	days := fs.Int("days", 7, "number of dinners to plan, starting Monday")
 	weekStr := fs.String("week", "", "ISO week to plan, e.g. 2026-W31 (default: next week)")
 	createWishlist := fs.Bool("create-wishlist", false, "resolve products and create the Willys wishlist (default: dry-run print)")
+	writeTonight := fs.String("write-tonight", "", "write the week projection for the ambient surface (task 5.2), e.g. tonight.json")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -139,6 +141,7 @@ func runPlan(args []string) error {
 
 	// ── Present the plan ──────────────────────────────────────────────────────
 	fmt.Println("\nProposed week:")
+	projection := ambient.PlanFile{Week: fmt.Sprintf("%d-W%02d", year, week)}
 	for _, s := range chosenSlots {
 		reason := s.winner.Reason
 		if olla != nil {
@@ -147,6 +150,26 @@ func runPlan(args []string) error {
 			}
 		}
 		fmt.Printf("  %s  %-30s %s\n", s.date.Format("Mon 02/01"), s.winner.Candidate.Title, reason)
+		projection.Slots = append(projection.Slots, ambient.Slot{
+			Date:   s.date.Format("2006-01-02"),
+			Title:  s.winner.Candidate.Title,
+			Reason: reason,
+			Tags:   s.winner.Candidate.Tags,
+		})
+	}
+
+	// ── Ambient projection (task 5.2) ─────────────────────────────────────────
+	// Written before the dry-run return so a plain `plan` run still feeds the
+	// Home Assistant surface.
+	if *writeTonight != "" {
+		buf, err := json.MarshalIndent(projection, "", "  ")
+		if err != nil {
+			return fmt.Errorf("write tonight: %w", err)
+		}
+		if err := os.WriteFile(*writeTonight, append(buf, '\n'), 0o644); err != nil {
+			return fmt.Errorf("write tonight: %w", err)
+		}
+		fmt.Printf("\nWrote ambient projection to %s (%d dinners)\n", *writeTonight, len(projection.Slots))
 	}
 
 	// ── Shopping requirements ─────────────────────────────────────────────────
