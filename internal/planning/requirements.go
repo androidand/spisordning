@@ -1,26 +1,21 @@
-// Package planning turns chosen meals into canonical, retailer-independent
-// shopping requirements. It deliberately knows nothing about Willys or any
-// retailer: a requirement names a canonical ingredient and an amount, and the
-// retailer adapter is responsible for resolving that to an actual product.
+// Package planning is the planner's core: it plans the week's dinners from
+// candidates (PlanWeek, see week.go) and turns chosen meals into canonical,
+// retailer-independent shopping requirements. It deliberately knows nothing
+// about Willys or any retailer: a requirement names a canonical ingredient and
+// an amount, and the retailer adapter is responsible for resolving that to an
+// actual product.
 package planning
 
-import "sort"
+import (
+	"sort"
 
-// RecipeIngredient is one line of a recipe's ingredient list, in canonical form.
-type RecipeIngredient struct {
-	IngredientID string
-	Quantity     float64
-	Unit         string
-	// AcceptableForms / PreferredForm carry through to the requirement so the
-	// adapter can prefer fresh but accept frozen, etc.
-	AcceptableForms []string
-	PreferredForm   string
-}
+	"github.com/androidand/spisordning/internal/domain"
+)
 
 // ChosenMeal is a decided slot: the recipe plus its canonical ingredient lines.
 type ChosenMeal struct {
 	MealieRecipeID string
-	Ingredients    []RecipeIngredient
+	Ingredients    []domain.Ingredient
 }
 
 // ShoppingRequirement is the retailer-independent output. It intentionally

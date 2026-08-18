@@ -4,7 +4,10 @@
 // can be exercised as pure functions.
 package domain
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Sentiment is a person's directional feeling about a food or dish, on a small
 // signed scale. It is combined with a Confidence in [0,1] before it influences
@@ -67,17 +70,41 @@ type Candidate struct {
 	Effort      Effort
 }
 
+// Ingredient is one structured line of a recipe's ingredient list in canonical
+// form — the single canonical ingredient-line type shared by the shopping
+// planner and the recipe hierarchy. IngredientID is the canonical ingredient id
+// (see CanonicalIngredientID), not a source or retailer id; RawText keeps the
+// human-readable line. AcceptableForms / PreferredForm are optional household
+// recipe knowledge ("prefer fresh, accept frozen") that carries through to the
+// shopping requirement so the retailer adapter can negotiate the form; most
+// lines leave them empty.
+type Ingredient struct {
+	IngredientID    string
+	Quantity        float64
+	Unit            string
+	RawText         string
+	AcceptableForms []string
+	PreferredForm   string
+}
+
+// CanonicalIngredientID derives the canonical ingredient id for a food name:
+// lowercased and trimmed. Until the ingredient_mapping table refines ids, the
+// canonical id of an unmapped food is its own normalized name.
+func CanonicalIngredientID(foodName string) string {
+	return strings.ToLower(strings.TrimSpace(foodName))
+}
+
 // PlanContext is everything about a given day/slot that is not the candidate
 // itself: who is eating, what they prefer, how much energy the cook has, what
 // was eaten recently, what the kids already had at school, and what is on
 // campaign at the family's store this week.
 type PlanContext struct {
-	Day            time.Time
-	People         []Person
-	Preferences    []Preference
-	KitchenEnergy  Effort // the most effort the cook can spend today
-	RecentMealIDs  []RecentMeal
-	SchoolLunchTags []string // tags of dishes served at school today
+	Day                 time.Time
+	People              []Person
+	Preferences         []Preference
+	KitchenEnergy       Effort // the most effort the cook can spend today
+	RecentMealIDs       []RecentMeal
+	SchoolLunchTags     []string        // tags of dishes served at school today
 	CampaignIngredients map[string]bool // canonical ingredient id -> on campaign
 }
 

@@ -11,15 +11,17 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
-// IngredientLine is one parsed ingredient line of an imported recipe. It
-// mirrors a row of recipe_import_candidate_ingredient. RawText is always kept
-// (the source line); Quantity/Unit are best-effort splits; Food is the derived
-// food name (the line minus quantity+unit) used by the review surface.
-// NeedsReview is always true at import: resolution to a canonical
-// ingredient.id happens in the review flow, reusing the
-// ingredient_mapping.needs_review pattern (see design.md, Section 5.1).
+// IngredientLine is one parsed ingredient line of an imported recipe — the
+// SOURCE shape for external web recipes: RawText is always kept (the source
+// line); Quantity/Unit are best-effort splits; Food is the derived food name
+// (the line minus quantity+unit) used by the review surface. NeedsReview is
+// always true at import: resolution to the canonical domain.Ingredient (id via
+// domain.CanonicalIngredientID) happens in the review flow, reusing the
+// ingredient_mapping.needs_review pattern (see design.md, Section 5.1). It is
+// deliberately not the canonical type.
 type IngredientLine struct {
 	LineNo      int
 	RawText     string
@@ -86,8 +88,8 @@ type Candidate struct {
 	SourceURL         string
 	ExternalID        string
 	LicenseNote       string
-	ImportedAt        string // RFC3339; set by the persistence layer
-	FirstServedAt     string // RFC3339; set when first planned/cooked
+	ImportedAt        time.Time // set by the persistence layer
+	FirstServedAt     time.Time // set when first planned/cooked
 	Status            CandidateStatus
 	PromotedVariantID string
 	Parsed            ParsedRecipe

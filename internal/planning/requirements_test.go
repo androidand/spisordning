@@ -1,14 +1,18 @@
 package planning
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/androidand/spisordning/internal/domain"
+)
 
 func TestBuildRequirements_AggregatesSameIngredientAndUnit(t *testing.T) {
 	meals := []ChosenMeal{
-		{MealieRecipeID: "a", Ingredients: []RecipeIngredient{
+		{MealieRecipeID: "a", Ingredients: []domain.Ingredient{
 			{IngredientID: "onion", Quantity: 2, Unit: "st"},
 			{IngredientID: "cream", Quantity: 200, Unit: "g", PreferredForm: "fresh"},
 		}},
-		{MealieRecipeID: "b", Ingredients: []RecipeIngredient{
+		{MealieRecipeID: "b", Ingredients: []domain.Ingredient{
 			{IngredientID: "onion", Quantity: 1, Unit: "st"},
 		}},
 	}
@@ -29,7 +33,7 @@ func TestBuildRequirements_AggregatesSameIngredientAndUnit(t *testing.T) {
 
 func TestBuildRequirements_SameIngredientDifferentUnitsStaySeparate(t *testing.T) {
 	meals := []ChosenMeal{
-		{MealieRecipeID: "a", Ingredients: []RecipeIngredient{
+		{MealieRecipeID: "a", Ingredients: []domain.Ingredient{
 			{IngredientID: "milk", Quantity: 5, Unit: "dl"},
 			{IngredientID: "milk", Quantity: 1, Unit: "l"},
 		}},
@@ -43,10 +47,10 @@ func TestBuildRequirements_SameIngredientDifferentUnitsStaySeparate(t *testing.T
 
 func TestBuildRequirements_UnionsAcceptableForms(t *testing.T) {
 	meals := []ChosenMeal{
-		{MealieRecipeID: "a", Ingredients: []RecipeIngredient{
+		{MealieRecipeID: "a", Ingredients: []domain.Ingredient{
 			{IngredientID: "cauliflower", Quantity: 1, Unit: "st", AcceptableForms: []string{"fresh"}, PreferredForm: "fresh"},
 		}},
-		{MealieRecipeID: "b", Ingredients: []RecipeIngredient{
+		{MealieRecipeID: "b", Ingredients: []domain.Ingredient{
 			{IngredientID: "cauliflower", Quantity: 1, Unit: "st", AcceptableForms: []string{"frozen"}},
 		}},
 	}
@@ -66,7 +70,7 @@ func TestBuildRequirements_UnionsAcceptableForms(t *testing.T) {
 
 func TestBuildRequirements_Deterministic(t *testing.T) {
 	meals := []ChosenMeal{
-		{MealieRecipeID: "a", Ingredients: []RecipeIngredient{
+		{MealieRecipeID: "a", Ingredients: []domain.Ingredient{
 			{IngredientID: "zucchini", Quantity: 1, Unit: "st"},
 			{IngredientID: "apple", Quantity: 4, Unit: "st"},
 			{IngredientID: "milk", Quantity: 1, Unit: "l"},
