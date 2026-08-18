@@ -1,6 +1,10 @@
 package planning
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/androidand/spisordning/internal/domain"
+)
 
 // Assumed staples (README inventory class ASSUMED_STAPLE): pantry basics every
 // kitchen is assumed to have, so they are never put on the shopping list. Kept
@@ -43,7 +47,7 @@ func IsAssumedStaple(ingredientID string) bool {
 // assumed-staples that are dropped. Returning the dropped set (rather than
 // silently filtering) lets the caller report what it skipped — silent
 // truncation would read as "nothing was assumed" when things were.
-func PartitionStaples(reqs []ShoppingRequirement) (buy, dropped []ShoppingRequirement) {
+func PartitionStaples(reqs []domain.ShoppingRequirement) (buy, dropped []domain.ShoppingRequirement) {
 	for _, r := range reqs {
 		if IsAssumedStaple(r.IngredientID) {
 			dropped = append(dropped, r)

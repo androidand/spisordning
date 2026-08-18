@@ -114,3 +114,17 @@ type RecentMeal struct {
 	MealieRecipeID string
 	Served         time.Time
 }
+
+// ShoppingRequirement is the retailer-independent output of planning: a
+// canonical ingredient plus an amount. It intentionally carries no retailer
+// product id — resolving it to an actual product is the retailer adapter's
+// job. It lives in domain because both the planner (application) and the
+// retailer client (infrastructure) exchange it without either depending on
+// the other's layer.
+type ShoppingRequirement struct {
+	IngredientID    string
+	Quantity        float64
+	Unit            string
+	AcceptableForms []string
+	PreferredForm   string
+}

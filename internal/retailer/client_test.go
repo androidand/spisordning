@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/androidand/spisordning/internal/planning"
+	"github.com/androidand/spisordning/internal/domain"
 )
 
 func TestResolveRequirements_RoundTrip(t *testing.T) {
@@ -37,7 +37,7 @@ func TestResolveRequirements_RoundTrip(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	reqs := []planning.ShoppingRequirement{{
+	reqs := []domain.ShoppingRequirement{{
 		IngredientID:    "cauliflower",
 		Quantity:        500,
 		Unit:            "g",
@@ -87,7 +87,7 @@ func TestResolveRequirements_PreservesReviewFlag(t *testing.T) {
 	defer srv.Close()
 
 	got, err := New(srv.URL).ResolveRequirements(context.Background(),
-		[]planning.ShoppingRequirement{{IngredientID: "saffron", Quantity: 1, Unit: "g"}}, nil)
+		[]domain.ShoppingRequirement{{IngredientID: "saffron", Quantity: 1, Unit: "g"}}, nil)
 	if err != nil {
 		t.Fatalf("ResolveRequirements: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestAdapterErrorSurfaces(t *testing.T) {
 	defer srv.Close()
 
 	_, err := New(srv.URL).ResolveRequirements(context.Background(),
-		[]planning.ShoppingRequirement{{IngredientID: "x", Quantity: 1, Unit: "g"}}, nil)
+		[]domain.ShoppingRequirement{{IngredientID: "x", Quantity: 1, Unit: "g"}}, nil)
 	if err == nil {
 		t.Fatal("expected error from 502 response")
 	}

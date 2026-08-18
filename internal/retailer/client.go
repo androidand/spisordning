@@ -8,8 +8,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/androidand/spisordning/internal/domain"
 	"github.com/androidand/spisordning/internal/httpclient"
-	"github.com/androidand/spisordning/internal/planning"
 )
 
 // Client talks to a running willys-adapter instance.
@@ -55,7 +55,7 @@ type SearchTerms map[string]string
 // its product resolutions, review flags intact.
 func (c *Client) ResolveRequirements(
 	ctx context.Context,
-	reqs []planning.ShoppingRequirement,
+	reqs []domain.ShoppingRequirement,
 	terms SearchTerms,
 ) ([]Resolution, error) {
 	payload := struct {

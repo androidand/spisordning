@@ -18,31 +18,21 @@ type ChosenMeal struct {
 	Ingredients    []domain.Ingredient
 }
 
-// ShoppingRequirement is the retailer-independent output. It intentionally
-// carries no retailer product id — that mapping is the adapter's job.
-type ShoppingRequirement struct {
-	IngredientID    string
-	Quantity        float64
-	Unit            string
-	AcceptableForms []string
-	PreferredForm   string
-}
-
 // BuildRequirements aggregates the ingredient lines of all chosen meals into one
 // requirement per (ingredient, unit) pair, summing quantities. Requirements for
 // the same ingredient in different units are kept separate (the adapter/mapping
 // layer handles unit reconciliation, not this pure aggregation). Output is
 // sorted by ingredient then unit for a deterministic result.
-func BuildRequirements(meals []ChosenMeal) []ShoppingRequirement {
+func BuildRequirements(meals []ChosenMeal) []domain.ShoppingRequirement {
 	type key struct{ ingredient, unit string }
-	agg := map[key]*ShoppingRequirement{}
+	agg := map[key]*domain.ShoppingRequirement{}
 
 	for _, meal := range meals {
 		for _, line := range meal.Ingredients {
 			k := key{line.IngredientID, line.Unit}
 			req, ok := agg[k]
 			if !ok {
-				req = &ShoppingRequirement{
+				req = &domain.ShoppingRequirement{
 					IngredientID:    line.IngredientID,
 					Unit:            line.Unit,
 					AcceptableForms: append([]string(nil), line.AcceptableForms...),
@@ -60,7 +50,7 @@ func BuildRequirements(meals []ChosenMeal) []ShoppingRequirement {
 		}
 	}
 
-	out := make([]ShoppingRequirement, 0, len(agg))
+	out := make([]domain.ShoppingRequirement, 0, len(agg))
 	for _, req := range agg {
 		out = append(out, *req)
 	}

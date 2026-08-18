@@ -1,0 +1,143 @@
+// Package architecturetest mechanically enforces the layering documented in
+// openspec/changes/establish-enforced-go-architecture/design.md: the import
+// graph of every package in this module is walked with `go list -deps` and
+// checked against a small set of boundary rules. A violation fails
+// `go test ./...` (and therefore CI) with the exact offending edge.
+//
+// Layers:
+//
+//	domain       internal/domain, internal/recipefamily, internal/scoring — pure, no I/O
+//	application  internal/planning                                — use-case logic
+//	client       internal/mealie, internal/skolmaten, internal/retailer,
+//	             internal/llm, internal/httpclient, internal/recipeimport
+//	persistence  internal/persistence                      — Postgres repos
+//	httpapi      internal/httpapi                          — HTTP handlers
+//	cmd          cmd/...                                   — composition root
+//
+// Every future internal/ package MUST be classified here; an unclassified
+// internal/ package is a violation by design.
+package architecturetest
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+)
+
+// Layer is one of the documented layers, or External/Test for non-module and
+// self-test packages.
+type Layer string
+
+const (
+	Domain      Layer = "domain"
+	Application Layer = "application"
+	Client      Layer = "client"
+	Persistence Layer = "persistence"
+	HTTPAPI     Layer = "httpapi"
+	Cmd         Layer = "cmd"
+	Test        Layer = "test"
+	External    Layer = "external"
+	Unknown     Layer = "unknown"
+)
+
+type prefix struct {
+	layer    Layer
+	prefixes []string
+}
+
+var layerPrefixes = []prefix{
+	{Cmd, []string{"cmd"}},
+	{Test, []string{"internal/architecturetest"}},
+	{Domain, []string{"internal/domain", "internal/recipefamily", "internal/scoring"}},
+	{Application, []string{"internal/planning"}},
+	{Client, []string{
+		"internal/mealie",
+		"internal/skolmaten",
+		"internal/retailer",
+		"internal/llm",
+		"internal/httpclient",
+		"internal/recipeimport",
+	}},
+	{Persistence, []string{"internal/persistence"}},
+	{HTTPAPI, []string{"internal/httpapi"}},
+}
+
+// layerOf classifies a full import path relative to the module.
+func layerOf(module, pkg string) Layer {
+	if pkg == module {
+		return Cmd
+	}
+	if !strings.HasPrefix(pkg, module+"/") {
+		return External
+	}
+	rel := strings.TrimPrefix(pkg, module+"/")
+	for _, p := range layerPrefixes {
+		for _, pref := range p.prefixes {
+			if rel == pref || strings.HasPrefix(rel, pref+"/") {
+				return p.layer
+			}
+		}
+	}
+	if strings.HasPrefix(rel, "internal/") {
+		return Unknown
+	}
+	return External
+}
+
+// rule is one boundary constraint: it reports a violation when bad(from, to)
+// is true.
+type rule struct {
+	name string
+	bad  func(from, to Layer) bool
+}
+
+var rules = []rule{
+	{"domain must not import any non-domain internal package", func(f, t Layer) bool {
+		return f == Domain && t != Domain && t != External && t != Test
+	}},
+	{"application must not import clients, persistence, httpapi, or cmd", func(f, t Layer) bool {
+		return f == Application && (t == Client || t == Persistence || t == HTTPAPI || t == Cmd || t == Unknown)
+	}},
+	{"clients must not import application, persistence, httpapi, or cmd", func(f, t Layer) bool {
+		return f == Client && (t == Application || t == Persistence || t == HTTPAPI || t == Cmd || t == Unknown)
+	}},
+	{"persistence must import only domain and external packages", func(f, t Layer) bool {
+		return f == Persistence && t != Domain && t != External && t != Test
+	}},
+	{"httpapi must not import persistence", func(f, t Layer) bool {
+		return f == HTTPAPI && t == Persistence
+	}},
+	{"no internal package may import the cmd composition root", func(f, t Layer) bool {
+		return t == Cmd
+	}},
+	{"every internal package must be classified into a layer", func(f, t Layer) bool {
+		return f == Unknown || t == Unknown
+	}},
+}
+
+// Check verifies the import graph (from package -> its direct imports) against
+// the layer rules and returns a sorted list of human-readable violations.
+func Check(module string, deps map[string][]string) []string {
+	var violations []string
+	froms := make([]string, 0, len(deps))
+	for from := range deps {
+		froms = append(froms, from)
+	}
+	sort.Strings(froms)
+
+	for _, from := range froms {
+		fl := layerOf(module, from)
+		if fl == External {
+			continue // only module packages are policed
+		}
+		for _, to := range deps[from] {
+			tl := layerOf(module, to)
+			for _, r := range rules {
+				if r.bad(fl, tl) {
+					violations = append(violations, fmt.Sprintf("%s: %s -> %s", r.name, from, to))
+				}
+			}
+		}
+	}
+	return violations
+}

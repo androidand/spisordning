@@ -1,6 +1,10 @@
 package planning
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/androidand/spisordning/internal/domain"
+)
 
 func TestIsAssumedStaple(t *testing.T) {
 	staples := []string{"salt", "peppar", "socker", "olja", "smör", "vatten", "salt "}
@@ -18,7 +22,7 @@ func TestIsAssumedStaple(t *testing.T) {
 }
 
 func TestPartitionStaples(t *testing.T) {
-	reqs := []ShoppingRequirement{
+	reqs := []domain.ShoppingRequirement{
 		{IngredientID: "falukorv", Quantity: 550, Unit: "g"},
 		{IngredientID: "salt", Quantity: 1, Unit: "tsk"},
 		{IngredientID: "matlagningsgrädde", Quantity: 2.5, Unit: "dl"},
