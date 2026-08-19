@@ -61,3 +61,24 @@ deliberately:
 Connection config comes from environment (`DATABASE_URL` or the individual
 `POSTGRES_HOST/PORT/DB/USER/PASSWORD` vars used by docker-compose), parsed in
 `internal/persistence` so callers and tests never handle connection strings by hand.
+
+## 4. OpenAPI → Go codegen (task 3.2)
+
+**Decision: `github.com/oapi-codegen/oapi-codegen/v2` (pinned `v2.8.0`), `-generate types` only.**
+
+- Tengil (this org's convention) uses oapi-codegen; `openapitools.json` pins it
+  (`generator-cli.version: 7.17.0` is the OpenAPI *Generator* CLI, a different tool —
+  tengil's Go codegen is via oapi-codegen, per its Makefile `generate-tengil-go.sh`).
+- Spisordning stays stdlib-only (`net/http`, no `chi`/`echo`/`gin`), so we generate
+  **types only** — never the chi/echo server stubs that would pull a router dependency.
+- The `oapi-codegen/v2/cmd/oapi-codegen` command is recorded in `tools/tools.go`
+  (build-tagged `//go:build tools`), so `go mod tidy` pins it without it entering the
+  normal build graph or `go list -deps` (the layer guard never sees it).
+- Generated types live in `internal/openapi/` (`types.gen.go`, DO NOT EDIT), classified
+  as `Domain` (pure data, no I/O) in the layer checker. The `//go:generate` directive in
+  `internal/openapi/doc.go` and the `Makefile generate` target both reproduce it.
+- `api/openapi.yaml` is the single authored contract; CI `codegen` job regenerates and
+  `git diff --exit-code` so drift fails the build. Codegen surfaced two real spec bugs
+  (3.1 `exclusiveMinimum` in a 3.0 doc; a property-level `$ref`) — both fixed.
+- The hand-written stdlib handlers (`internal/httpapi`) satisfy this contract today;
+  migrating them to consume the generated types is the follow-on handoff (still task 3.3).

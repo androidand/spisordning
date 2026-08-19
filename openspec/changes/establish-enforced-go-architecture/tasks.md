@@ -76,10 +76,23 @@
       Meals, MealPlans, MealPlanCandidate/Decision, ShoppingRequirement, IngredientMapping,
       EffortProfile schemas + /health,/people,/preferences,/recipes,/meals,/plans,... paths.
       `python3 -c yaml.safe_load` confirms valid YAML; fields mirror `migrations/0001_init.sql`.
-- [ ] 3.2 Pick and pin an OpenAPI-to-Go codegen tool (survey what `tengil` uses via
+- [x] 3.2 Pick and pin an OpenAPI-to-Go codegen tool (survey what `tengil` uses via
       `openapitools.json` as a starting reference) and wire codegen into a `go generate` or
-      Makefile step. *(Deferred to 3.3: served via hand-wired stdlib handlers from 3.1's
-      contract; codegen is the later handoff.)*
+      Makefile step.
+      *Verified:* chose **oapi-codegen v2** (matching tengil's go.mod:
+      `github.com/oapi-codegen/oapi-codegen/v2`) — generates `types` only (`-generate types`),
+      because spisordning stays stdlib-only and must not pull `chi` (chi-server would). Pinned
+      **v2.8.0** in go.mod via `tools/tools.go` (build-tagged `tools` package → excluded from
+      `go list -deps`, so the layer guard stays clean). `internal/openapi/types.gen.go` is the
+      committed, generated contract (DO NOT EDIT) with a `//go:generate` directive in
+      `internal/openapi/doc.go`; `go generate ./internal/openapi` reproduces it exactly (idempotent).
+      Two real spec bugs surfaced by the codegen step and fixed: (1) 3.1-style `exclusiveMinimum: 0`
+      is invalid in a 3.0.3 doc → changed to `minimum: 0, exclusiveMinimum: true`; (2) a property-level
+      `$ref` to `#/components/schemas/Ingredient/properties/id` broke oapi-codegen's ref resolution
+      → inlined the type. `Makefile` adds `generate`/`verify-codegen` targets; CI `codegen` job
+      regenerates + `git diff --exit-code` so spec drift fails the build. Codegen only covers the
+      contract types — the hand-written stdlib handlers (3.3) are the later handoff to use them;
+      they already satisfy the contract today.
 - [x] 3.3 Implement HTTP handlers in the httpapi layer that call into the application layer only
       (never directly into persistence), satisfying the generated server interface.
       *Verified:* `internal/httpapi/{people,preferences,recipes,meals}.go` implement `/people`
