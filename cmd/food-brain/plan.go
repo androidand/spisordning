@@ -148,6 +148,19 @@ func runPlan(args []string) error {
 	// Drop pantry staples (salt, pepper, oil, …) — assumed on hand, never bought.
 	reqs, staples := planning.PartitionStaples(allReqs)
 
+	// ── Persist the plan to Postgres (task 2.3) ─────────────────────────────────
+	// No-op when no database is configured (openStore returns nil); the CLI
+	// behavior is otherwise unchanged.
+	if store, perr := openStore(ctx); perr != nil {
+		fmt.Fprintf(os.Stderr, "⚠ persistence unavailable; plan not persisted: %v\n", perr)
+	} else if store != nil {
+		if err := persistPlan(ctx, store, monday, planned, reqs); err != nil {
+			fmt.Fprintf(os.Stderr, "⚠ could not persist plan to Postgres: %v\n", err)
+		} else {
+			fmt.Printf("✅ persisted plan for week %d-W%02d to Postgres (meal_plan + candidates + decisions + shopping_requirements)\n", year, week)
+		}
+	}
+
 	fmt.Printf("\nShopping requirements (%d; %d assumed-staple item(s) skipped):\n", len(reqs), len(staples))
 	for _, r := range reqs {
 		fmt.Printf("  - %-24s %g %s\n", r.IngredientID, r.Quantity, r.Unit)

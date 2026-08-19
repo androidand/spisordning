@@ -73,6 +73,64 @@ func TestMealPlan_CreateGetByWeek(t *testing.T) {
 	}
 }
 
+func TestMealPlan_GetOrCreateMealPlan(t *testing.T) {
+	s := skipWithoutDB(t)
+	ctx := context.Background()
+	weekStart := date(t, "2043-03-01") // a fresh week
+	// First call creates the 'draft' plan row.
+	p1, err := s.GetOrCreateMealPlan(ctx, weekStart)
+	if err != nil {
+		t.Fatalf("GetOrCreateMealPlan create: %v", err)
+	}
+	if p1.ID == 0 || p1.Status != "draft" {
+		t.Fatalf("first call = %+v", p1)
+	}
+	// Second call returns the SAME row (not a duplicate).
+	p2, err := s.GetOrCreateMealPlan(ctx, weekStart)
+	if err != nil {
+		t.Fatalf("GetOrCreateMealPlan get: %v", err)
+	}
+	if p2.ID != p1.ID {
+		t.Fatalf("expected same plan id, got %d and %d", p1.ID, p2.ID)
+	}
+	// Anchor a full plan artifact set against the single plan (2.3 wiring surface).
+	if err := s.InsertCandidate(ctx, MealPlanCandidate{
+		PlanID: p1.ID, SlotDate: weekStart, MealieRecipeID: "r-1",
+		Score: 0.85, Breakdown: map[string]float64{"pref": 0.5, "effort": 0.35},
+		Feasible: true, Rank: 0,
+	}); err != nil {
+		t.Fatalf("InsertCandidate: %v", err)
+	}
+	if err := s.SetDecision(ctx, MealPlanDecision{
+		PlanID: p1.ID, SlotDate: weekStart, MealieRecipeID: "r-1",
+	}); err != nil {
+		t.Fatalf("SetDecision: %v", err)
+	}
+	if err := s.InsertShoppingRequirement(ctx, ShoppingRequirement{
+		PlanID: p1.ID, IngredientID: "köttfärs", Quantity: 400, Unit: "g",
+	}); err != nil {
+		t.Fatalf("InsertShoppingRequirement: %v", err)
+	}
+	cands, _ := s.ListCandidates(ctx, p1.ID)
+	decs, _ := s.ListDecisions(ctx, p1.ID)
+	reqs, _ := s.ListShoppingRequirements(ctx, p1.ID)
+	if len(cands) != 1 || len(decs) != 1 || len(reqs) != 1 {
+		t.Fatalf("anchored artifacts: %d cand %d dec %d req", len(cands), len(decs), len(reqs))
+	}
+}
+
+func TestMealPlan_GetOrCreateMealPlan_NotDuplicatedAcrossWeeks(t *testing.T) {
+	s := skipWithoutDB(t)
+	ctx := context.Background()
+	a := date(t, "2043-03-08")
+	b := date(t, "2043-03-15")
+	pa, _ := s.GetOrCreateMealPlan(ctx, a)
+	pb, _ := s.GetOrCreateMealPlan(ctx, b)
+	if pa.ID == pb.ID {
+		t.Fatalf("different weeks must not share a plan row")
+	}
+}
+
 func TestMealPlan_CandidatesAndDecisionsRoundTrip(t *testing.T) {
 	s := skipWithoutDB(t)
 	ctx := context.Background()

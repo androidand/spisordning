@@ -2,10 +2,12 @@ package persistence
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -73,6 +75,24 @@ func (s *Store) GetMealPlanByWeek(ctx context.Context, weekStart time.Time) (Mea
 		return MealPlan{}, fmt.Errorf("persistence: get meal_plan by week: %w", err)
 	}
 	return m, nil
+}
+
+// GetOrCreateMealPlan returns the plan row for weekStart, creating it as 'draft'
+// if none exists yet (idempotent). This is the entry point the planner (2.3) uses
+// to anchor candidates, decisions and shopping requirements to a plan.
+func (s *Store) GetOrCreateMealPlan(ctx context.Context, weekStart time.Time) (MealPlan, error) {
+	m, err := s.GetMealPlanByWeek(ctx, weekStart)
+	if err == nil {
+		return m, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return MealPlan{}, err
+	}
+	id, err := s.CreateMealPlan(ctx, weekStart)
+	if err != nil {
+		return MealPlan{}, err
+	}
+	return s.GetMealPlan(ctx, id)
 }
 
 // SetMealPlanStatus updates a plan's status.
