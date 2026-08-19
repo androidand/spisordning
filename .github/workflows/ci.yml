@@ -112,7 +112,23 @@ jobs:
           context: .
           push: false
           tags: ghcr.io/${{ github.repository_owner }}/food-brain:ci
-          # food-brain is CLI-only today; this ensures the Dockerfile stays
-          # buildable as it grows an HTTP server (task 4.1).
+          # food-brain now runs an HTTP server (api/openapi.yaml); this build
+          # ensures the multi-stage Dockerfile stays buildable (task 4.1).
 
-  migrations:
+   codegen:
+     name: openapi codegen up-to-date
+     runs-on: ubuntu-latest
+     # Fails if api/openapi.yaml drifts from internal/openapi/types.gen.go.
+     # Tool: oapi-codegen v2 (see tools/tools.go + Makefile generate target).
+     steps:
+       - uses: actions/checkout@v4
+       - uses: actions/setup-go@v5
+         with:
+           go-version: '1.26.1'
+           cache: true
+       - name: regenerate types from spec
+         run: go generate ./internal/openapi
+       - name: assert no diff (spec ↔ generated types in sync)
+         run: git diff --exit-code -- internal/openapi/types.gen.go
+
+   migrations:
