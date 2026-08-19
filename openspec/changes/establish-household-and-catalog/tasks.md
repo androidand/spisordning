@@ -1,3 +1,13 @@
+**Update (2026-08-19): a deliberately minimal first slice has landed** —
+`migrations/0008_household_catalog_minimal.sql` + `internal/persistence/catalog.go`. Scope was
+narrowed to exactly what `implement-pantry-inventory` needs as FK targets: `household` (no
+`account`/`household_membership`, no changes to `person`), `product`, `product_identifier`,
+`product_ingredient_mapping`. Everything else in this file — restrictions, ingredient forms,
+substitution, the full unit/unit_conversion system, canonicalization — is still fully open;
+only the three boxes below that this narrow slice genuinely satisfies are checked. Do not read
+"some boxes checked" as "this change is underway" — it's one deliberately small PR unblocking a
+downstream change, not a start on the rest of this scope.
+
 ## 1. Household & identity vocabulary
 
 - [ ] 1.1 Confirm the candidate vocabulary from PLAN.md's "Household" section: `households`,
@@ -25,9 +35,12 @@
 
 ## 3. Ingredient model (canonical vs. Product)
 
-- [ ] 3.1 Confirm canonical semantic Ingredient (e.g. "chicken breast") stays distinct from
+- [x] 3.1 Confirm canonical semantic Ingredient (e.g. "chicken breast") stays distinct from
       Product (e.g. "Garant Kycklingfilé 900g") — treat this as non-negotiable per PLAN.md
-      unless research surfaces overwhelming contrary evidence; document if any surfaces.
+      unless research surfaces overwhelming contrary evidence; document if any surfaces. —
+      structurally enforced 2026-08-19: `product` (name/brand/package_size) is a separate table
+      from `ingredient` (id/display only, unchanged); no brand/package column was added to
+      `ingredient`.
 - [ ] 3.2 Audit existing `ingredient` table (`id`, `display`) for what's missing to support
       forms/substitution without polluting it with brand/package data.
 - [ ] 3.3 Design ingredient canonicalization (merge duplicates) without breaking FKs from
@@ -87,11 +100,14 @@
 - [ ] 7.1 Model `products`, `product_identifiers`, `product_ingredient_mappings` per PLAN.md's
       candidate, covering commercial packaged, commercial unpackaged, and manual/generic
       products.
-- [ ] 7.2 Confirm barcode is optional on `product_identifiers`, not a required identity field.
-- [ ] 7.3 Explicitly stop at the `Product` boundary: do not model `RetailerProduct` or
+- [x] 7.2 Confirm barcode is optional on `product_identifiers`, not a required identity field. —
+      `product_identifier` is a separate table with no row required per product (2026-08-19);
+      `Store.GetProduct`/`CreateProduct` never touch it.
+- [x] 7.3 Explicitly stop at the `Product` boundary: do not model `RetailerProduct` or
       `StoreOffer` here — confirm the expected relationship
       `Ingredient ← Product ← RetailerProduct → StoreOffer` from PLAN.md's "Retailer Identity"
-      section stays intact for Epic F to build on.
+      section stays intact for Epic F to build on. — confirmed 2026-08-19: this slice adds no
+      retailer/offer table or column.
 - [ ] 7.4 Reconcile against today's Mealie-food-id-keyed `ingredient_mapping` table — decide
       whether it is superseded, kept parallel, or folded into `product_ingredient_mapping`
       later (do not rename/drop it in this change).
