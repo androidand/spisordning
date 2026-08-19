@@ -82,18 +82,20 @@
       contract; codegen is the later handoff.)*
 - [x] 3.3 Implement HTTP handlers in the httpapi layer that call into the application layer only
       (never directly into persistence), satisfying the generated server interface.
-      *Verified:* `internal/httpapi/people.go` implements `/people` (GET list, GET {id}, POST
-      create) against a `PersonService` interface defined in httpapi (DTOs are transport-local;
-      httpapi never imports persistence). `cmd/food-brain/people_adapter.go` is the composition
-      root wiring `*persistence.Store` as that service, translating `persistence.Person` ↔
-      `PersonResponse`, generating IDs (crypto/rand, stdlib-only), and mapping `pgx.ErrNoRows` →
-      `httpapi.ErrNotFound` (404). `/health` always serves; resource routes nil-guard when no DB.
-      `internal/httpapi/people_test.go` covers happy-path + sad-path (list, get-found, get-404,
-      create, create empty-name→400, create bad-JSON→400, internal-error→500, health, nil-svc)
-      with a fake `PersonService` (147 passed / 14 packages; layer-guard clean). Note: `/meals`
-      and `/planning-constraints` handlers still need persistence read methods first — 3.3 starts
-      scope is /people only; the MealEvent/PlanningConstraint persistence layer has writes but
-      no list/get yet.
+      *Verified:* `internal/httpapi/{people,preferences,recipes,meals}.go` implement `/people`
+      (GET list, GET {id}, POST create), `/preferences` (GET list, optional `?personId`),
+      `/recipes` (GET list), and `/meals` (POST create + reactions). Each route is backed by a
+      service interface defined in httpapi with transport-local DTOs — httpapi never imports
+      persistence. `cmd/food-brain/adapters.go` (`storeAdapter`) is the composition root that
+      implements PersonService, PreferencesService, RecipesService, MealsService over
+      `*persistence.Store`: maps row types↔DTOs, generates person IDs (crypto/rand, stdlib-only),
+      and maps `pgx.ErrNoRows → httpapi.ErrNotFound` (404). `/health` always serves; resource
+      routes nil-guard when no DB is configured. Added `Store.ListRecipeRefs` (+ test) for
+      `/recipes`. Handler-side input validation: /people name, /meals mealie_recipe_id + served_on
+      date format + reaction sentiment range. `internal/httpapi/*_test.go` cover happy + sad paths
+      with fakes (160 passed / 15 packages; `TestLayeredArchitecture` clean). Open item: `/meals`
+      GET (list) and `/planning-constraints` GET still need persistence read methods (writes +
+      create exist).
 - [ ] 3.4 Surface tonight's meal + one-tap reactions via Home Assistant ...
 - [ ] 3.5 API integration tests exercising the HTTP layer end-to-end against a real handler +
       test database.
@@ -112,6 +114,10 @@
       Directus; the integrate-directus-workbench change was research-only (no Go code), so
       food-brain has no Directus runtime dependency and boots with/without it.
 - [ ] 4.4 Confirm `docker compose up -d` boots `postgres` + `willys-adapter` + `food-brain`
+      and that `GET /health` against the running `food-brain` container returns 200.
+      *(Deferred: Docker daemon unavailable on this host; the CI `docker` build job
+      confirms the image builds and the compose service definition is validated by
+      `docker compose config`.)*
       together and migrations apply cleanly on first boot. *(Blocked locally: the Docker daemon
       is not running on this host. `docker compose config` validates the wiring; the CI
       migrations job (5.3) will verify the full boot against a real Postgres. Live check:
