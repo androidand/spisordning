@@ -28,13 +28,27 @@ content is read from, and is a close sibling of `research-barcode-scanning-devic
 barcode is read back through the same physical scanning hardware that change researches, on the
 check-out path).
 
+**Update (2026-08-19): the household already owns a Bluetooth Brother label printer** and wants
+to test against it directly rather than only surveying hardware in the abstract. This grounds
+the hardware-survey scope (§2 below) with a concrete first candidate rather than leaving the
+choice fully open, and the household has also confirmed printing labels for home-cooked meals
+put in the freezer — not just retailer-purchased items — is a primary goal, not an edge case.
+`implement-pantry-inventory`'s design has since been amended (`design.md` D8) to resolve the
+"how does a home-cooked meal become inventory at all" question this proposal originally flagged
+as open: a `RecordPurchase` with `source: 'home_prepared'` creates the lot, no new event kind
+needed. This change's own scope is unaffected by that resolution — it still only needs the
+resulting `InventoryLot` to exist, whichever `source` created it — but the print-trigger design
+below no longer treats the home-cooked-meal case as blocked on an unresolved upstream question.
+
 ## What Changes
 
-- Research consumer/small-business thermal label printer options (connectivity: USB, Bluetooth,
-  or network; common candidates worth surveying include Brother QL-series, Niimbot, Dymo, and
-  Zebra desktop printers — nothing pre-decided, survey before recommending) and their
-  printing-API surfaces (vendor SDK, ESC/POS-style raw commands, or a print-to-image/PDF
-  approach).
+- Research consumer/small-business thermal label printer options, **starting with the
+  household's own Bluetooth Brother printer as the primary/first candidate to test against**
+  (connectivity: USB, Bluetooth, or network; other candidates worth surveying as fallback/
+  comparison include Niimbot, Dymo, and Zebra desktop printers) and their printing-API surfaces
+  (vendor SDK, ESC/POS-style raw commands, or a print-to-image/PDF approach) — for the Brother
+  unit specifically, identify the exact model and confirm its Bluetooth printing API/SDK before
+  assuming general Brother QL-series documentation applies unmodified.
 - Design label content: what a label displays (ingredient/product name, quantity where known,
   stored-on date, best-before/use-by if known, and the storage `InventoryLocation` it's
   destined for) and a scannable code (barcode or QR — evaluate which prints more reliably at
@@ -46,11 +60,13 @@ check-out path).
   `research-barcode-scanning-devices`' check-out flow — design how the scanning flow tells the
   two apart (e.g. a distinguishable code prefix/format, or a distinct symbology).
 - Define **print trigger points**: on a `RecordPurchase` (optionally, not mandatory — a
-  printer is described as optional hardware), and/or an explicit "print label for this lot"
-  action independent of purchase timing (e.g. printing a label for a home-cooked meal frozen
-  for later, which isn't a `PURCHASE` at all — flag this as a scope question, since
-  `implement-pantry-inventory`'s event vocabulary doesn't currently have a kind for "portioned
-  and frozen a cooked meal").
+  printer is described as optional hardware), and an explicit "print label for this lot" action
+  independent of purchase timing — this second path is a first-class goal, not a deferred edge
+  case, since printing a label for a home-cooked meal portioned and frozen for later is one of
+  the household's stated primary use cases. `implement-pantry-inventory` `design.md` D8 already
+  resolves how such a lot comes to exist (`RecordPurchase` with `source: 'home_prepared'`); this
+  change designs the print action itself, triggerable from any existing lot regardless of how it
+  was created.
 - Define the **check-out loop**: scanning a lot's printed label resolves directly and
   unambiguously to that `InventoryLot`, feeding `RecordConsume`/`RecordDiscard`/
   `RecordMarkEmpty` — the same command surface `research-barcode-scanning-devices` targets for
@@ -58,10 +74,11 @@ check-out path).
 
 ## Non-Goals
 
-- No printer purchase or implementation code — this change is research and design only.
+- No printer purchase (the household's Bluetooth Brother unit is the test target already on
+  hand) or implementation code — this change is research and design only.
 - No redesign of `implement-pantry-inventory`'s event vocabulary or lot model — consumed, not
-  re-litigated (though the "frozen home-cooked meal" scope question above is flagged for that
-  change or a future one to resolve, not decided here).
+  re-litigated. The `home_prepared` source and the ingredient-only lot it produces (D8) are
+  taken as given here.
 - No redesign of GTIN scanning or resolution — `research-barcode-scanning-devices`' and
   `implement-pantry-inventory`'s concern; this change only defines how its own lot-reference
   codes stay distinguishable from GTINs.

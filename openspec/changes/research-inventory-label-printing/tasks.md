@@ -11,16 +11,20 @@
 
 ## 2. Printer hardware research
 
-- [ ] 2.1 Survey consumer/small-business thermal label printer options (connectivity: USB,
-      Bluetooth, network) — candidates to evaluate include Brother QL-series, Niimbot, Dymo,
-      Zebra desktop printers; do not pre-commit to a vendor before surveying
-- [ ] 2.2 For each surveyed candidate, determine the printing-API surface: vendor SDK, raw
-      ESC/POS-style commands, or print-to-image/PDF via a generic driver
-- [ ] 2.3 Evaluate label stock cost/availability and freezer-durability (a label must survive
-      frost, moisture, and handling — confirm this is a real differentiator between candidates,
-      not assumed)
-- [ ] 2.4 Evaluate connectivity practicality for a household kitchen setting (Bluetooth pairing
-      reliability vs. USB-tethered-to-a-specific-device vs. network-printer discoverability)
+- [ ] 2.1 Identify the exact model of the household's existing Bluetooth Brother label printer
+      and confirm its printing API/SDK (Brother's own SDK, generic Bluetooth-printing library,
+      or raw command protocol) — this is the primary test target, not a hypothetical candidate
+- [ ] 2.2 Test-print a minimal label against the household's actual printer once 2.1 identifies
+      the API surface, to validate the connectivity/API assumption before designing further
+      against it
+- [ ] 2.3 Survey other consumer/small-business thermal label printer options as fallback/
+      comparison only (Niimbot, Dymo, Zebra desktop printers) — not required if the household's
+      own Brother unit proves sufficient, but useful context for the recommendation
+- [ ] 2.4 Evaluate label stock cost/availability and freezer-durability (a label must survive
+      frost, moisture, and handling — confirm this is a real differentiator, not assumed;
+      confirm what label stock the household's specific Brother model accepts)
+- [ ] 2.5 Evaluate Bluetooth pairing reliability in a household kitchen setting for the specific
+      printer on hand
 
 ## 3. Label content design
 
@@ -51,11 +55,13 @@
 
 - [ ] 5.1 Design the optional print-on-`RecordPurchase` trigger (printer absence must not block
       or complicate a purchase being recorded — printing is strictly additive)
-- [ ] 5.2 Design an explicit "print label for this lot" action independent of purchase timing
-- [ ] 5.3 Flag and document the "portioned and froze a home-cooked meal" scope gap: this doesn't
-      fit `implement-pantry-inventory`'s current `PURCHASE`-originated lot-creation path; record
-      as an open question for that change (or a future one) to resolve — do not silently invent
-      a new event kind here
+- [ ] 5.2 Design an explicit "print label for this lot" action independent of purchase timing —
+      treat this as a primary goal (freezer meal labeling), not a secondary trigger: it must work
+      for any existing `InventoryLot` regardless of how it was created
+- [ ] 5.3 Confirm the home-cooked/frozen-meal path end to end: `RecordPurchase` with
+      `source: 'home_prepared'` (`implement-pantry-inventory` `design.md` D8) creates the lot,
+      then the "print label for this lot" action (5.2) prints it — this is resolved upstream, no
+      longer an open scope gap; this task is to verify the two designs actually connect cleanly
 
 ## 6. Check-out loop design
 

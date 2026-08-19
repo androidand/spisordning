@@ -57,6 +57,12 @@
 - [ ] 4.5 Implement `RefineLotProduct(lotId, productId, source)`: attaches a specific `Product`
       to an existing ingredient-only lot without changing quantity, location, or confidence
       (`design.md` D8)
+- [ ] 4.6 Implement `ListCandidateProductsForIngredient(ingredientId, query?)`:
+      `ProductIngredientMapping` matches first, name-match fallback against
+      `Ingredient.display` — powers the `RefineLotProduct` picker, never an unscoped catalog
+      search (`design.md` D8)
+- [ ] 4.7 Add `home_prepared` to the `source` vocabulary; confirm `RecordPurchase` with this
+      source creates an ingredient-only lot with no `productId` (`design.md` D8, Step 5)
 
 ## 5. Inventory events
 
@@ -143,3 +149,7 @@
 - [ ] 9.8 Location hierarchy tests: nested location creation, cycle rejection (self- and
       descendant-as-parent), recursive "everything under this location" query correctness
       (`design.md` D9)
+- [ ] 9.9 `ListCandidateProductsForIngredient` tests: mapped products returned first, name-match
+      fallback when no mapping exists, unrelated products excluded (`design.md` D8)
+- [ ] 9.10 `home_prepared` source tests: `RecordPurchase` creates a lot with no `productId`,
+      confidence resolves to `EXACT` on a counted quantity (`design.md` D8/D3)

@@ -129,6 +129,10 @@ Key relationship decisions:
   (D8)
 - `RefineLotProduct(lotId, productId, source)` → attaches a specific `Product` to a
   previously ingredient-only lot; does not itself change quantity/location/confidence (D8)
+- `ListCandidateProductsForIngredient(ingredientId, query?)` → the picker `RefineLotProduct`
+  is driven from: `Product` rows already linked to `ingredientId` via
+  `ProductIngredientMapping`, plus a name-match fallback against the ingredient's canonical
+  name when no mapping yet exists, never an unscoped catalog-wide product search (D8)
 - `RecordConsume(lotId, quantity, source)` → decrements the lot, appends a `CONSUME` event
 - `RecordDiscard(lotId, quantity, reason, source)` → decrements the lot, appends a `DISCARD`
   event (reason: expired / spoiled / other)
@@ -144,8 +148,15 @@ Key relationship decisions:
   Open Food Facts, then retailer lookup, then manual entry (see D6)
 
 Every command above requires a `source` — where the observation came from
-(`purchase_receipt` | `barcode_scan` | `manual_count` | `shopping_order` | `inferred_decay`,
-extensible) — because `source` is the raw material Step 6's confidence rule uses.
+(`purchase_receipt` | `barcode_scan` | `manual_count` | `shopping_order` | `inferred_decay` |
+`home_prepared`, extensible) — because `source` is the raw material Step 6's confidence rule
+uses. `home_prepared` is `RecordPurchase`'s source for inventory that didn't come from a
+retailer at all — a home-cooked meal portioned and frozen — resolving
+`research-inventory-label-printing`'s "how does a frozen home-cooked meal become a lot at all"
+open question without a new event kind: it's still "new inventory came into existence," just
+with a `source` that isn't a retailer transaction, so `PURCHASE`'s existing semantics (creates a
+lot, `ingredientId` required, `productId` optional per D8) already fit without a change to the
+kind vocabulary in D7.
 
 ## Step 6 — Invariants
 
@@ -256,13 +267,14 @@ derived from event history, or some combination. Each option in isolation has a 
 - `inventory_lot.confidence` is the current, queryable, indexed belief — same treatment as
   `person_preference.confidence`.
 - Every `inventory_event` carries a `source` (`purchase_receipt` | `barcode_scan` |
-  `manual_count` | `shopping_order` | `inferred_decay`, extensible) that is the evidence
+  `manual_count` | `shopping_order` | `inferred_decay` | `home_prepared`, extensible) that is
+  the evidence
   justifying whatever confidence the lot is set to as part of that same transaction — same
   treatment as `preference_observation`.
 - Confidence transitions are a deterministic function of `(event kind, source)`, applied at
   write time, not silently recomputed by a background process:
-  - `PURCHASE` with a known quantity (receipt, barcode-confirmed, or shopping-order-derived) →
-    `EXACT`.
+  - `PURCHASE` with a known quantity (receipt, barcode-confirmed, shopping-order-derived, or a
+    counted home-prepared portion) → `EXACT`.
   - `CONSUME`/`ADJUST`/`DISCARD` with an explicit counted quantity → `EXACT`; with an estimated
     quantity ("about half") → `ESTIMATED`.
   - `OPEN` does not by itself downgrade confidence (quantity is still known) but marks the lot
@@ -402,6 +414,26 @@ description:
   for free; forcing a later manual refinement step here would throw away information the system
   already has. This is recorded as invariant 7 and enforced at the `RecordPurchase` boundary
   (Step 5's `productId` is required when `source` is `shopping_order`), not left to convention.
+- **Home preparation**: a home-cooked meal portioned and frozen isn't a retailer purchase at
+  all, but is still "new inventory came into existence" — `RecordPurchase` with
+  `source: 'home_prepared'` covers it without a new event kind (see Step 5's source vocabulary
+  update). `productId` is naturally omitted here (there's no retailer product for a home-cooked
+  dish) — this path always lands at ingredient-only specificity, refinable only in the trivial
+  sense of naming which dish/recipe it was, which is `Ingredient`-level information already.
+
+**Connecting a lot to a `Product` is scoped by the lot's `Ingredient`, never an unscoped
+catalog search.** The household asked for this explicitly: refining "we have mjölk" into a
+specific product should be driven by the ingredient's type/name, not require already knowing
+the product's own name or browsing the entire catalog. `RefineLotProduct`'s picker is powered
+by the new `ListCandidateProductsForIngredient(ingredientId, query?)` (Step 5): first, `Product`
+rows already linked to this `ingredient_id` via `ProductIngredientMapping` (the common case once
+a household has shopped online a few times — most milk products are already mapped); falling
+back to a name-match search against the ingredient's canonical name (`Ingredient.display`) when
+no mapping exists yet for this exact product. This reuses `establish-household-and-catalog`'s
+existing mapping table rather than adding a second index, and keeps the invariant from that
+change intact — an unmapped `Product` selected this way still doesn't force a `Ingredient` row
+to be invented; it's the household confirming a match, which is exactly how new
+`ProductIngredientMapping` rows are expected to get created in the first place.
 
 `ingredient_id` is immutable once a lot is created (Step 3) — if a lot turns out to have been
 misidentified at the ingredient level (rare; usually only "quick" entries), the correction is a
@@ -415,6 +447,11 @@ household's own description — cupboard, drawer, fridge, freezer, basement, bal
 "wherever the user stores their stuff" — settles this empirically: their storage is neither flat
 nor uniformly typed (a chest freezer *in* the basement; a produce drawer *inside* the fridge),
 and an unbounded, household-specific set of places rules out a fixed enum of location identities.
+`parent_location_id` being nullable means nesting is opt-in per location, not imposed: a
+household is expected to leave most locations flat (`parent_location_id` unset) and nest only
+the handful that are genuinely inside another — the household itself expects flat to be the
+common case, hierarchy the exception, which this shape already gives for free without a
+separate "flat mode" toggle or a forced setup step asking every location's parent.
 
 - **Typing (`location_type`)**: an optional, extensible enum (`CUPBOARD`/`DRAWER`/`FRIDGE`/
   `FREEZER`/`BASEMENT`/`BALCONY`/`BREADBOX`/`OTHER`) on `InventoryLocation`, used as a *hint* —

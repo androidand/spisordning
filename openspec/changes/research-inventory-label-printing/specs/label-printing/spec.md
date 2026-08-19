@@ -58,3 +58,18 @@ opening Spisordning.
 - **WHEN** a household member looks at a label on a container in the freezer
 - **THEN** they can read what it is and when it was stored directly off the label, without
   needing to scan it or open the app
+
+### Requirement: Printing a label does not require the lot to have come from a purchase
+
+The system SHALL allow printing a label for any existing `InventoryLot`, regardless of the
+`source` that created it. Labeling home-prepared food portioned and frozen for later SHALL be
+supported as directly as labeling a retailer-purchased item.
+
+#### Scenario: A home-cooked meal's lot can be labeled
+
+- **WHEN** a household member portions and freezes a home-cooked meal, creating an
+  `InventoryLot` via `RecordPurchase` with a `home_prepared` source
+  (`implement-pantry-inventory` `design.md` D8)
+- **THEN** the household member can print a label for that lot the same way as for a
+  retailer-purchased item
+- **AND** no purchase-specific precondition blocks it

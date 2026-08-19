@@ -133,6 +133,27 @@ already determined it.
 - **THEN** the resulting `InventoryLot` references the specific `Product` the order resolved
 - **AND** the lot is never created at ingredient-only specificity for this source
 
+#### Scenario: A home-cooked meal can be recorded as inventory without a retailer purchase
+
+- **WHEN** a household member portions and freezes a home-cooked meal
+- **THEN** a `PURCHASE` event with a `home_prepared` source creates the `InventoryLot`
+- **AND** the lot is created at ingredient-only specificity, since no retailer `Product` exists
+  for a home-cooked dish
+
+### Requirement: Attaching a Product to a lot is scoped by the lot's Ingredient
+
+When refining an ingredient-only `InventoryLot` to a specific `Product`, the system SHALL
+present candidate products scoped to the lot's `Ingredient` — products already mapped to that
+ingredient, or products matched by name against the ingredient's canonical name — rather than an
+unscoped search across the entire product catalog.
+
+#### Scenario: Refining a milk lot only offers milk products
+
+- **WHEN** a household member refines an ingredient-only lot for "mjölk"
+- **THEN** the candidate products offered are those already linked to the milk `Ingredient`, or
+  matched by name to "mjölk"
+- **AND** unrelated products elsewhere in the catalog are not offered
+
 ### Requirement: Inventory locations may be typed and nested
 
 The system SHALL allow an `InventoryLocation` to optionally carry a `location_type` (e.g.
