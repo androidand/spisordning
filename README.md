@@ -186,8 +186,10 @@ while existing apps provide the generic 80%.
 The deterministic planning core is built and tested without any database, LLM, or network:
 
 ```bash
-go test ./...                # 114 tests incl. an end-to-end plan test against fake services
+go test ./...                # 147 tests incl. an end-to-end plan test against fake services;
+                          # 7 persistence integration tests skip without Postgres (run in CI)
 go run ./cmd/food-brain demo # in-memory demo: ranks a sample week + prints requirements
+go run ./cmd/food-brain serve # HTTP server on :8080 — /health and OpenAPI-backed /people
 ```
 
 The live weekly pipe is `food-brain plan` (dry-run by default):

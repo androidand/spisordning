@@ -1,4 +1,4 @@
-# Current state (as of 2026-08-18)
+# Current state (as of 2026-08-19)
 
 This is the Phase 0 "inspect existing Spisordning" deliverable `PLAN.md` asks for. It records
 what actually exists today, distinct from what `PLAN.md` envisions, so new OpenSpec changes
@@ -7,24 +7,36 @@ build on reality rather than re-deriving or contradicting it.
 ## Layout
 
 ```
-cmd/food-brain/        main.go, demo.go, plan.go, plan_test.go — CLI only, no HTTP server
+cmd/food-brain/        main.go (serve/demo/plan), demo.go, plan.go, plan_test.go,
+                       people_adapter.go (composition root: wires persistence.Store into
+                       httpapi's PersonService interface)
 internal/
-  domain/               core types
+  architecturetest/     layer-boundary guard (TestLayeredArchitecture via `go list -deps`)
+  domain/               core types (Person, Preference, Candidate, Ingredient,
+                        ShoppingRequirement, …)
+  httpapi/              HTTP handlers + wiring (health.go, people.go, helpers.go, tests)
   httpclient/           shared JSON-over-HTTP transport used by every backend client
   llm/                  AI provider abstraction (Provider interface); Olla (Client) is the
                         primary OpenAI-compatible implementation
   mealie/client.go       read-only Mealie sync client (real, tested)
+  persistence/          pgx-v5 Postgres repositories (people, recipes, meals, meal_plan)
+                        + Config/FromEnv/New/NewStore; integration-tested
   planning/              requirements.go, staples.go, week.go (PlanWeek planner loop)
   retailer/client.go     Go-side client for the willys-adapter HTTP service
   scoring/scoring.go     deterministic candidate scorer
   skolmaten/client.go    school-lunch client
 migrations/0001-0007      Postgres schema (0001 first-slice … 0007 order) — applied by
-                          docker-compose; Go persistence still pending (establish-enforced-go-architecture)
+                          docker-compose; Go persistence now wired (establish-enforced-go-architecture)
+api/openapi.yaml          design-first OpenAPI 3.0.3 contract; server code generated from this
 openspec/                 see below
 ```
 
-`go.mod`: `github.com/androidand/spisordning`, Go 1.26.1, **stdlib-only** (zero third-party
-Go dependencies). `go build ./... && go test ./...` passes: 114 tests across 11 packages.
+`go.mod`: `github.com/androidand/spisordning`, Go 1.26.1, **stdlib-only except `pgx/v5`**
+(`github.com/jackc/pgx/v5 v5.10.0`) — the first non-stdlib dependency, pinned by
+`establish-enforced-go-architecture` (rationale in that change's `design.md` §3). The
+architecture test confines pgx to `internal/persistence`. `go build ./... && go test ./...`
+passes: 147 tests across 14 packages (7 persistence integration tests skip locally without a
+Postgres; they run in CI's `persistence-test` job).
 
 No `AGENTS.md`/`CLAUDE.md` existed before this change. No `docs/` existed before this change.
 
@@ -110,10 +122,16 @@ new shopping/order tables yet** — that persistence is tracked, known, open wor
 
 ## CI / Docker
 
-No CI (`.github/` doesn't exist). No Makefile. No Dockerfile for `food-brain` itself — it's
-CLI-only, so it doesn't join `docker-compose.yml` yet (an explicit comment marks where it will
-once it grows an HTTP server). `docker-compose.yml` today: `postgres` (stock image) +
-`willys-adapter` (built from the sibling repo).
+CI exists: `.github/workflows/ci.yml` runs `go build`/`go test`/`go vet` on every
+push/PR, plus `migrations` (apply `migrations/*.sql` against postgres:16) and
+`persistence-test` (repository integration tests) jobs. No Makefile yet (CI uses
+`go` directly). `food-brain` now ships a multi-stage `Dockerfile` and joins
+`docker-compose.yml` as a `food-brain` service; `docker compose up -d` brings up
+`postgres`, `willys-adapter`, and `food-brain` (`food-brain serve` on `:8080`,
+exposing the OpenAPI contract, reading/writing Postgres). `/health` always serves
+even without a database, and `/people` provides the first persistence-backed
+endpoints. `docker-compose.yml` today: `postgres` (stock image) + `willys-adapter`
+(built from the sibling repo) + `food-brain` (built from this repo).
 
 ## What this means for new OpenSpec changes
 
