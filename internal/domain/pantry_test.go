@@ -1,0 +1,90 @@
+package domain
+
+import "testing"
+
+func TestConfidenceForEvent(t *testing.T) {
+	cases := []struct {
+		name      string
+		kind      EventKind
+		source    string
+		estimated bool
+		want      Confidence
+	}{
+		{"purchase always exact", EventPurchase, "purchase_receipt", false, ConfidenceExact},
+		{"purchase ignores estimated flag", EventPurchase, "shopping_order", true, ConfidenceExact},
+		{"home_prepared purchase is exact", EventPurchase, "home_prepared", false, ConfidenceExact},
+		{"counted consume is exact", EventConsume, "manual_count", false, ConfidenceExact},
+		{"estimated consume is estimated", EventConsume, "manual_count", true, ConfidenceEstimated},
+		{"mark_empty is always exact even if flagged estimated", EventConsume, SourceMarkEmpty, true, ConfidenceExact},
+		{"counted discard is exact", EventDiscard, "manual_count", false, ConfidenceExact},
+		{"estimated discard is estimated", EventDiscard, "manual_count", true, ConfidenceEstimated},
+		{"counted adjust is exact", EventAdjust, "manual_count", false, ConfidenceExact},
+		{"estimated adjust is estimated", EventAdjust, "manual_count", true, ConfidenceEstimated},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := ConfidenceForEvent(c.kind, c.source, c.estimated)
+			if got != c.want {
+				t.Errorf("ConfidenceForEvent(%s, %s, %v) = %s, want %s", c.kind, c.source, c.estimated, got, c.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeGTIN(t *testing.T) {
+	// Real GTIN-13 (EAN-13) with a valid check digit.
+	got, err := NormalizeGTIN("7300400176354")
+	if err != nil {
+		t.Fatalf("NormalizeGTIN: %v", err)
+	}
+	want := "07300400176354" // 13 digits, left-padded with one zero to 14
+	if got != want {
+		t.Errorf("NormalizeGTIN(valid13) = %q, want %q", got, want)
+	}
+	if len(got) != 14 {
+		t.Errorf("expected 14-digit canonical form, got %d digits: %q", len(got), got)
+	}
+
+	// Same digits with a non-digit separator stripped before validation.
+	got2, err := NormalizeGTIN("7-300400176354")
+	if err != nil {
+		t.Fatalf("NormalizeGTIN with dash: %v", err)
+	}
+	if got2 != got {
+		t.Errorf("NormalizeGTIN with dash = %q, want %q (same as without dash)", got2, got)
+	}
+
+	// Wrong check digit (last digit altered from the valid 7300400176354).
+	if _, err := NormalizeGTIN("7300400176353"); err == nil {
+		t.Error("expected error for invalid check digit, got nil")
+	}
+
+	// Wrong length.
+	if _, err := NormalizeGTIN("12345"); err == nil {
+		t.Error("expected error for invalid length, got nil")
+	}
+}
+
+func TestWouldCreateLocationCycle(t *testing.T) {
+	// Self-parent is always a cycle, regardless of ancestor list.
+	if !WouldCreateLocationCycle("basement", "basement", nil) {
+		t.Error("expected self-parent to be a cycle")
+	}
+
+	// basement -> freezer would create a cycle if freezer's ancestors already include basement
+	// (i.e. basement is already an ancestor of freezer, so basement can't also become freezer's
+	// descendant).
+	if !WouldCreateLocationCycle("basement", "freezer", []string{"basement", "house"}) {
+		t.Error("expected a cycle when candidate parent's ancestors include the child")
+	}
+
+	// A genuinely new, unrelated nesting is fine.
+	if WouldCreateLocationCycle("chest-freezer", "basement", []string{"house"}) {
+		t.Error("did not expect a cycle for an unrelated parent")
+	}
+
+	// No ancestors at all (candidate parent is currently a root) is fine.
+	if WouldCreateLocationCycle("drawer", "fridge", nil) {
+		t.Error("did not expect a cycle when candidate parent has no ancestors")
+	}
+}
