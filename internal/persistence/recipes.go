@@ -48,6 +48,29 @@ func (s *Store) GetRecipeRef(ctx context.Context, id string) (RecipeRef, error) 
 	return r, nil
 }
 
+// ListRecipeRefs returns every cached reference, most-recently-synced first.
+func (s *Store) ListRecipeRefs(ctx context.Context) ([]RecipeRef, error) {
+	rows, err := s.db.Query(ctx, `SELECT mealie_recipe_id, title, tags, effort, last_synced_at, raw_snapshot
+		FROM recipe_ref ORDER BY last_synced_at DESC, mealie_recipe_id`)
+	if err != nil {
+		return nil, fmt.Errorf("persistence: list recipe_refs: %w", err)
+	}
+	defer rows.Close()
+	var out []RecipeRef
+	for rows.Next() {
+		var r RecipeRef
+		var tags []string
+		var raw pgtype.Text
+		if err := rows.Scan(&r.MealieRecipeID, &r.Title, &tags, &r.Effort, &r.LastSyncedAt, &raw); err != nil {
+			return nil, err
+		}
+		r.Tags = tags
+		r.RawSnapshot = raw.String
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // Ingredient mirrors migrations/0001_init.sql ingredient (canonical id).
 type Ingredient struct {
 	ID      string

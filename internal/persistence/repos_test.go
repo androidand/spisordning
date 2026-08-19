@@ -88,6 +88,14 @@ func TestRecipes_IngredientsAndMappings(t *testing.T) {
 	if refs.Title != "Pasta" || len(refs.Tags) != 1 || refs.Tags[0] != "pasta" {
 		t.Errorf("GetRecipeRef = %+v", refs)
 	}
+
+	all, err := s.ListRecipeRefs(ctx)
+	if err != nil {
+		t.Fatalf("ListRecipeRefs: %v", err)
+	}
+	if len(all) != 1 || all[0].MealieRecipeID != "r-pasta" || all[0].Effort != 2 {
+		t.Errorf("ListRecipeRefs = %+v", all)
+	}
 	ing, err := s.GetIngredient(ctx, "köttfärs")
 	if err != nil {
 		t.Fatalf("GetIngredient: %v", err)

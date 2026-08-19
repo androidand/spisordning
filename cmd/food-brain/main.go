@@ -69,7 +69,11 @@ func buildDependencies() httpapi.Dependencies {
 		fmt.Fprintln(os.Stderr, "⚠ persistence unavailable:", err)
 		return deps
 	}
-	deps.People = personAdapter{db: store}
+	adapters := storeAdapter{db: store}
+	deps.People = adapters
+	deps.Preferences = adapters
+	deps.Recipes = adapters
+	deps.Meals = adapters
 	return deps
 }
 

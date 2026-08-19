@@ -61,10 +61,10 @@ type errSentinel string
 
 func (e errSentinel) Error() string { return string(e) }
 
-func newMux(t *testing.T, svc PersonService) *http.ServeMux {
+func newMux(t *testing.T, deps Dependencies) *http.ServeMux {
 	t.Helper()
 	mux := http.NewServeMux()
-	RegisterHandlers(mux, Dependencies{People: svc})
+	RegisterHandlers(mux, deps)
 	return mux
 }
 
@@ -92,7 +92,7 @@ func mustJSON(t *testing.T, data []byte, out any) {
 }
 
 func TestListPeople_HappyPath(t *testing.T) {
-	mux := newMux(t, newFake())
+	mux := newMux(t, Dependencies{People: newFake()})
 
 	rec := doGet(t, mux, "/people")
 	if rec.Code != http.StatusOK {
@@ -112,7 +112,7 @@ func TestListPeople_HappyPath(t *testing.T) {
 func TestListPeople_Error(t *testing.T) {
 	svc := newFake()
 	svc.err = errSentinel("boom")
-	mux := newMux(t, svc)
+	mux := newMux(t, Dependencies{People: svc})
 
 	rec := doGet(t, mux, "/people")
 	if rec.Code != http.StatusInternalServerError {
@@ -126,7 +126,7 @@ func TestListPeople_Error(t *testing.T) {
 }
 
 func TestGetPerson_HappyPath(t *testing.T) {
-	mux := newMux(t, newFake())
+	mux := newMux(t, Dependencies{People: newFake()})
 
 	rec := doGet(t, mux, "/people/p2")
 	if rec.Code != http.StatusOK {
@@ -141,7 +141,7 @@ func TestGetPerson_HappyPath(t *testing.T) {
 }
 
 func TestGetPerson_NotFound(t *testing.T) {
-	mux := newMux(t, newFake())
+	mux := newMux(t, Dependencies{People: newFake()})
 
 	rec := doGet(t, mux, "/people/does-not-exist")
 	if rec.Code != http.StatusNotFound {
@@ -156,7 +156,7 @@ func TestGetPerson_NotFound(t *testing.T) {
 
 func TestCreatePerson_HappyPath(t *testing.T) {
 	svc := newFake()
-	mux := newMux(t, svc)
+	mux := newMux(t, Dependencies{People: svc})
 
 	rec := doPost(t, mux, "/people", `{"name":"Grace","weight":1.1}`)
 	if rec.Code != http.StatusCreated {
@@ -174,7 +174,7 @@ func TestCreatePerson_HappyPath(t *testing.T) {
 }
 
 func TestCreatePerson_EmptyName(t *testing.T) {
-	mux := newMux(t, newFake())
+	mux := newMux(t, Dependencies{People: newFake()})
 
 	rec := doPost(t, mux, "/people", `{"name":"  ","weight":1.0}`)
 	if rec.Code != http.StatusBadRequest {
@@ -188,7 +188,7 @@ func TestCreatePerson_EmptyName(t *testing.T) {
 }
 
 func TestCreatePerson_BadJSON(t *testing.T) {
-	mux := newMux(t, newFake())
+	mux := newMux(t, Dependencies{People: newFake()})
 
 	rec := doPost(t, mux, "/people", `not-json`)
 	if rec.Code != http.StatusBadRequest {
@@ -197,7 +197,7 @@ func TestCreatePerson_BadJSON(t *testing.T) {
 }
 
 func TestHealthStillWorks(t *testing.T) {
-	mux := newMux(t, newFake())
+	mux := newMux(t, Dependencies{People: newFake()})
 
 	rec := doGet(t, mux, "/health")
 	if rec.Code != http.StatusOK {

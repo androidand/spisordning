@@ -44,7 +44,10 @@ type PersonService interface {
 // Dependencies are the services httpapi's handlers call. Add new services here as
 // routes are implemented from api/openapi.yaml.
 type Dependencies struct {
-	People PersonService
+	People      PersonService
+	Preferences PreferencesService
+	Recipes     RecipesService
+	Meals       MealsService
 }
 
 type peopleHandler struct {
@@ -57,19 +60,29 @@ type peopleHandler struct {
 func RegisterHandlers(mux *http.ServeMux, deps Dependencies) {
 	mux.HandleFunc("/health", healthHandler)
 
-	if deps.People == nil {
-		return
+	if deps.People != nil {
+		h := peopleHandler{svc: deps.People}
+		mux.HandleFunc("GET /people", h.listPeople)
+		mux.HandleFunc("POST /people", h.createPerson)
+		mux.HandleFunc("GET /people/{id}", h.getPerson)
 	}
-	h := peopleHandler{svc: deps.People}
-
-	mux.HandleFunc("GET /people", h.listPeople)
-	mux.HandleFunc("POST /people", h.createPerson)
-	mux.HandleFunc("GET /people/{id}", h.getPerson)
+	if deps.Preferences != nil {
+		h := prefsHandler{svc: deps.Preferences}
+		mux.HandleFunc("GET /preferences", h.listPreferences)
+	}
+	if deps.Recipes != nil {
+		h := recipesHandler{svc: deps.Recipes}
+		mux.HandleFunc("GET /recipes", h.listRecipes)
+	}
+	if deps.Meals != nil {
+		h := mealsHandler{svc: deps.Meals}
+		mux.HandleFunc("POST /meals", h.createMealEvent)
+	}
 }
 
 // Serve starts the HTTP server on addr (e.g. ":8080"). Handlers are sourced from
-// api/openapi.yaml; /health and /people{,/id} are wired today. Persistence-backed
-// handlers are injected via deps from the cmd composition root.
+// api/openapi.yaml; /health, /people, /preferences, /recipes and /meals are wired
+// today. Persistence-backed handlers are injected via deps from the cmd root.
 func Serve(addr string, deps Dependencies) error {
 	mux := http.NewServeMux()
 	RegisterHandlers(mux, deps)
