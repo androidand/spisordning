@@ -265,7 +265,7 @@ components:
       properties:
         id: { type: string, description: canonical id }
         name: { type: string }
-        weight: { type: number, format: double, default: 1.0, exclusiveMinimum: 0 }
+        weight: { type: number, format: double, default: 1.0, minimum: 0, exclusiveMinimum: true }
         created_at: { type: string, format: date-time }
 
     PersonNew:
@@ -273,7 +273,7 @@ components:
       required: [name]
       properties:
         name: { type: string }
-        weight: { type: number, format: double, default: 1.0, exclusiveMinimum: 0 }
+        weight: { type: number, format: double, default: 1.0, minimum: 0, exclusiveMinimum: true }
 
     PersonPreference:
       type: object
@@ -307,7 +307,7 @@ components:
       required: [mealie_food_id, ingredient_id, source_name, needs_review, updated_at]
       properties:
         mealie_food_id: { type: string }
-        ingredient_id: { type: string, $ref: '#/components/schemas/Ingredient/properties/id' }
+        ingredient_id: { type: string, description: canonical ingredient id (see Ingredient.id) }
         source_name: { type: string }
         external_id: { type: string, nullable: true }
         needs_review: { type: boolean, default: true }
