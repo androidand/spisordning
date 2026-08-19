@@ -5,9 +5,9 @@
 ### Requirement: A lot is the canonical model of physical household inventory
 
 The system SHALL represent physical household inventory as `InventoryLot` rows, each scoped to
-a `Product`, an `InventoryLocation`, a quantity, and a confidence tier. The system SHALL NOT use
-a single mutable quantity field on `Product` (e.g. `products.current_quantity`) as the model of
-how much of something a household has.
+an `Ingredient` (always) and optionally a `Product`, an `InventoryLocation`, a quantity, and a
+confidence tier. The system SHALL NOT use a single mutable quantity field on `Product` (e.g.
+`products.current_quantity`) as the model of how much of something a household has.
 
 #### Scenario: Two lots of the same product in different locations are distinct
 
@@ -102,3 +102,63 @@ value directly.
   Facts, retailer lookup)
 - **THEN** the system prompts for manual product entry
 - **AND** does not fabricate a `Product` or treat the raw barcode as a stand-in identity
+
+### Requirement: An inventory lot may be recorded at ingredient-level or product-level specificity
+
+An `InventoryLot` SHALL always reference an `Ingredient`. It MAY additionally reference a
+specific `Product`; when it does not, the lot is valid at ingredient-only specificity, and the
+system SHALL NOT invent or guess a `Product` to satisfy it. A `Product` MAY be attached to an
+existing ingredient-only lot at any later time without altering the lot's quantity, location, or
+confidence. A `PURCHASE` event whose source is a completed online shopping order SHALL always
+carry a specific `Product` reference, since the retailer resolution that produced the order
+already determined it.
+
+#### Scenario: A quick manual entry needs only an ingredient
+
+- **WHEN** a household member records "we have mjölk" without selecting a specific product
+- **THEN** an `InventoryLot` is created referencing the `Ingredient` for milk
+- **AND** the lot's `Product` reference is left unset
+- **AND** no `Product` row is fabricated to fill it in
+
+#### Scenario: A lot is refined from generic to specific after the fact
+
+- **WHEN** a household member later identifies exactly which milk product the ingredient-only
+  lot refers to
+- **THEN** the lot is updated to reference that `Product`
+- **AND** the lot's quantity, location, and confidence are unchanged by this refinement
+
+#### Scenario: An online order always creates a product-level lot
+
+- **WHEN** a completed online shopping order's line item creates a `PURCHASE` event
+- **THEN** the resulting `InventoryLot` references the specific `Product` the order resolved
+- **AND** the lot is never created at ingredient-only specificity for this source
+
+### Requirement: Inventory locations may be typed and nested
+
+The system SHALL allow an `InventoryLocation` to optionally carry a `location_type` (e.g.
+cupboard, drawer, fridge, freezer, basement, balcony, breadbox, or other) as a non-authoritative
+hint, and to optionally reference a parent `InventoryLocation` to represent physical nesting
+(e.g. a freezer inside a basement, a drawer inside a fridge). Location type SHALL NOT be treated
+as identity: multiple locations may share the same type. The system SHALL prevent a location
+from being configured as its own ancestor.
+
+#### Scenario: A household with two fridges keeps them as distinct locations
+
+- **WHEN** a household registers a kitchen fridge and a garage fridge, both typed `FRIDGE`
+- **THEN** both exist as separate `InventoryLocation` rows
+- **AND** no system behavior conflates them because they share a type
+
+#### Scenario: A location can be nested inside another
+
+- **WHEN** a household registers a chest freezer located in the basement
+- **THEN** the chest freezer's `InventoryLocation` references the basement's `InventoryLocation`
+  as its parent
+- **AND** querying everything stored "in the basement" includes lots recorded directly against
+  the chest freezer
+
+#### Scenario: A location cannot become its own ancestor
+
+- **WHEN** a household member attempts to set a location's parent to itself or to one of its own
+  descendants
+- **THEN** the system rejects the change
+- **AND** the location hierarchy remains a valid tree

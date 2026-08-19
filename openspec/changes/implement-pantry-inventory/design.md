@@ -24,6 +24,10 @@ revisit has been performed; see the new "Findings from establish-reference-lab" 
 and D7. The original text below is left intact as the reasoning trail; only D7 and the Risks
 section reflect the update.
 
+**Update (2026-08-19): two household-requested refinements** — graduated item specificity
+(D8) and location taxonomy/hierarchy (D9), both amending Step 1/3/5/7 below. Marked inline
+where they touch prior text; the reasoning in D1-D7 is unaffected.
+
 ## Goals / Non-Goals
 
 **Goals:**
@@ -49,11 +53,12 @@ section reflect the update.
 
 | Term | Definition |
 |---|---|
-| **InventoryLocation** | A named place physical inventory sits (pantry shelf, fridge, freezer, garage freezer), scoped to a `Household`. |
-| **InventoryLot** | A distinguishable physical quantity of a `Product` sitting in one `InventoryLocation` at one time — the unit of physical inventory. |
+| **InventoryLocation** | A named place physical inventory sits (pantry shelf, fridge, freezer, garage freezer), scoped to a `Household`, typed by an optional `LocationType` and optionally nested under a parent `InventoryLocation` (D9). |
+| **LocationType** | An optional taxonomy hint on an `InventoryLocation` — `CUPBOARD` / `DRAWER` / `FRIDGE` / `FREEZER` / `BASEMENT` / `BALCONY` / `BREADBOX` / `OTHER`, extensible (D9). Not identity — two locations of the same type are still distinct rows. |
+| **InventoryLot** | A distinguishable physical quantity sitting in one `InventoryLocation` at one time — the unit of physical inventory. Always anchored to an `Ingredient`; anchored to a specific `Product` only once known (D8). |
 | **InventoryEvent** | An immutable, append-only record of something that happened to inventory: a lot was purchased, consumed from, discarded, adjusted, transferred, marked empty, or opened. |
 | **Confidence** | How sure the system is that an `InventoryLot`'s current recorded quantity/existence reflects physical reality: `EXACT` / `LIKELY` / `ESTIMATED` / `UNKNOWN`. |
-| **Barcode (GTIN/EAN)** | A normalized numeric identifier printed on packaging, used only as a lookup key onto a `Product` via `ProductIdentifier` (from `establish-household-and-catalog`) — never as identity itself. |
+| **Barcode (GTIN/EAN)** | A normalized numeric identifier printed on packaging, used only as a lookup key onto a `Product` via `ProductIdentifier` (from `establish-household-and-catalog`) — never as identity itself. Distinct from a printed inventory-label barcode, which references an `InventoryLot`, not a `Product` (see `research-inventory-label-printing`). |
 
 ## Step 2 — Aggregates
 
@@ -75,14 +80,15 @@ section reflect the update.
 Household
     │
     ▼
-InventoryLocation
+InventoryLocation ──── parent_location_id (optional, self-referential, D9)
     │
     │ (1) hosts (N)
     ▼
-InventoryLot ──────► Product (establish-household-and-catalog)
-    ▲                    │
-    │                    ▼
-    │              ProductIdentifier (barcode, optional, many-to-one onto Product)
+InventoryLot ──────► Ingredient (establish-household-and-catalog, always set)
+    │        ╲
+    │          ╲ (optional, D8)
+    │            ▼
+    │          Product (establish-household-and-catalog) ──► ProductIdentifier (barcode)
     │
     └──── projected from ────  InventoryEvent (append-only)
                                     │ kind: PURCHASE | CONSUME | DISCARD | ADJUST
@@ -91,18 +97,19 @@ InventoryLot ──────► Product (establish-household-and-catalog)
                           concrete typed references per kind:
                             lot_id (nullable — PURCHASE creates one)
                             from_location_id / to_location_id (TRANSFER only)
-                            product_id (PURCHASE only, to create the lot)
+                            ingredient_id, product_id (nullable) (PURCHASE only, to create the lot)
 ```
 
 Key relationship decisions:
 - `InventoryEvent` references `InventoryLot` (nullable — only `PURCHASE` may create a new lot
   without one existing yet), `InventoryLocation` (source/destination, `TRANSFER` uses both),
-  and `Product` (via the lot, or directly on `PURCHASE`). All real FKs — no polymorphic
-  `entity_type`/`entity_id` column (see D5).
-- A lot's `product_id` is set once at creation and immutable; if what's physically in the lot
-  changes identity (rare — e.g. a corrected barcode misread), that is a `DISCARD` + new
-  `PURCHASE`-kind `ADJUST`, not a mutation of `product_id` on the existing lot, so the ledger
-  stays truthful about what was on hand when.
+  and `Ingredient`/`Product` (via the lot, or directly on `PURCHASE`). All real FKs — no
+  polymorphic `entity_type`/`entity_id` column (see D5).
+- A lot's `product_id` is set once at creation (or added later via `RefineLotProduct`, D8) and
+  never silently overwritten; if what's physically in the lot changes identity (rare — e.g. a
+  corrected barcode misread), that is a `DISCARD` + new `PURCHASE`-kind `ADJUST`, not a
+  reassignment of `product_id` on the existing lot, so the ledger stays truthful about what was
+  on hand when. `ingredient_id`, once set at lot creation, is immutable for the same reason.
 
 ## Step 4 — Lifecycle (mutable vs. immutable)
 
@@ -115,9 +122,13 @@ Key relationship decisions:
 
 ## Step 5 — Commands
 
-- `CreateInventoryLocation(householdId, name)`
-- `RecordPurchase(productId, locationId, quantity, unit, bestBefore?, source)` → creates a new
-  `InventoryLot` + a `PURCHASE` event
+- `CreateInventoryLocation(householdId, name, locationType?, parentLocationId?)` (D9)
+- `RecordPurchase(ingredientId, productId?, locationId, quantity, unit, bestBefore?, source)` →
+  creates a new `InventoryLot` + a `PURCHASE` event; `productId` is required when `source` is
+  `shopping_order` (the retailer resolution already knows the exact product), optional otherwise
+  (D8)
+- `RefineLotProduct(lotId, productId, source)` → attaches a specific `Product` to a
+  previously ingredient-only lot; does not itself change quantity/location/confidence (D8)
 - `RecordConsume(lotId, quantity, source)` → decrements the lot, appends a `CONSUME` event
 - `RecordDiscard(lotId, quantity, reason, source)` → decrements the lot, appends a `DISCARD`
   event (reason: expired / spoiled / other)
@@ -139,8 +150,8 @@ extensible) — because `source` is the raw material Step 6's confidence rule us
 ## Step 6 — Invariants
 
 1. **A lot is the unit of physical inventory.** `products.current_quantity`-style single-field
-   tracking SHALL NOT exist; `InventoryLot` (scoped to product + location) is the only model of
-   "how much of this do we have."
+   tracking SHALL NOT exist; `InventoryLot` (scoped to ingredient/product + location) is the
+   only model of "how much of this do we have."
 2. **`InventoryEvent` rows are immutable once written.** Corrections are new events, never
    updates or deletes of existing ones.
 3. **`InventoryLot` current state is never edited outside an `InventoryEvent` write.** Every
@@ -153,14 +164,22 @@ extensible) — because `source` is the raw material Step 6's confidence rule us
    a barcode directly — they reference `product_id`.
 6. **No generic polymorphism.** `InventoryEvent` SHALL use concrete, nullable, typed FK columns
    per event kind's actual references, never an `entity_type`/`entity_id`/`value` shape.
+7. **A lot always has an ingredient; a specific product is optional and only ever added, never
+   silently invented.** (D8)
+8. **A location's type and parent are hints, not identity — the same free-form-plus-lookup
+   discipline as barcode (invariant 5).** No behavior SHALL depend on `location_type` alone
+   defining what a location *is*; two `FRIDGE`-typed locations remain distinct rows. (D9)
 
 ## Step 7 — Persistence (sketch)
 
-- `inventory_location(id, household_id FK, name, archived_at NULL)`
-- `inventory_lot(id, product_id FK, location_id FK, quantity, unit, confidence CHECK IN (...),
-  best_before NULL, opened_at NULL, created_at, updated_at)`
+- `inventory_location(id, household_id FK, name, location_type CHECK IN ('CUPBOARD','DRAWER',
+  'FRIDGE','FREEZER','BASEMENT','BALCONY','BREADBOX','OTHER') NULL, parent_location_id FK NULL
+  REFERENCES inventory_location(id), archived_at NULL)` — self-referential parent, D9
+- `inventory_lot(id, ingredient_id FK NOT NULL, product_id FK NULL, location_id FK, quantity,
+  unit, confidence CHECK IN (...), best_before NULL, opened_at NULL, created_at, updated_at)`
+  — `product_id` nullable, D8
 - `inventory_event(id, kind CHECK IN ('PURCHASE','CONSUME','DISCARD','ADJUST','TRANSFER',
-  'OPEN'), lot_id FK NULL, product_id FK NULL, from_location_id FK NULL,
+  'OPEN'), lot_id FK NULL, ingredient_id FK NULL, product_id FK NULL, from_location_id FK NULL,
   to_location_id FK NULL, quantity_delta, reason NULL, source NOT NULL, recorded_at)`
   — **six kinds, not seven: see D7.** `MARK_EMPTY` is a `RecordMarkEmpty` *command* (Step 5)
   that writes a `CONSUME` event with `source: 'mark_empty'`, not its own `kind` value.
@@ -345,6 +364,88 @@ persistence-layer design, confirms another, and adds a hard divergence:
   `tasks.md` item (undo is not in this change's Step 5 command list today) but the invariant is
   locked in now so it isn't accidentally built the Grocy way later.
 
+### D8: Graduated item specificity — `ingredient_id` required, `product_id` optional (2026-08-19)
+
+The household explicitly wants two ways to know "we have milk": a quick, generic entry ("we
+have mjölk," no product picked) and a detailed one (a specific product, usually populated
+automatically from a completed online order). Three shapes were considered:
+
+- **(a) `product_id` always required** (the original Step 7 sketch). Rejected outright now:
+  forces a specific `Product` to be chosen even for a two-second manual "we have milk" entry,
+  which the household has said is friction they want removed. Also awkward for the barcode
+  scan-a-product-with-no-local-`Product`-row-yet case at the moment of scanning.
+- **(b) A separate "generic lot" table alongside `inventory_lot`**, unioned at read time.
+  Rejected: two tables for what is conceptually one thing (a physical quantity of stuff in a
+  place) forces every downstream reader (`implement-recipe-availability`,
+  `implement-recommendations`) to query and merge two sources instead of one, and re-introduces
+  exactly the kind of parallel-model drift `establish-household-and-catalog` already avoided by
+  making `Product`→`Ingredient` mapping optional rather than a second ingredient table.
+- **(c) `ingredient_id` required, `product_id` nullable, refined in place** (chosen): mirrors
+  `establish-household-and-catalog`'s own precedent almost exactly — that change already
+  established "a `Product` without a resolved `Ingredient` mapping is still valid... no
+  `Ingredient` row is invented or guessed automatically." This decision takes the symmetric
+  position one layer up: an `InventoryLot` without a resolved `Product` is still valid, and no
+  `Product` row is invented or guessed to satisfy it. One table, one read path, two honestly
+  optional levels of detail.
+
+Two write paths populate `product_id` differently, both already implied by the household's own
+description:
+- **Manual quick entry** (no order, e.g. after a physical-store trip without barcode scanning):
+  `RecordPurchase` is called with `productId` omitted. The lot is created at `ingredient_id`-only
+  specificity. `RefineLotProduct(lotId, productId, source)` (Step 5) attaches a specific
+  `Product` later, at any point, without touching quantity/location/confidence — the household
+  said this refinement should be optional and can happen "whenever," not only at creation time.
+- **Online order completion**: `implement-shopping-and-commerce`'s order already carries a
+  resolved `RetailerProduct` → `Product` for every line (the retailer resolution pipeline's
+  entire job). A `PURCHASE` event with `source: 'shopping_order'` therefore always supplies
+  `productId` — there is no "quick" version of this path because the specificity already exists
+  for free; forcing a later manual refinement step here would throw away information the system
+  already has. This is recorded as invariant 7 and enforced at the `RecordPurchase` boundary
+  (Step 5's `productId` is required when `source` is `shopping_order`), not left to convention.
+
+`ingredient_id` is immutable once a lot is created (Step 3) — if a lot turns out to have been
+misidentified at the ingredient level (rare; usually only "quick" entries), the correction is a
+`DISCARD` of the wrong lot plus a fresh `PURCHASE`, same pattern already used for a corrected
+barcode misread (Step 3), not a mutation of the existing row.
+
+### D9: Location taxonomy and optional hierarchy — typed, self-referential, still reference data (2026-08-19)
+
+Task 3.2 asked directly: is nesting needed, or is a flat named-location list sufficient. The
+household's own description — cupboard, drawer, fridge, freezer, basement, balcony, breadbox,
+"wherever the user stores their stuff" — settles this empirically: their storage is neither flat
+nor uniformly typed (a chest freezer *in* the basement; a produce drawer *inside* the fridge),
+and an unbounded, household-specific set of places rules out a fixed enum of location identities.
+
+- **Typing (`location_type`)**: an optional, extensible enum (`CUPBOARD`/`DRAWER`/`FRIDGE`/
+  `FREEZER`/`BASEMENT`/`BALCONY`/`BREADBOX`/`OTHER`) on `InventoryLocation`, used as a *hint* —
+  e.g. a future feature (not this change) reading `FREEZER` to suggest a longer default
+  best-before window, or `research-inventory-label-printing` reading it to phrase a label
+  ("frozen: 2026-08-19"). It is explicitly not identity: nothing keys behavior off "the one and
+  only fridge" — a household with two fridges has two `FRIDGE`-typed rows, same as two
+  `BREADBOX`-typed rows are still distinct places (invariant 8, mirroring invariant 5's barcode
+  discipline: a hint you can look up, never a thing you can quietly redefine identity around).
+- **Hierarchy (`parent_location_id`)**: a nullable, self-referential FK on `InventoryLocation`,
+  to arbitrary depth ("freezer" → "basement" → no parent). Rejected alternatives: a fixed-depth
+  `room`/`storage_unit`/`shelf` three-tier model (rejected — the household's own list already
+  doesn't fit three clean tiers: is "breadbox" a room-level or shelf-level thing? forcing an
+  answer is exactly the kind of premature schema the flat list already under-served) and a
+  closure/materialized-path table (rejected for the same household-scale reasoning D2 used
+  against full event sourcing — a handful of locations, at most a few levels deep, doesn't
+  justify the extra table and maintenance cost; a plain recursive `parent_location_id` walk is
+  the same technique `implement-recipe-family`'s DAG-cycle reasoning already validated as
+  sufficient at this scale, applied to a strictly simpler tree rather than a DAG).
+- **Still reference data, not a new aggregate** (Step 2 unchanged): nesting adds a self-reference
+  column, not new lifecycle complexity — `InventoryLocation` stays mutable/renameable/
+  soft-archived (Step 4), and cycle prevention (a location cannot be its own ancestor) is an
+  application-layer check on write, the same shape as `establish-recipe-family`'s
+  `LineageGraph.WouldCreateCycle()`, not a database constraint (self-referential FKs can't
+  express "no cycles" declaratively).
+- **A lot's `location_id` always references the specific location it's actually in** (e.g. the
+  produce drawer, not "the fridge" in general) — querying "everything in the fridge" is a
+  recursive walk down from the fridge row, not a requirement that lots be recorded at the
+  coarsest ancestor. This keeps `TRANSFER` (Step 5) meaningful at whatever granularity the
+  household actually uses.
+
 ## Risks / Trade-offs
 
 - **Still depends on `establish-household-and-catalog`'s Product/Ingredient model** (not yet
@@ -369,3 +470,13 @@ persistence-layer design, confirms another, and adds a hard divergence:
   triggering mechanism itself is left to `tasks.md`, not decided here.
 - **A few always-null columns per event kind** (D5's cost) is accepted in exchange for real FK
   integrity, per `PLAN.md`'s explicit guidance.
+- **Two nullable identity columns instead of one required one** (D8's `ingredient_id`/
+  `product_id` on both `inventory_lot` and `inventory_event`) is a small ongoing query-shape
+  cost (every reader must handle "product unknown"), accepted because the alternative — forcing
+  product selection at every entry point — is the exact friction the household asked to remove.
+  `implement-recipe-availability` and `implement-recommendations` (both downstream readers) must
+  be written against `ingredient_id` as the reliable join key and treat `product_id` as
+  enrichment, not the reverse.
+- **A self-referential `parent_location_id` needs an application-layer cycle check** (D9) —
+  cheap at household scale, but it is a real code path that must exist (mirroring
+  `LineageGraph.WouldCreateCycle()`), not a database constraint that enforces itself for free.

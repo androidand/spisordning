@@ -29,17 +29,34 @@
 ## 3. Inventory locations
 
 - [ ] 3.1 Model `inventory_location` scoped to a `Household`
-- [ ] 3.2 Decide location hierarchy vs. flat list (e.g. is "garage freezer" distinct from
-      "freezer," and is nesting needed, or is a flat named-location list sufficient for v1)
+- [x] 3.2 Decide location hierarchy vs. flat list (e.g. is "garage freezer" distinct from
+      "freezer," and is nesting needed, or is a flat named-location list sufficient for v1) —
+      resolved 2026-08-19 in `design.md` D9: typed (`location_type`, extensible enum, a hint not
+      identity) plus optional self-referential `parent_location_id` nesting to arbitrary depth.
+- [ ] 3.3 Implement `location_type` as an extensible, non-authoritative enum
+      (`CUPBOARD`/`DRAWER`/`FRIDGE`/`FREEZER`/`BASEMENT`/`BALCONY`/`BREADBOX`/`OTHER`) — see
+      `design.md` D9 and invariant 8
+- [ ] 3.4 Implement `parent_location_id` (nullable, self-referential) plus an application-layer
+      cycle check on write (a location cannot become its own ancestor), mirroring
+      `LineageGraph.WouldCreateCycle()`'s approach in `implement-recipe-family` — `design.md` D9
+- [ ] 3.5 Recursive "everything under this location" query (e.g. all lots under "basement"
+      including nested "chest freezer") — `design.md` D9
 
 ## 4. Inventory lots
 
 - [ ] 4.1 A lot represents physical household inventory — not a `products.current_quantity`
       field
-- [ ] 4.2 Define lot lifecycle fields: product reference, location, quantity, unit, best-before/
-      expiry, opened/sealed state, confidence
+- [ ] 4.2 Define lot lifecycle fields: ingredient reference (required), product reference
+      (optional, `design.md` D8), location, quantity, unit, best-before/expiry, opened/sealed
+      state, confidence
 - [ ] 4.3 Implement lot state as fully derived from / maintained alongside `inventory_event`
       writes (never mutated independently) per `design.md` D2/invariant 3
+- [ ] 4.4 Implement `RecordPurchase` with `productId` optional except when `source` is
+      `shopping_order`, where it is required (`design.md` D8, invariant 7) — enforce at the
+      command boundary, not by convention
+- [ ] 4.5 Implement `RefineLotProduct(lotId, productId, source)`: attaches a specific `Product`
+      to an existing ingredient-only lot without changing quantity, location, or confidence
+      (`design.md` D8)
 
 ## 5. Inventory events
 
@@ -120,3 +137,9 @@
 - [ ] 9.4 Barcode normalization unit tests (valid/invalid check digits, GTIN-8/12/13/14
       canonicalization)
 - [ ] 9.5 `openspec validate implement-pantry-inventory`
+- [ ] 9.7 Graduated-specificity tests: ingredient-only lot creation, `RefineLotProduct` leaves
+      quantity/location/confidence untouched, `shopping_order`-sourced `PURCHASE` rejected
+      without a `productId` (`design.md` D8)
+- [ ] 9.8 Location hierarchy tests: nested location creation, cycle rejection (self- and
+      descendant-as-parent), recursive "everything under this location" query correctness
+      (`design.md` D9)

@@ -1,0 +1,2 @@
+- androidand/spisordning#26
+- androidand/spisordning#27

@@ -29,14 +29,35 @@ model rather than re-litigating Ingredient-vs-Product modeling. In particular,
 table for "optional barcode"; this change's Barcode scope builds the normalization/lookup
 workflow on top of that table rather than defining a second, competing barcode table.
 
+**Update (2026-08-19): two household-requested refinements, incorporated before implementation
+starts.** Neither changes this change's core ledger-plus-projection shape (D2) or event
+vocabulary (D7); both amend Step 3/7's shape for `InventoryLot` and `InventoryLocation`
+specifically:
+
+1. **Graduated item specificity.** The household wants to record "we have mjölk" without being
+   forced to pick which specific product it is, and to optionally refine that later — or
+   automatically, when the milk came from a completed online order that already knows the exact
+   `Product`. `establish-household-and-catalog`'s own spec already establishes that a `Product`
+   can exist without a resolved `Ingredient` mapping ("a `Product` without a resolved mapping is
+   still valid... no `Ingredient` row is invented or guessed automatically"); this change takes
+   the symmetric position for `InventoryLot` — see D8.
+2. **Location taxonomy and optional hierarchy.** The household's actual storage is not one flat
+   list of same-shaped places — cupboard, drawer, fridge, freezer, basement, balcony, breadbox,
+   and arbitrary others, some nested inside others (a chest freezer in the basement, a shelf
+   inside the fridge). Task 3.2 already flagged this exact question ("is nesting needed, or is a
+   flat named-location list sufficient for v1") as open; it is now answered — see D9.
+
 ## What Changes
 
 - **`inventory_location`**: named places physical inventory sits (pantry, fridge, freezer, ...),
-  scoped to a `Household` (from `establish-household-and-catalog`).
-- **`inventory_lot`**: a distinguishable physical quantity of a `Product` in an
-  `inventory_location`, carrying current quantity, confidence, best-before/expiry, and
-  open/sealed state. A lot is the unit of physical inventory — never a `products.current_quantity`
-  field.
+  scoped to a `Household` (from `establish-household-and-catalog`), typed by an optional
+  `location_type` (cupboard/drawer/fridge/freezer/basement/balcony/breadbox/other — extensible,
+  a hint not an identity) and optionally nested under a parent `inventory_location` to arbitrary
+  depth (D9).
+- **`inventory_lot`**: a distinguishable physical quantity in an `inventory_location`, anchored
+  to an `Ingredient` always and a specific `Product` only when known, carrying current quantity,
+  confidence, best-before/expiry, and open/sealed state (D8). A lot is the unit of physical
+  inventory — never a `products.current_quantity` field.
 - **`inventory_event`**: an append-only ledger of `PURCHASE`/`CONSUME`/`DISCARD`/`ADJUST`/
   `TRANSFER`/`MARK_EMPTY`/`OPEN` events, each with concrete typed references (not a generic
   `entity_type`/`entity_id`/`value` table — see `design.md` D5 and PLAN.md's "Do Not Use Generic
@@ -79,6 +100,14 @@ workflow on top of that table rather than defining a second, competing barcode t
 - `implement-shopping-and-commerce`'s `order`/`order_item` design already reserves an explicit
   extension point for a completed order to create inventory `PURCHASE` events; this change
   defines that write path's target shape (`inventory_event` of kind `PURCHASE`) but does not
-  itself modify `implement-shopping-and-commerce`.
+  itself modify `implement-shopping-and-commerce`. Per D8, an order-derived `PURCHASE` already
+  knows the exact `Product` (the retailer resolution pipeline resolved it), so these events are
+  created at full product-level specificity automatically — manual quick entry (ingredient-only)
+  is for the physical-shopping/no-order path, not the online one.
+- Feeds two sibling changes gated on this one landing first:
+  `research-barcode-scanning-devices` (scan-driven `RecordPurchase`/`RecordConsume`/
+  `RecordDiscard`/`RecordMarkEmpty` calls) and `research-inventory-label-printing` (label
+  content is read from `InventoryLot`, and a scanned label barcode resolves to a specific
+  `InventoryLot`, not a `Product` GTIN — a distinct barcode namespace from this change's D6).
 - No changes to `internal/scoring`, `internal/planning`, or the existing `meal_plan`/
   `shopping_requirement` tables.
