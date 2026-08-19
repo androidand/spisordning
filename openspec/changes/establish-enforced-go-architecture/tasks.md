@@ -80,8 +80,20 @@
       `openapitools.json` as a starting reference) and wire codegen into a `go generate` or
       Makefile step. *(Deferred to 3.3: served via hand-wired stdlib handlers from 3.1's
       contract; codegen is the later handoff.)*
-- [ ] 3.3 Implement HTTP handlers in the httpapi layer that call into the application layer only
+- [x] 3.3 Implement HTTP handlers in the httpapi layer that call into the application layer only
       (never directly into persistence), satisfying the generated server interface.
+      *Verified:* `internal/httpapi/people.go` implements `/people` (GET list, GET {id}, POST
+      create) against a `PersonService` interface defined in httpapi (DTOs are transport-local;
+      httpapi never imports persistence). `cmd/food-brain/people_adapter.go` is the composition
+      root wiring `*persistence.Store` as that service, translating `persistence.Person` ↔
+      `PersonResponse`, generating IDs (crypto/rand, stdlib-only), and mapping `pgx.ErrNoRows` →
+      `httpapi.ErrNotFound` (404). `/health` always serves; resource routes nil-guard when no DB.
+      `internal/httpapi/people_test.go` covers happy-path + sad-path (list, get-found, get-404,
+      create, create empty-name→400, create bad-JSON→400, internal-error→500, health, nil-svc)
+      with a fake `PersonService` (147 passed / 14 packages; layer-guard clean). Note: `/meals`
+      and `/planning-constraints` handlers still need persistence read methods first — 3.3 starts
+      scope is /people only; the MealEvent/PlanningConstraint persistence layer has writes but
+      no list/get yet.
 - [ ] 3.4 Surface tonight's meal + one-tap reactions via Home Assistant ...
 - [ ] 3.5 API integration tests exercising the HTTP layer end-to-end against a real handler +
       test database.

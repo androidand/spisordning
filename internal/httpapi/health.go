@@ -19,18 +19,3 @@ func healthHandler(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(Health{Status: "ok"})
 }
-
-// RegisterHandlers mounts the service's HTTP handlers on mux. Today that is
-// only /health; more routes arrive as the API contract is implemented.
-func RegisterHandlers(mux *http.ServeMux) {
-	mux.HandleFunc("/health", healthHandler)
-}
-
-// Serve starts the HTTP server on addr (e.g. ":8080"). Handlers are sourced
-// from api/openapi.yaml; today only /health is wired. Persistence-backed
-// handlers (plans, shopping, etc.) arrive with task 2.2 + 3.3.
-func Serve(addr string) error {
-	mux := http.NewServeMux()
-	RegisterHandlers(mux)
-	return http.ListenAndServe(addr, mux)
-}
