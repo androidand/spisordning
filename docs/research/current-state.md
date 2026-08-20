@@ -8,8 +8,12 @@ build on reality rather than re-deriving or contradicting it.
 
 ```
 cmd/food-brain/        main.go (serve/demo/plan), demo.go, plan.go, plan_test.go,
-                       people_adapter.go (composition root: wires persistence.Store into
-                       httpapi's PersonService interface)
+                        people_adapter.go (composition root: wires persistence.Store into
+                        httpapi's PersonService interface)
+cmd/mcp-server/        main.go (stdio + stateless Streamable HTTP on :8081), adapters.go
+                        (composition root: wires persistence.Store + planning into
+                        mcptools' service interfaces); see
+                        docs/adr/mcp-protocol-2026-07-28-and-go-sdk.md
 internal/
   architecturetest/     layer-boundary guard (TestLayeredArchitecture via `go list -deps`)
   domain/               core types (Person, Preference, Candidate, Ingredient,
@@ -19,6 +23,8 @@ internal/
   llm/                  AI provider abstraction (Provider interface); Olla (Client) is the
                         primary OpenAI-compatible implementation
   mealie/client.go       read-only Mealie sync client (real, tested)
+  mcptools/              MCP tool adapters (list_recipe_candidates, record_meal_reaction,
+                        get_shopping_requirements); thin layer over the application layer
   persistence/          pgx-v5 Postgres repositories (people, recipes, meals, meal_plan)
                         + Config/FromEnv/New/NewStore; integration-tested
   planning/              requirements.go, staples.go, week.go (PlanWeek planner loop)
@@ -32,11 +38,14 @@ openspec/                 see below
 ```
 
 `go.mod`: `github.com/androidand/spisordning`, Go 1.26.1, **stdlib-only except `pgx/v5`**
-(`github.com/jackc/pgx/v5 v5.10.0`) — the first non-stdlib dependency, pinned by
-`establish-enforced-go-architecture` (rationale in that change's `design.md` §3). The
-architecture test confines pgx to `internal/persistence`. `go build ./... && go test ./...`
-passes: 147 tests across 14 packages (7 persistence integration tests skip locally without a
-Postgres; they run in CI's `persistence-test` job).
+(`github.com/jackc/pgx/v5 v5.10.0`) and the MCP Go SDK
+(`github.com/modelcontextprotocol/go-sdk v1.7.0`) — the latter added by
+`implement-mcp-server`; the protocol/SDK/binary-placement rationale is recorded in
+`docs/adr/mcp-protocol-2026-07-28-and-go-sdk.md`. The architecture test confines pgx to
+`internal/persistence` and forbids `internal/mcptools` from importing clients, persistence,
+httpapi, or cmd. `go build ./... && go test ./...` passes: 199 tests across 18 packages
+(7 persistence integration tests skip locally without a Postgres; they run in CI's
+`persistence-test` job).
 
 No `AGENTS.md`/`CLAUDE.md` existed before this change. No `docs/` existed before this change.
 
