@@ -76,3 +76,14 @@ verified rather than invented answers.
   ICA adapter should follow (pinning, review queue, confidence/quantity-uncertainty split, no
   automated checkout) rather than reinventing those invariants per retailer.
 - Part of Epic F: Retailer, Pricing & Commerce (tracking issue #6).
+- **Update (2026-08-18)**: a sibling `~/dev/willys/ica-client` scaffold has independently
+  started, mirroring `willys-client`'s architecture. Its `oauth2.ts` now hardcodes the exact same
+  DCR client, ACR value, and redirect URI this research found in `ha-ica-todo` — independent
+  confirmation of the mobile-API auth flow, not a competing theory — while also targeting ICA's
+  web storefront for cart/product search, a surface neither seed repo covers. Auth is not yet
+  proven live. Tracked in `docs/research/ica-current-api.md` §5 rather than reopening this
+  change's tasks, since it doesn't change this change's own completed scope.
+- **Update (2026-08-18, reconciliation)**: this change and a separate `feat/ica-current-api-research`
+  branch independently produced two versions of `docs/research/ica-current-api.md` for the same
+  investigation. Merged into one document (best material from each, one open disagreement flagged
+  rather than silently resolved — see the doc's §3.1 token-lifetime note); see `tasks.md` §6.
