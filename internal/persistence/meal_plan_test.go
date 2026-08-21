@@ -46,6 +46,10 @@ func sameDate(a, b time.Time) bool {
 func TestMealPlan_CreateGetByWeek(t *testing.T) {
 	s := skipWithoutDB(t)
 	ctx := context.Background()
+	// Clear any leftover plans from a prior run so the create-then-approve
+	// assertions below start from a clean state (this test runs first, so it
+	// also resets state for the other meal-plan tests).
+	truncateTables(t, ctx, s, "meal_plan")
 	weekStart := date(t, "2043-01-18") // first Monday of 2043
 	id, err := s.CreateMealPlan(ctx, weekStart)
 	if err != nil {
@@ -77,6 +81,13 @@ func TestMealPlan_GetOrCreateMealPlan(t *testing.T) {
 	s := skipWithoutDB(t)
 	ctx := context.Background()
 	weekStart := date(t, "2043-03-01") // a fresh week
+	// Seed the FK targets the anchored artifacts reference below.
+	if err := s.UpsertRecipeRef(ctx, RecipeRef{MealieRecipeID: "r-1", Title: "Test Recipe", Effort: 1}); err != nil {
+		t.Fatalf("UpsertRecipeRef (fixture): %v", err)
+	}
+	if err := s.UpsertIngredient(ctx, Ingredient{ID: "köttfärs", Display: "Köttfärs"}); err != nil {
+		t.Fatalf("UpsertIngredient (fixture): %v", err)
+	}
 	// First call creates the 'draft' plan row.
 	p1, err := s.GetOrCreateMealPlan(ctx, weekStart)
 	if err != nil {
@@ -135,6 +146,10 @@ func TestMealPlan_CandidatesAndDecisionsRoundTrip(t *testing.T) {
 	s := skipWithoutDB(t)
 	ctx := context.Background()
 	weekStart := date(t, "2043-01-25")
+	// Seed the recipe_ref the candidate/decision reference.
+	if err := s.UpsertRecipeRef(ctx, RecipeRef{MealieRecipeID: "r-1", Title: "Test Recipe", Effort: 1}); err != nil {
+		t.Fatalf("UpsertRecipeRef (fixture): %v", err)
+	}
 	pid, err := s.CreateMealPlan(ctx, weekStart)
 	if err != nil {
 		t.Fatalf("CreateMealPlan: %v", err)
@@ -176,6 +191,10 @@ func TestShoppingRequirements_RoundTrip(t *testing.T) {
 	s := skipWithoutDB(t)
 	ctx := context.Background()
 	weekStart := date(t, "2043-02-01")
+	// Seed the ingredient the shopping requirement references.
+	if err := s.UpsertIngredient(ctx, Ingredient{ID: "köttfärs", Display: "Köttfärs"}); err != nil {
+		t.Fatalf("UpsertIngredient (fixture): %v", err)
+	}
 	pid, err := s.CreateMealPlan(ctx, weekStart)
 	if err != nil {
 		t.Fatalf("CreateMealPlan: %v", err)

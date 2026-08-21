@@ -26,8 +26,12 @@ func (s *Store) UpsertRecipeRef(ctx context.Context, r RecipeRef) error {
 		ON CONFLICT (mealie_recipe_id) DO UPDATE SET title = EXCLUDED.title,
 			tags = EXCLUDED.tags, effort = EXCLUDED.effort, last_synced_at = now(),
 			raw_snapshot = EXCLUDED.raw_snapshot`
+	tags := r.Tags
+	if tags == nil {
+		tags = []string{}
+	}
 	raw := pgtype.Text{String: r.RawSnapshot, Valid: r.RawSnapshot != ""}
-	if _, err := s.db.Exec(ctx, q, r.MealieRecipeID, r.Title, r.Tags, r.Effort, raw); err != nil {
+	if _, err := s.db.Exec(ctx, q, r.MealieRecipeID, r.Title, tags, r.Effort, raw); err != nil {
 		return fmt.Errorf("persistence: upsert recipe_ref: %w", err)
 	}
 	return nil

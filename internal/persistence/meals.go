@@ -50,7 +50,7 @@ func (s *Store) AddMealReaction(ctx context.Context, r MealReaction) error {
 // ListMealReactions returns all reactions for an event.
 func (s *Store) ListMealReactions(ctx context.Context, eventID int64) ([]MealReaction, error) {
 	rows, err := s.db.Query(ctx, `SELECT id, meal_event_id, person_id, sentiment, note, created_at
-		FROM meal_reaction WHERE meal_event_id = $1 ORDER BY created_at`)
+		FROM meal_reaction WHERE meal_event_id = $1 ORDER BY created_at`, eventID)
 	if err != nil {
 		return nil, fmt.Errorf("persistence: list meal_reactions: %w", err)
 	}
