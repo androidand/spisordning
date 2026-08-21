@@ -75,6 +75,32 @@ func TestCheck_HttpapiImportsPersistence(t *testing.T) {
 	}
 }
 
+func TestCheck_McptoolsImportsPersistence(t *testing.T) {
+	deps := graph(
+		"example.com/spisordning/internal/mcptools: example.com/spisordning/internal/persistence",
+		"example.com/spisordning/internal/persistence: fmt",
+	)
+	v := Check(testModule, deps)
+	if len(v) == 0 {
+		t.Fatal("expected a violation for mcptools importing persistence")
+	}
+	if !strings.Contains(v[0], "internal/mcptools") || !strings.Contains(v[0], "internal/persistence") {
+		t.Fatalf("violation should name both packages, got: %q", v[0])
+	}
+}
+
+func TestCheck_McptoolsCleanGraphPasses(t *testing.T) {
+	deps := graph(
+		"example.com/spisordning/internal/mcptools: github.com/modelcontextprotocol/go-sdk/mcp",
+		"example.com/spisordning/cmd/mcp-server: example.com/spisordning/internal/mcptools example.com/spisordning/internal/persistence example.com/spisordning/internal/planning",
+		"example.com/spisordning/internal/planning: example.com/spisordning/internal/domain",
+		"example.com/spisordning/internal/persistence: example.com/spisordning/internal/domain",
+	)
+	if v := Check(testModule, deps); len(v) != 0 {
+		t.Fatalf("expected clean graph, got violations:\n%s", strings.Join(v, "\n"))
+	}
+}
+
 func TestCheck_InternalImportsCmd(t *testing.T) {
 	deps := graph(
 		"example.com/spisordning/internal/planning: example.com/spisordning/cmd/food-brain",

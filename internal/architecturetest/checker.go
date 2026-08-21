@@ -12,6 +12,7 @@
 //	             internal/llm, internal/httpclient, internal/recipeimport
 //	persistence  internal/persistence                      — Postgres repos
 //	httpapi      internal/httpapi                          — HTTP handlers
+//	mcptools     internal/mcptools                         — MCP tool adapters (no persistence)
 //	cmd          cmd/...                                   — composition root
 //
 // Every future internal/ package MUST be classified here; an unclassified
@@ -34,6 +35,7 @@ const (
 	Client      Layer = "client"
 	Persistence Layer = "persistence"
 	HTTPAPI     Layer = "httpapi"
+	MCPTools    Layer = "mcptools"
 	Cmd         Layer = "cmd"
 	Test        Layer = "test"
 	External    Layer = "external"
@@ -60,6 +62,7 @@ var layerPrefixes = []prefix{
 	}},
 	{Persistence, []string{"internal/persistence"}},
 	{HTTPAPI, []string{"internal/httpapi"}},
+	{MCPTools, []string{"internal/mcptools"}},
 }
 
 // layerOf classifies a full import path relative to the module.
@@ -106,6 +109,9 @@ var rules = []rule{
 	}},
 	{"httpapi must not import persistence", func(f, t Layer) bool {
 		return f == HTTPAPI && t == Persistence
+	}},
+	{"mcptools must not import clients, persistence, httpapi, or cmd", func(f, t Layer) bool {
+		return f == MCPTools && (t == Client || t == Persistence || t == HTTPAPI || t == Cmd || t == Unknown)
 	}},
 	{"no internal package may import the cmd composition root", func(f, t Layer) bool {
 		return t == Cmd
