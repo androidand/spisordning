@@ -45,10 +45,11 @@ type MealPlan struct {
 }
 
 // CreateMealPlan inserts a plan for weekStart and returns its id. The UNIQUE
-// week_start constraint makes this idempotent via ON CONFLICT DO NOTHING.
+// week_start constraint makes this idempotent: on conflict the no-op DO UPDATE
+// still yields a row, so the existing plan's id is returned rather than erroring.
 func (s *Store) CreateMealPlan(ctx context.Context, weekStart time.Time) (int64, error) {
 	const q = `INSERT INTO meal_plan (week_start, status) VALUES ($1, 'draft')
-		ON CONFLICT (week_start) DO NOTHING RETURNING id`
+		ON CONFLICT (week_start) DO UPDATE SET week_start = EXCLUDED.week_start RETURNING id`
 	var id int64
 	err := s.db.QueryRow(ctx, q, weekStart).Scan(&id)
 	if err != nil {
@@ -218,7 +219,11 @@ func (s *Store) InsertShoppingRequirement(ctx context.Context, r ShoppingRequire
 		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (plan_id, ingredient_id) DO UPDATE
 		SET quantity = shopping_requirement.quantity + EXCLUDED.quantity`
-	if _, err := s.db.Exec(ctx, q, r.PlanID, r.IngredientID, r.Quantity, r.Unit, r.AcceptableForms, r.PreferredForm); err != nil {
+	forms := r.AcceptableForms
+	if forms == nil {
+		forms = []string{}
+	}
+	if _, err := s.db.Exec(ctx, q, r.PlanID, r.IngredientID, r.Quantity, r.Unit, forms, r.PreferredForm); err != nil {
 		return fmt.Errorf("persistence: insert shopping_requirement: %w", err)
 	}
 	return nil
