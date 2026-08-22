@@ -50,9 +50,13 @@ This change reconciles the two without breaking the existing scorer's consumptio
 
 Per PLAN.md: "a planned dinner may produce an actual Meal."
 
-The link is modelled as an **explicit FK** `meal_event.meal_plan_decision_plan_id` →
-`meal_plan_decision.plan_id`, nullable (unplanned meals have no link). Date+recipe match
-alone is too fragile — two different plans could decide on the same recipe on the same day.
+The link is modelled as a **composite explicit FK**
+`meal_event.(meal_plan_id, meal_plan_slot_date)` →
+`meal_plan_decision(plan_id, slot_date)`, nullable (unplanned meals have no
+link). Both columns must be nil together; PostgreSQL skips the FK check when
+any column of a composite FK is NULL. Date+recipe match alone is too fragile
+— two different plans could decide on the same recipe on the same day — so
+the composite FK to the decision's PK is the right model.
 
 ## Decision: meal_reaction vs meal_review (§3.1)
 
@@ -81,7 +85,7 @@ existing rows.
 | Does it require history? | No. A current attendance ledger is sufficient; no need to track "was present yesterday but not today" as separate rows. |
 | Lifecycle? | Created when the meal is logged; can be deleted if the meal is removed. |
 | Deletion behavior? | Cascading: if the `meal_event` is deleted, participant rows go with it. If a `person` is deleted, their participant rows are orphaned (handled by ON DELETE SET NULL or CASCADE on the FK). |
-| Uniqueness constraints? | None — a person can attend the same meal multiple times (edge case, but allowed). |
+| Uniqueness constraints? | UNIQUE `(meal_event_id, person_id)` — one attendance record per person per meal. Mirrors the constraint on `meal_reaction`. |
 | Indexing? | Index on `(meal_event_id)` for listing attendees; index on `(person_id)` for "what meals did this person attend". |
 | FK-ability? | FK to `meal_event.id` (CASCADE), FK to `person.id` (CASCADE). |
 | JSON? | No — two clean FK columns. |
@@ -112,8 +116,8 @@ existing rows.
 | Is it mutable? | Yes — can be added or removed at any time. |
 | Does it require history? | No — current favorite state is all that matters. |
 | Lifecycle? | Created by explicit action; removed by explicit action. |
-| Deletion behavior? | Person delete cascades. Household delete cascades. Recipe delete has no effect (favorite becomes dangling; cleanup is a separate concern). |
+| Deletion behavior? | Person delete cascades. Household delete cascades. Recipe delete is RESTRICT (default FK behavior) — a favorite referencing a deleted recipe blocks the delete; cleanup is a separate concern. |
 | Uniqueness constraints? | UNIQUE `(person_id, mealie_recipe_id)` and UNIQUE `(household_id, mealie_recipe_id)` — a person can't favorite the same recipe twice; same for household. |
 | Indexing? | Index on `(mealie_recipe_id)` for "who favorited this recipe". |
-| FK-ability? | Nullable FK to `person.id` (CASCADE), nullable FK to `household.id` (CASCADE). CHECK constraint: exactly one of `person_id`, `household_id` is non-NULL. |
+| FK-ability? | Nullable FK to `person.id` (CASCADE), nullable FK to `household.id` (CASCADE), RESTRICT FK to `recipe_ref.mealie_recipe_id` (default). CHECK constraint: exactly one of `person_id`, `household_id` is non-NULL. |
 | JSON? | No — two nullable FK columns with a CHECK constraint is the right model here. |

@@ -6,24 +6,26 @@ import (
 	"time"
 )
 
-// MealEvent mirrors migrations/0001_init.sql meal_event.
+// MealEvent mirrors migrations/0001_init.sql meal_event plus the plan link
+// added by migrations/0010_meals_and_preferences.sql.
 type MealEvent struct {
-	ID             int64
-	MealieRecipeID string
-	ServedOn       time.Time
-	MealPlanID     *int64 // nil for ad-hoc meals; set when the meal came from a plan
-	CreatedAt      time.Time
+	ID               int64
+	MealieRecipeID   string
+	ServedOn         time.Time
+	MealPlanID       *int64     // nil for ad-hoc meals
+	MealPlanSlotDate *time.Time // nil for ad-hoc meals; paired with MealPlanID
+	CreatedAt        time.Time
 }
 
-// CreateMealEvent records that a recipe was served on a day.
-func (s *Store) CreateMealEvent(ctx context.Context, mealieRecipeID string, servedOn time.Time, mealPlanID *int64) (int64, error) {
-	const q = `INSERT INTO meal_event (mealie_recipe_id, served_on, meal_plan_id) VALUES ($1, $2, $3) RETURNING id`
+// CreateMealEvent records that a recipe was served on a day. When planID and
+// planSlotDate are both non-nil they form a composite FK to the specific
+// meal_plan_decision row that produced this meal; both must be nil for ad-hoc
+// (unplanned) meals.
+func (s *Store) CreateMealEvent(ctx context.Context, mealieRecipeID string, servedOn time.Time, planID *int64, planSlotDate *time.Time) (int64, error) {
+	const q = `INSERT INTO meal_event (mealie_recipe_id, served_on, meal_plan_id, meal_plan_slot_date)
+		VALUES ($1, $2, $3, $4) RETURNING id`
 	var id int64
-	var planID *int64
-	if mealPlanID != nil && *mealPlanID > 0 {
-		planID = mealPlanID
-	}
-	if err := s.db.QueryRow(ctx, q, mealieRecipeID, servedOn, planID).Scan(&id); err != nil {
+	if err := s.db.QueryRow(ctx, q, mealieRecipeID, servedOn, planID, planSlotDate).Scan(&id); err != nil {
 		return 0, fmt.Errorf("persistence: create meal_event: %w", err)
 	}
 	return id, nil
@@ -83,9 +85,11 @@ type MealParticipant struct {
 	CreatedAt   time.Time
 }
 
-// AddMealParticipant records that a person was present at a meal.
+// AddMealParticipant records that a person was present at a meal. The UNIQUE
+// (meal_event_id, person_id) makes this an upsert per person per meal.
 func (s *Store) AddMealParticipant(ctx context.Context, p MealParticipant) error {
-	const q = `INSERT INTO meal_participant (meal_event_id, person_id) VALUES ($1, $2)`
+	const q = `INSERT INTO meal_participant (meal_event_id, person_id) VALUES ($1, $2)
+		ON CONFLICT (meal_event_id, person_id) DO NOTHING`
 	if _, err := s.db.Exec(ctx, q, p.MealEventID, p.PersonID); err != nil {
 		return fmt.Errorf("persistence: add meal_participant: %w", err)
 	}
@@ -224,7 +228,15 @@ func (s *Store) UpsertFavorite(ctx context.Context, personID, householdID, meali
 }
 
 // DeleteFavorite removes a person- or household-scoped favorite.
+// Exactly one of personID/householdID must be non-empty; mirrors UpsertFavorite's
+// validation.
 func (s *Store) DeleteFavorite(ctx context.Context, personID, householdID, mealieRecipeID string) error {
+	if personID != "" && householdID != "" {
+		return fmt.Errorf("persistence: delete favorite: exactly one of person_id/household_id must be set")
+	}
+	if personID == "" && householdID == "" {
+		return fmt.Errorf("persistence: delete favorite: either person_id or household_id must be set")
+	}
 	var q string
 	var args []interface{}
 	if personID != "" {

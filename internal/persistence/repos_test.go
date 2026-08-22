@@ -136,7 +136,7 @@ func TestMeals_ReactionsAndConstraints(t *testing.T) {
 		t.Fatalf("UpsertRecipeRef: %v", err)
 	}
 	served := time.Now().AddDate(0, 0, -3)
-	eid, err := s.CreateMealEvent(ctx, "r-fisk", served, nil)
+	eid, err := s.CreateMealEvent(ctx, "r-fisk", served, nil, nil)
 	if err != nil {
 		t.Fatalf("CreateMealEvent: %v", err)
 	}

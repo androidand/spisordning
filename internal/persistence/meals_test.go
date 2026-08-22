@@ -18,7 +18,7 @@ func TestMealsAndPreferences_ParticipantAndReviewRoundTrip(t *testing.T) {
 		t.Fatalf("UpsertRecipeRef: %v", err)
 	}
 	served := date(t, "2026-08-15")
-	eid, err := s.CreateMealEvent(ctx, "r-pasta", served, nil)
+	eid, err := s.CreateMealEvent(ctx, "r-pasta", served, nil, nil)
 	if err != nil {
 		t.Fatalf("CreateMealEvent: %v", err)
 	}
@@ -82,8 +82,8 @@ func TestMealsAndPreferences_RecipeRatingAggregation(t *testing.T) {
 	}
 
 	// Two meal events for the same recipe.
-	e1, _ := s.CreateMealEvent(ctx, "r-pasta", date(t, "2026-08-01"), nil)
-	e2, _ := s.CreateMealEvent(ctx, "r-pasta", date(t, "2026-08-08"), nil)
+	e1, _ := s.CreateMealEvent(ctx, "r-pasta", date(t, "2026-08-01"), nil, nil)
+	e2, _ := s.CreateMealEvent(ctx, "r-pasta", date(t, "2026-08-08"), nil, nil)
 
 	// Mum rates both 5; kid rates both 3. Weighted avg = (1*5 + 2*3 + 1*5 + 2*3) / (1+2+1+2) = 24/6 = 4.0.
 	s.UpsertMealReview(ctx, MealReview{MealEventID: e1, PersonID: "p-mum", Rating: 5})
@@ -130,8 +130,8 @@ func TestMealsAndPreferences_FavoriteSurvivesLowReviews(t *testing.T) {
 	}
 
 	// Then left several low reviews (maybe it was undercooked each time).
-	e1, _ := s.CreateMealEvent(ctx, "r-comfort", date(t, "2026-08-01"), nil)
-	e2, _ := s.CreateMealEvent(ctx, "r-comfort", date(t, "2026-08-08"), nil)
+	e1, _ := s.CreateMealEvent(ctx, "r-comfort", date(t, "2026-08-01"), nil, nil)
+	e2, _ := s.CreateMealEvent(ctx, "r-comfort", date(t, "2026-08-08"), nil, nil)
 	s.UpsertMealReview(ctx, MealReview{MealEventID: e1, PersonID: "p-kid", Rating: 2})
 	s.UpsertMealReview(ctx, MealReview{MealEventID: e2, PersonID: "p-kid", Rating: 1})
 
@@ -151,6 +151,80 @@ func TestMealsAndPreferences_FavoriteSurvivesLowReviews(t *testing.T) {
 	rating, _ := s.GetRecipeRating(ctx, "r-comfort")
 	if rating.Average > 1.5 || rating.ReviewCount != 2 {
 		t.Errorf("average = %v (count=%d), expected low", rating.Average, rating.ReviewCount)
+	}
+}
+
+func TestMealsAndPreferences_PlanLink(t *testing.T) {
+	s := skipWithoutDB(t)
+	ctx := context.Background()
+	truncateTables(t, ctx, s, "meal_event", "meal_plan_decision", "meal_plan", "recipe_ref")
+
+	// Seed a recipe.
+	if err := s.UpsertRecipeRef(ctx, RecipeRef{MealieRecipeID: "r-pasta", Title: "Pasta", Effort: 2}); err != nil {
+		t.Fatalf("UpsertRecipeRef: %v", err)
+	}
+
+	// Create a plan for a week.
+	weekStart := date(t, "2026-08-17") // Monday
+	planID, err := s.CreateMealPlan(ctx, weekStart)
+	if err != nil {
+		t.Fatalf("CreateMealPlan: %v", err)
+	}
+
+	// Add a decision for Wednesday.
+	decisionDate := weekStart.AddDate(0, 0, 2) // Wednesday
+	if err := s.SetDecision(ctx, MealPlanDecision{
+		PlanID:         planID,
+		SlotDate:       decisionDate,
+		MealieRecipeID: "r-pasta",
+	}); err != nil {
+		t.Fatalf("SetDecision: %v", err)
+	}
+
+	// Create the actual meal linked to that decision.
+	served := decisionDate
+	eid, err := s.CreateMealEvent(ctx, "r-pasta", served, &planID, &served)
+	if err != nil {
+		t.Fatalf("CreateMealEvent with plan link: %v", err)
+	}
+
+	// Ad-hoc meal (no plan link) still works.
+	eid2, err := s.CreateMealEvent(ctx, "r-pasta", served, nil, nil)
+	if err != nil {
+		t.Fatalf("CreateMealEvent ad-hoc: %v", err)
+	}
+	if eid2 == eid {
+		t.Fatal("ad-hoc and planned events should have different ids")
+	}
+}
+
+func TestMealsAndPreferences_ParticipantUniqueness(t *testing.T) {
+	s := skipWithoutDB(t)
+	ctx := context.Background()
+	truncateTables(t, ctx, s, "meal_participant", "meal_event", "recipe_ref", "person")
+
+	if err := s.CreatePerson(ctx, Person{ID: "p-a", Name: "A", Weight: 1.0}); err != nil {
+		t.Fatalf("CreatePerson: %v", err)
+	}
+	if err := s.UpsertRecipeRef(ctx, RecipeRef{MealieRecipeID: "r-pasta", Title: "Pasta", Effort: 2}); err != nil {
+		t.Fatalf("UpsertRecipeRef: %v", err)
+	}
+	eid, _ := s.CreateMealEvent(ctx, "r-pasta", date(t, "2026-08-15"), nil, nil)
+
+	// First add is fine.
+	if err := s.AddMealParticipant(ctx, MealParticipant{MealEventID: eid, PersonID: "p-a"}); err != nil {
+		t.Fatalf("first AddMealParticipant: %v", err)
+	}
+	// Duplicate add is idempotent (ON CONFLICT DO NOTHING).
+	if err := s.AddMealParticipant(ctx, MealParticipant{MealEventID: eid, PersonID: "p-a"}); err != nil {
+		t.Fatalf("duplicate AddMealParticipant: %v", err)
+	}
+	parts, err := s.ListMealParticipants(ctx, eid)
+	if err != nil {
+		t.Fatalf("ListMealParticipants: %v", err)
+	}
+	if len(parts) != 1 {
+		t.Errorf("expected 1 participant row (idempotent), got %d", len(parts))
 	}
 }
 

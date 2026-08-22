@@ -19,11 +19,21 @@
 
 BEGIN;
 
--- Link a cooked meal back to the plan decision that produced it. Nullable:
--- ad-hoc meals (never planned) have no plan link.
+-- Link a cooked meal back to the specific plan decision (plan_id + slot_date)
+-- that produced it. Nullable: ad-hoc meals (never planned) have no link.
+-- Composite FK targets meal_plan_decision's PK so the link is to the exact
+-- decision row, not just the week's plan. PostgreSQL skips the FK check when
+-- any column of a composite FK is NULL, so (NULL, NULL) is valid for unplanned
+-- meals.
 ALTER TABLE meal_event
-    ADD COLUMN meal_plan_id BIGINT REFERENCES meal_plan(id) ON DELETE SET NULL;
-CREATE INDEX ON meal_event (meal_plan_id);
+    ADD COLUMN meal_plan_id     BIGINT,
+    ADD COLUMN meal_plan_slot_date DATE;
+CREATE INDEX ON meal_event (meal_plan_id, meal_plan_slot_date);
+ALTER TABLE meal_event
+    ADD CONSTRAINT meal_event_plan_decision_fk
+        FOREIGN KEY (meal_plan_id, meal_plan_slot_date)
+        REFERENCES meal_plan_decision (plan_id, slot_date)
+        ON DELETE SET NULL;
 
 -- Who was actually present/ate at a meal. Distinct from meal_reaction (who
 -- reacted and how). A person can attend without reacting; a reaction can
@@ -33,9 +43,9 @@ CREATE TABLE meal_participant (
     id            BIGSERIAL PRIMARY KEY,
     meal_event_id BIGINT NOT NULL REFERENCES meal_event(id) ON DELETE CASCADE,
     person_id     TEXT NOT NULL REFERENCES person(id) ON DELETE CASCADE,
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (meal_event_id, person_id)
 );
-CREATE INDEX ON meal_participant (meal_event_id);
 CREATE INDEX ON meal_participant (person_id);
 
 -- Per-person considered rating of a specific meal instance (1-5). Sibling of

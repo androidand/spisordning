@@ -15,7 +15,11 @@
 - [x] 1.3 Confirm a planned dinner (`meal_plan_decision`) may produce an actual `meal_event`,
       per PLAN.md's "a planned dinner may produce an actual Meal" — decide whether that link is
       an explicit FK on `meal_event` or inferred by date+recipe match.
-      → explicit nullable FK `meal_event.meal_plan_decision_plan_id`; documented in `design.md` §Plan→actual link.
+      → composite nullable FK `meal_event.(meal_plan_id, meal_plan_slot_date)` →
+      `meal_plan_decision(plan_id, slot_date)`; documented in `design.md` §Plan→actual link.
+      Single-column FK to `meal_plan(id)` was rejected as insufficient (doesn't identify
+      the specific decision); date+recipe match was rejected as fragile. Composite PK
+      FK is the correct model.
 
 ## 2. Meal participants (actual attendance)
 
@@ -98,8 +102,10 @@
       migration — FK `meal_participant`/`meal_review` to `Person` (post-household model), not
       the bare `person` table's old shape if it changed underneath.
       → `migrations/0010_meals_and_preferences.sql`: `meal_participant`, `meal_review`,
-      `favorite`, plus `meal_event.meal_plan_id` nullable FK. All FKs target existing
-      tables (`person`, `household`, `meal_event`, `meal_plan`, `recipe_ref`).
+      `favorite`, plus composite nullable FK `meal_event.(meal_plan_id, meal_plan_slot_date)`
+      → `meal_plan_decision(plan_id, slot_date)`. All FKs target existing tables
+      (`person`, `household`, `meal_event`, `meal_plan_decision`, `recipe_ref`).
+      `meal_participant` has `UNIQUE (meal_event_id, person_id)` (idempotent attendance).
 - [x] 5.3 Add Go domain types in `internal/domain` for MealParticipant, MealReview, Favorite,
       and a recipe-level rating aggregate read model.
       → `internal/domain/meal_history.go`: `MealParticipant`, `MealReview`, `FavoriteRating`,
@@ -127,4 +133,7 @@
       `TestMealsAndPreferences_FavoriteSurvivesLowReviews` — explicit favorite persists
       despite low aggregate rating;
       `TestMealsAndPreferences_FavoriteScopeInvariant` — dual scope (person + household)
-      on same recipe, delete one without affecting the other.
+      on same recipe, delete one without affecting the other;
+      `TestMealsAndPreferences_PlanLink` — composite FK to `meal_plan_decision` works,
+      ad-hoc meals (nil link) coexist;
+      `TestMealsAndPreferences_ParticipantUniqueness` — duplicate attendance is idempotent.

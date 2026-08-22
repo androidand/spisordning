@@ -116,6 +116,9 @@ func (a storeAdapter) CreateMealEvent(ctx context.Context, in httpapi.MealEventN
 	if err := tx.QueryRow(ctx, insertEventQ, in.MealieRecipeID, servedOn).Scan(&eventID); err != nil {
 		return httpapi.MealEventResponse{}, fmt.Errorf("meals create: insert event: %w", err)
 	}
+	if _, err := a.db.CreateMealEvent(ctx, in.MealieRecipeID, servedOn, nil, nil); err != nil {
+		return httpapi.MealEventResponse{}, fmt.Errorf("meals create: persist event: %w", err)
+	}
 
 	// Insert reactions inside the same tx.
 	for _, rx := range in.Reactions {
