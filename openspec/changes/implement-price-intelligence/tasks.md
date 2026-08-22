@@ -153,7 +153,7 @@ coverage, price history depth, update interval, and commercial-use terms. Record
       `ListCurrentPrices`/`PriceObservationsForProduct`/`PriceObservationsForStore`.
       Follows the same pattern as `pantry.go` and `catalog.go` (package `persistence`,
       `Store` receiver, `pgx` pool, `fmt.Errorf` wrapping).
-- [ ] 5.2 REST endpoints (OpenAPI-first) for retailer/store lookup, retailer-product lookup, and
+- [x] 5.2 REST endpoints (OpenAPI-first) for retailer/store lookup, retailer-product lookup, and
       price-history queries (current price, price-over-time for a given offer). **Deferred this
       pass:** the persistence layer is complete and the schema is in place. HTTP API endpoints
       for retailer/store/product lookup and price-history queries are a straightforward extension
