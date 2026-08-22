@@ -145,19 +145,30 @@
 - [x] 8.1 Domain unit tests: exact on-hand match, substitution match at each tier, quantity
       shortfall, missing ingredient with no substitute, `UNKNOWN`-confidence lot handling.
       **Done 2026-08-22 (initial):** 21 tests in `internal/availability/availability_test.go`.
-      **Fixed 2026-08-22 (VERIFY gate):** Added 5 new tests —
-      `TestSubstitutionViaUnknownLotFlagged` (substitution backed by UNKNOWN lot sets
-      IsUncertain), `TestPartialOnHandWithSubstitution` (partial lots preserved when
-      substitution replaces line), `TestPartialOnHandDoesNotDoubleCountWithSubstitution`
-      (partial confident lot available for second line after substitution on first),
-      `TestFormFilterRejectsMismatched` (negative case: defaultForm set, all subs mismatched
-      → missing), `TestSubstitutionRatioGreaterThanOne` (ratio > 1 exercises needed > required).
-      Total: 26 tests. Removed unused `eggLot`/`formSub` helpers. Fixed unstable
+      **Fixed 2026-08-22 (VERIFY gate 2):** Added 6 new tests —
+      `TestFailedSubstitutionDoesNotConsumeStock` (failed sub attempt must not
+      consume substitute stock — prevents verdict-flipping),
+      `TestConfidentAndUnknownMixed` (confident+unknown combined sufficient →
+      unknown/flagged, not infeasible), `TestConfidentInsufficientThenUnknownSufficient`
+      (same scenario, explicit), `TestUnknownPartialWithSubstitution` (partial
+      confident+unknown insufficient, substitution succeeds),
+      `TestUnknownPartialWithoutSubstitution` (partial confident+unknown
+      insufficient, no sub → infeasible with correct shortfall),
+      `TestPartialConfidentPreservedForSecondLine` (partial confident lot available
+      for second line after substitution on first). Also fixed
+      `TestFormFilterOnSubstitution` to use different ToIngredientIDs (oat-milk vs
+      soymilk) so it can actually discriminate the correct form-matching sub.
+      Total: 32 tests. Removed unused `eggLot`/`formSub` helpers. Fixed unstable
       `sort.Slice` tie-break (secondary sort by ToIngredientID within same tier).
+      Refactored `computeLine` into a 4-phase flow: (1) confident sufficient → on-hand,
+      (2) confident+unknown combined sufficient → unknown/flagged, (3) substitution
+      (read-only snapshot, no mutation on failure), (4) consume partial lots → missing.
+      Added `consumeFromCombined` helper and `subAttempt`/`trySubstitutionSnapshot`/
+      `trySubstitutionCommit` for read-only substitution attempts.
 - [x] 8.2 Domain unit tests: recipe-level aggregation rule across mixed per-ingredient verdicts.
       **Done 2026-08-22:** Tests cover: all-on-hand→feasible, one-substitution→feasible-with-sub,
       one-missing→infeasible, all-uncertain→feasible-with-sub, mixed-on-hand-and-missing→infeasible,
       explainability (reasons are non-empty, verdict derivable from lines).
 - [x] 8.3 `openspec validate implement-recipe-availability`. **Verified:** valid.
-      Full suite: 255 tests passed (18 packages), 0 vet issues, build success,
+      Full suite: 261 tests passed (18 packages), 0 vet issues, build success,
       architecture tests 8/8.
