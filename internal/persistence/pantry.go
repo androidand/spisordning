@@ -250,8 +250,12 @@ func (s *Store) ListCandidateProductsForIngredient(ctx context.Context, ingredie
 	if err != nil {
 		return nil, err
 	}
+	// unaccent() makes the match accent-insensitive so "mjölk" matches "milk"
+	// and similar Scandinavian/English name pairs. Lowercasing both sides makes
+	// it case-insensitive as well.
 	const q = `SELECT id, name, brand, package_size, created_at FROM product
-		WHERE name ILIKE '%' || $1 || '%' ORDER BY id`
+		WHERE unaccent(lower(name)) LIKE '%' || unaccent(lower($1)) || '%'
+		ORDER BY id`
 	rows, err := s.db.Query(ctx, q, ing.Display)
 	if err != nil {
 		return nil, fmt.Errorf("persistence: name-match candidate products: %w", err)
