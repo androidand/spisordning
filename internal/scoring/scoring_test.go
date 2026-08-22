@@ -707,3 +707,71 @@ func TestDefaultWeights_PantryIncluded(t *testing.T) {
 		t.Errorf("default pantry weight = %v, want 0.5", w.Pantry)
 	}
 }
+
+func TestSelectBatch_InfeasibleCandidateNotPromoted(t *testing.T) {
+	// Regression test for reviewer round 4: the balance guarantee must
+	// never promote an infeasible candidate into the batch. If the pool's
+	// only favorite (or only novel) candidate is infeasible, the batch
+	// should not include it.
+	ctx := baseCtx()
+	ctx.KitchenEnergy = domain.EffortLow // exhausted cook
+	ctx.Preferences = []domain.Preference{
+		{PersonID: "kid", Tag: "pasta", Sentiment: domain.Loves, Confidence: 1.0},
+		{PersonID: "kid", Tag: "curry", Sentiment: domain.Loves, Confidence: 1.0},
+	}
+	// fav: loved, thrice-cooked → known favorite, but high effort → infeasible
+	fav := domain.Candidate{MealieRecipeID: "fav", Tags: []string{"pasta"}, Effort: domain.EffortHigh}
+	// novel: loved, never-cooked → discovery, low effort → feasible
+	novel := domain.Candidate{MealieRecipeID: "novel", Tags: []string{"curry"}, Effort: domain.EffortLow}
+	// other: loved, thrice-cooked → known favorite, low effort → feasible
+	other := domain.Candidate{MealieRecipeID: "other", Tags: []string{"pasta"}, Effort: domain.EffortLow}
+	for i := 0; i < 3; i++ {
+		ctx.RecentMealIDs = append(ctx.RecentMealIDs,
+			domain.RecentMeal{MealieRecipeID: "fav", Served: day.AddDate(0, 0, -(30+i*30))},
+			domain.RecentMeal{MealieRecipeID: "other", Served: day.AddDate(0, 0, -(40+i*30))},
+		)
+	}
+
+	ranked := RankWithMode([]domain.Candidate{fav, novel, other}, ctx, ModeSafeChoice)
+	// Verify the ranking: feasible candidates first, infeasible last.
+	if ranked[0].Candidate.MealieRecipeID == "fav" {
+		t.Fatal("infeasible candidate should not rank first")
+	}
+
+	batch := SelectBatch(ranked, ctx, 2)
+	for _, sc := range batch {
+		if !sc.Feasible {
+			t.Errorf("batch should not contain infeasible candidate %s", sc.Candidate.MealieRecipeID)
+		}
+	}
+	// The batch should have the feasible novel and the feasible other,
+	// never the infeasible favorite.
+	if len(batch) != 2 {
+		t.Fatalf("batch size = %d, want 2", len(batch))
+	}
+	ids := map[string]bool{batch[0].Candidate.MealieRecipeID: true, batch[1].Candidate.MealieRecipeID: true}
+	if !ids["novel"] || !ids["other"] {
+		t.Errorf("batch should contain novel and other, got %v", batch)
+	}
+}
+
+func TestSelectBatch_NoFeasibleFavoriteOrNovel(t *testing.T) {
+	// Edge case: all candidates in the pool are infeasible.
+	// The batch should contain the top-ranked infeasible candidates
+	// without pretending they are feasible.
+	ctx := baseCtx()
+	ctx.KitchenEnergy = domain.EffortLow
+	candidates := []domain.Candidate{
+		{MealieRecipeID: "a", Tags: []string{"pasta"}, Effort: domain.EffortHigh},
+		{MealieRecipeID: "b", Tags: []string{"curry"}, Effort: domain.EffortHigh},
+	}
+	ranked := RankWithMode(candidates, ctx, ModeSafeChoice)
+	batch := SelectBatch(ranked, ctx, 1)
+	if len(batch) != 1 {
+		t.Fatalf("batch size = %d, want 1", len(batch))
+	}
+	// Top-ranked infeasible should be returned (1-slot batch, no alternative).
+	if !batch[0].Feasible {
+		t.Logf("batch contains infeasible candidate %s (expected — no feasible alternative)", batch[0].Candidate.MealieRecipeID)
+	}
+}

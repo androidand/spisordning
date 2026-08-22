@@ -209,18 +209,23 @@ func SelectBatch(ranked []ScoredCandidate, ctx domain.PlanContext, n int) []Scor
 		}
 	}
 	if poolFav && !batchFav {
-		swapIn(func(sc ScoredCandidate) bool { return IsKnownFavorite(sc.Candidate, ctx) })
+		swapIn(func(sc ScoredCandidate) bool { return sc.Feasible && IsKnownFavorite(sc.Candidate, ctx) })
 	}
 	if poolNovel && !batchNovel {
-		swapIn(func(sc ScoredCandidate) bool { return IsDiscovery(sc.Candidate, ctx) })
+		swapIn(func(sc ScoredCandidate) bool { return sc.Feasible && IsDiscovery(sc.Candidate, ctx) })
 	}
 	return batch
 }
 
-// groupsPresent reports whether the given candidates include at least one known
-// favorite and/or at least one discovery candidate.
+// groupsPresent reports whether the given candidates include at least one
+// known favorite and/or at least one discovery candidate. Only feasible
+// candidates are counted: an infeasible candidate is never surfaced by the
+// balance guarantee, so it must not trigger the swap-in.
 func groupsPresent(cands []ScoredCandidate, ctx domain.PlanContext) (fav, novel bool) {
 	for _, sc := range cands {
+		if !sc.Feasible {
+			continue
+		}
 		if !fav && IsKnownFavorite(sc.Candidate, ctx) {
 			fav = true
 		}

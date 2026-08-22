@@ -58,8 +58,10 @@
       re-scores) the mode-ranked list, so the deterministic ranking is preserved. The mix ratio is
       driven by the mode's weights (safe choice leans familiar, surprise me leans novel); the
       guarantee only prevents a degenerate all-one-group batch. `TestSelectBatch_BalanceGuarantee`,
-      `TestSelectBatch_AllFavorites`, `TestSelectBatch_SmallBatch` cover the guarantee, the honest
-      all-favorites case, and the 1-slot edge case)
+      `TestSelectBatch_AllFavorites`, `TestSelectBatch_SmallBatch`,
+      `TestSelectBatch_InfeasibleCandidateNotPromoted`, `TestSelectBatch_NoFeasibleFavoriteOrNovel`
+      cover the guarantee, the honest all-favorites case, the 1-slot edge case, the infeasible-candidate
+      regression, and the all-infeasible edge case)
 - [x] 4.2 Explainability: each candidate's reason SHALL state whether it was surfaced for
       familiarity or for novelty
       (verified: `familiarityReason` — a deterministic, LLM-free note (novel (never/rarely cooked) /
