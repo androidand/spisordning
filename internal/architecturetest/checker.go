@@ -9,7 +9,8 @@
 //	domain       internal/domain, internal/recipefamily, internal/scoring — pure, no I/O
 //	application  internal/planning                                — use-case logic
 //	client       internal/mealie, internal/skolmaten, internal/retailer,
-//	             internal/llm, internal/httpclient, internal/recipeimport
+//	             internal/icaretailer, internal/llm, internal/httpclient,
+//	             internal/recipeimport
 //	persistence  internal/persistence                      — Postgres repos
 //	httpapi      internal/httpapi                          — HTTP handlers
 //	cmd          cmd/...                                   — composition root
@@ -50,10 +51,11 @@ var layerPrefixes = []prefix{
 	{Test, []string{"internal/architecturetest"}},
 	{Domain, []string{"internal/domain", "internal/recipefamily", "internal/scoring", "internal/ingredients", "internal/openapi", "internal/availability"}},
 	{Application, []string{"internal/planning"}},
-	{Client, []string{
+{Client, []string{
 		"internal/mealie",
 		"internal/skolmaten",
 		"internal/retailer",
+		"internal/icaretailer",
 		"internal/llm",
 		"internal/httpclient",
 		"internal/recipeimport",
