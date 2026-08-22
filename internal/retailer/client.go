@@ -110,3 +110,19 @@ func (c *Client) CreateShoppingList(
 	}
 	return &out, nil
 }
+
+// ToCartResponse is the body returned by POST /shopping-lists/:id/to-cart.
+type ToCartResponse struct {
+	CartID string `json:"cartId"`
+	Status string `json:"status"`
+}
+
+// ToCart converts a retailer wishlist to the session cart. It is the last
+// automated step — no checkout, payment, or slot booking is triggered.
+func (c *Client) ToCart(ctx context.Context, externalListID string) (*ToCartResponse, error) {
+	var out ToCartResponse
+	if err := c.http.PostJSON(ctx, "/shopping-lists/"+externalListID+"/to-cart", struct{}{}, &out, nil); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}

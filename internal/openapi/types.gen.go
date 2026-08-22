@@ -66,6 +66,27 @@ func (e MealPlanUpdateStatus) Valid() bool {
 	}
 }
 
+// Defines values for OrderSource.
+const (
+	Manual        OrderSource = "manual"
+	ReceiptImport OrderSource = "receipt_import"
+	RetailerApi   OrderSource = "retailer_api"
+)
+
+// Valid indicates whether the value is a known member of the OrderSource enum.
+func (e OrderSource) Valid() bool {
+	switch e {
+	case Manual:
+		return true
+	case ReceiptImport:
+		return true
+	case RetailerApi:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PlanRunResultStatus.
 const (
 	Accepted PlanRunResultStatus = "accepted"
@@ -78,6 +99,78 @@ func (e PlanRunResultStatus) Valid() bool {
 	case Accepted:
 		return true
 	case Failed:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RetailerListBindingLastPushStatus.
+const (
+	RetailerListBindingLastPushStatusError   RetailerListBindingLastPushStatus = "error"
+	RetailerListBindingLastPushStatusSuccess RetailerListBindingLastPushStatus = "success"
+)
+
+// Valid indicates whether the value is a known member of the RetailerListBindingLastPushStatus enum.
+func (e RetailerListBindingLastPushStatus) Valid() bool {
+	switch e {
+	case RetailerListBindingLastPushStatusError:
+		return true
+	case RetailerListBindingLastPushStatusSuccess:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RetailerListBindingSyncDirection.
+const (
+	Outbound RetailerListBindingSyncDirection = "outbound"
+)
+
+// Valid indicates whether the value is a known member of the RetailerListBindingSyncDirection enum.
+func (e RetailerListBindingSyncDirection) Valid() bool {
+	switch e {
+	case Outbound:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ShoppingCartStatus.
+const (
+	Abandoned ShoppingCartStatus = "abandoned"
+	Confirmed ShoppingCartStatus = "confirmed"
+	Created   ShoppingCartStatus = "created"
+)
+
+// Valid indicates whether the value is a known member of the ShoppingCartStatus enum.
+func (e ShoppingCartStatus) Valid() bool {
+	switch e {
+	case Abandoned:
+		return true
+	case Confirmed:
+		return true
+	case Created:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ShoppingListStatus.
+const (
+	ShoppingListStatusActive   ShoppingListStatus = "active"
+	ShoppingListStatusArchived ShoppingListStatus = "archived"
+)
+
+// Valid indicates whether the value is a known member of the ShoppingListStatus enum.
+func (e ShoppingListStatus) Valid() bool {
+	switch e {
+	case ShoppingListStatusActive:
+		return true
+	case ShoppingListStatusArchived:
 		return true
 	default:
 		return false
@@ -175,7 +268,7 @@ type MealPlanDecision struct {
 
 // MealPlanNew defines model for MealPlanNew.
 type MealPlanNew struct {
-	WeekStart openapi_types.Date `json:"week_start"`
+	WeekStart *openapi_types.Date `json:"week_start,omitempty"`
 }
 
 // MealPlanUpdate defines model for MealPlanUpdate.
@@ -197,6 +290,36 @@ type MealPlanView struct {
 type MealReaction struct {
 	PersonId  string `json:"person_id"`
 	Sentiment int    `json:"sentiment"`
+}
+
+// Order defines model for Order.
+type Order struct {
+	Id             int         `json:"id"`
+	OrderedAt      time.Time   `json:"ordered_at"`
+	Retailer       string      `json:"retailer"`
+	ShoppingCartId *int        `json:"shopping_cart_id,omitempty"`
+	Source         OrderSource `json:"source"`
+	TotalPrice     *float32    `json:"total_price,omitempty"`
+}
+
+// OrderSource defines model for Order.Source.
+type OrderSource string
+
+// OrderItem defines model for OrderItem.
+type OrderItem struct {
+	Id                   int      `json:"id"`
+	OrderId              int      `json:"order_id"`
+	Quantity             float32  `json:"quantity"`
+	RetailerProductId    string   `json:"retailer_product_id"`
+	SubstitutedForItemId *int     `json:"substituted_for_item_id,omitempty"`
+	TotalPrice           *float32 `json:"total_price,omitempty"`
+	UnitPrice            *float32 `json:"unit_price,omitempty"`
+}
+
+// OrderView defines model for OrderView.
+type OrderView struct {
+	Items []OrderItem `json:"items"`
+	Order Order       `json:"order"`
 }
 
 // Person defines model for Person.
@@ -295,6 +418,76 @@ type RecipeRef struct {
 	Title          string    `json:"title"`
 }
 
+// RetailerListBinding defines model for RetailerListBinding.
+type RetailerListBinding struct {
+	ExternalListId string                             `json:"external_list_id"`
+	Id             int                                `json:"id"`
+	LastPushStatus *RetailerListBindingLastPushStatus `json:"last_push_status,omitempty"`
+	LastPushedAt   *time.Time                         `json:"last_pushed_at,omitempty"`
+	Retailer       string                             `json:"retailer"`
+	ShoppingListId int                                `json:"shopping_list_id"`
+	SyncDirection  RetailerListBindingSyncDirection   `json:"sync_direction"`
+}
+
+// RetailerListBindingLastPushStatus defines model for RetailerListBinding.LastPushStatus.
+type RetailerListBindingLastPushStatus string
+
+// RetailerListBindingSyncDirection defines model for RetailerListBinding.SyncDirection.
+type RetailerListBindingSyncDirection string
+
+// ShoppingCart defines model for ShoppingCart.
+type ShoppingCart struct {
+	CreatedAt             time.Time          `json:"created_at"`
+	Id                    int                `json:"id"`
+	RetailerListBindingId int                `json:"retailer_list_binding_id"`
+	Status                ShoppingCartStatus `json:"status"`
+}
+
+// ShoppingCartStatus defines model for ShoppingCart.Status.
+type ShoppingCartStatus string
+
+// ShoppingList defines model for ShoppingList.
+type ShoppingList struct {
+	CreatedAt time.Time `json:"created_at"`
+	Id        int       `json:"id"`
+	Name      string    `json:"name"`
+
+	// OwnerPersonId person who owns the list; null = shared
+	OwnerPersonId *string            `json:"owner_person_id,omitempty"`
+	Status        ShoppingListStatus `json:"status"`
+}
+
+// ShoppingListStatus defines model for ShoppingList.Status.
+type ShoppingListStatus string
+
+// ShoppingListItem defines model for ShoppingListItem.
+type ShoppingListItem struct {
+	AddedAt               time.Time `json:"added_at"`
+	Checked               bool      `json:"checked"`
+	Id                    int       `json:"id"`
+	IngredientId          *string   `json:"ingredient_id,omitempty"`
+	Label                 *string   `json:"label,omitempty"`
+	Quantity              float32   `json:"quantity"`
+	ShoppingListId        int       `json:"shopping_list_id"`
+	ShoppingRequirementId *int      `json:"shopping_requirement_id,omitempty"`
+	Unit                  string    `json:"unit"`
+}
+
+// ShoppingListItemNew defines model for ShoppingListItemNew.
+type ShoppingListItemNew struct {
+	IngredientId          *string `json:"ingredient_id,omitempty"`
+	Label                 *string `json:"label,omitempty"`
+	Quantity              float32 `json:"quantity"`
+	ShoppingRequirementId *int    `json:"shopping_requirement_id,omitempty"`
+	Unit                  string  `json:"unit"`
+}
+
+// ShoppingListNew defines model for ShoppingListNew.
+type ShoppingListNew struct {
+	Name          string  `json:"name"`
+	OwnerPersonId *string `json:"owner_person_id,omitempty"`
+}
+
 // ShoppingRequirement defines model for ShoppingRequirement.
 type ShoppingRequirement struct {
 	AcceptableForms []string `json:"acceptable_forms"`
@@ -315,17 +508,32 @@ type TonightView struct {
 	ServedOn openapi_types.Date `json:"served_on"`
 }
 
+// OrderId defines model for OrderId.
+type OrderId = int
+
 // PersonId defines model for PersonId.
 type PersonId = string
 
 // PlanId defines model for PlanId.
 type PlanId = int
 
+// ShoppingListId defines model for ShoppingListId.
+type ShoppingListId = int
+
+// ShoppingListItemId defines model for ShoppingListItemId.
+type ShoppingListItemId = int
+
 // Conflict defines model for Conflict.
 type Conflict = Error
 
 // NotFound defines model for NotFound.
 type NotFound = Error
+
+// ListOrdersParams defines parameters for ListOrders.
+type ListOrdersParams struct {
+	Retailer *string `form:"retailer,omitempty" json:"retailer,omitempty"`
+	CartId   *int    `form:"cartId,omitempty" json:"cartId,omitempty"`
+}
 
 // SetDecisionsJSONBody defines parameters for SetDecisions.
 type SetDecisionsJSONBody = []MealPlanDecision
@@ -334,6 +542,22 @@ type SetDecisionsJSONBody = []MealPlanDecision
 type ListPreferencesParams struct {
 	// PersonId filter to one person
 	PersonId *string `form:"personId,omitempty" json:"personId,omitempty"`
+}
+
+// ToggleShoppingListItemJSONBody defines parameters for ToggleShoppingListItem.
+type ToggleShoppingListItemJSONBody struct {
+	Checked bool `json:"checked"`
+}
+
+// PushShoppingListParams defines parameters for PushShoppingList.
+type PushShoppingListParams struct {
+	// Retailer which retailer to push to
+	Retailer *string `form:"retailer,omitempty" json:"retailer,omitempty"`
+}
+
+// ToCartParams defines parameters for ToCart.
+type ToCartParams struct {
+	Retailer *string `form:"retailer,omitempty" json:"retailer,omitempty"`
 }
 
 // CreatePlanningConstraintJSONRequestBody defines body for CreatePlanningConstraint for application/json ContentType.
@@ -365,3 +589,12 @@ type SetDecisionsJSONRequestBody = SetDecisionsJSONBody
 
 // CreateReactionJSONRequestBody defines body for CreateReaction for application/json ContentType.
 type CreateReactionJSONRequestBody = ReactionNew
+
+// CreateShoppingListJSONRequestBody defines body for CreateShoppingList for application/json ContentType.
+type CreateShoppingListJSONRequestBody = ShoppingListNew
+
+// AddShoppingListItemJSONRequestBody defines body for AddShoppingListItem for application/json ContentType.
+type AddShoppingListItemJSONRequestBody = ShoppingListItemNew
+
+// ToggleShoppingListItemJSONRequestBody defines body for ToggleShoppingListItem for application/json ContentType.
+type ToggleShoppingListItemJSONRequestBody ToggleShoppingListItemJSONBody
