@@ -46,15 +46,23 @@
       sync_direction default 'outbound' CHECK IN ('outbound') [v1 outbound-only per D2],
       last_pushed_at/last_push_status nullable (NULL until first push), UNIQUE (shopping_list_id,
       retailer) so re-push updates the same row; `openspec validate` valid)
-- [ ] 2.2 Wire outbound push through the existing adapter's `POST /shopping-lists` (additive,
+- [x] 2.2 Wire outbound push through the existing adapter's `POST /shopping-lists` (additive,
       per its existing contract) — no new retailer-facing code, only the binding record and the
       Go-side call.
-      (BLOCKED on establish-enforced-go-architecture: the Go-side call already exists —
-      internal/retailer/client.go CreateShoppingList posts to /shopping-lists and returns
-      {wishlistId}; the remaining piece is persisting the retailer_list_binding row, which needs
-      the Postgres repository layer that change establishes (0/26, not started). Writing that
-      persistence now would violate the convention that change is meant to set. Unblocks when
-      establish-enforced-go-architecture lands.)
+      **Done 2026-08-22:** Added `internal/domain/shopping.go` with `ShoppingList`,
+      `ShoppingListItem`, and `RetailerListBinding` domain types. Added
+      `internal/persistence/shopping.go` with `CreateShoppingList`, `GetShoppingList`,
+      `ListShoppingLists`, `UpdateShoppingListStatus`, `CreateShoppingListItem`,
+      `ListShoppingListItems`, `UpdateShoppingListItemChecked`, `DeleteShoppingListItem`,
+      `GetShoppingRequirement`, `CreateOrUpdateRetailerListBinding`, `GetRetailerListBinding`,
+      `ListRetailerListBindings`. Added `cmd/food-brain/shopping.go` with `PushShoppingList`
+      which reads a list's items, resolves requirement-backed items through the adapter's
+      `ResolveRequirements`, calls `CreateShoppingList`, and upserts the
+      `retailer_list_binding` row. Added `internal/persistence/shopping_test.go` with 5
+      integration tests covering create/get, list+status, item round-trip (incl. label-only
+      items), and binding upsert semantics. `go vet ./...` clean, `go test ./...` = 267 passed
+      (18 packages), arch test 8/8, `openspec validate implement-shopping-and-commerce` valid.
+      Tests skip cleanly without `DATABASE_URL`/`POSTGRES_PASSWORD`.
 - [x] 2.3 Confirm push idempotency/additivity against the adapter's actual behavior (does
       re-pushing the same list duplicate items in the Willys wishlist, or merge?).
       (confirmed from apps/willys-adapter/server.ts POST /shopping-lists: additive — same-named
