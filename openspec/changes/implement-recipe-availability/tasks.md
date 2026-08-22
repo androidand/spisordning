@@ -74,6 +74,11 @@
       `LineVerdict.Shortfall` for a future consumer. The line status is `StatusMissing`
       and the recipe verdict is `infeasible` if this is the only missing line. This is
       the conservative interpretation: a recipe that can't be made as written is infeasible.
+      **Fixed 2026-08-22 (VERIFY gate):** When confident lots are partially available but
+      insufficient, the partial lots are NOT consumed if a substitution is found (the
+      substitution replaces the line, preserving partial lots for other lines). If no
+      substitution is found, the partial lots ARE consumed so they don't double-count.
+      Same policy applies to the unknown-confidence path.
 - [x] 3.6 A lot with `UNKNOWN` confidence SHALL NOT silently satisfy a requirement — decide
       whether it counts as unmet, or as satisfied-but-flagged, and make the choice explicit in
       the per-line reason. **Done 2026-08-22:** UNKNOWN lots satisfy the line but are
@@ -81,6 +86,10 @@
       "on-hand (uncertain confidence)". The recipe-level verdict elevates to
       `feasible-with-substitution` (not `feasible`) when any line is uncertain, so the
       user sees that not everything is confidently on hand.
+      **Fixed 2026-08-22 (VERIFY gate):** `trySubstitution` now tracks confidence of
+      consumed substitute lots and sets `IsUncertain = true` when any consumed lot is
+      UNKNOWN — the spec's "SHALL NOT silently trust" rule now covers substitution-backed
+      lines too, not just direct on-hand matches.
 
 ## 4. Overall recipe feasibility
 
@@ -135,15 +144,20 @@
 
 - [x] 8.1 Domain unit tests: exact on-hand match, substitution match at each tier, quantity
       shortfall, missing ingredient with no substitute, `UNKNOWN`-confidence lot handling.
-      **Done 2026-08-22:** 21 tests in `internal/availability/availability_test.go` covering:
-      exact on-hand, EQUIVALENT substitution, GOOD substitution, tier preference, ratio
-      application, ratio insufficiency, missing ingredient, UNKNOWN confidence flagging,
-      partial quantity (unmet), unit mismatch, greedy lot consumption, deterministic order,
-      form filter on substitution, empty recipe, best-before exposure.
+      **Done 2026-08-22 (initial):** 21 tests in `internal/availability/availability_test.go`.
+      **Fixed 2026-08-22 (VERIFY gate):** Added 5 new tests —
+      `TestSubstitutionViaUnknownLotFlagged` (substitution backed by UNKNOWN lot sets
+      IsUncertain), `TestPartialOnHandWithSubstitution` (partial lots preserved when
+      substitution replaces line), `TestPartialOnHandDoesNotDoubleCountWithSubstitution`
+      (partial confident lot available for second line after substitution on first),
+      `TestFormFilterRejectsMismatched` (negative case: defaultForm set, all subs mismatched
+      → missing), `TestSubstitutionRatioGreaterThanOne` (ratio > 1 exercises needed > required).
+      Total: 26 tests. Removed unused `eggLot`/`formSub` helpers. Fixed unstable
+      `sort.Slice` tie-break (secondary sort by ToIngredientID within same tier).
 - [x] 8.2 Domain unit tests: recipe-level aggregation rule across mixed per-ingredient verdicts.
       **Done 2026-08-22:** Tests cover: all-on-hand→feasible, one-substitution→feasible-with-sub,
       one-missing→infeasible, all-uncertain→feasible-with-sub, mixed-on-hand-and-missing→infeasible,
       explainability (reasons are non-empty, verdict derivable from lines).
 - [x] 8.3 `openspec validate implement-recipe-availability`. **Verified:** valid.
-      Full suite: 250 tests passed (18 packages), 0 vet issues, build success,
+      Full suite: 255 tests passed (18 packages), 0 vet issues, build success,
       architecture tests 8/8.

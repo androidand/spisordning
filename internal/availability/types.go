@@ -47,7 +47,7 @@ type LineVerdict struct {
 	SubstitutedFromIngredient string
 	SubstitutedToIngredient   string
 	SubstitutionTier          string
-	IsUncertain               bool // true if satisfied by UNKNOWN-confidence lot
+	IsUncertain               bool // true if satisfied by UNKNOWN-confidence lot (direct or via substitution)
 }
 
 // LineStatus is the per-ingredient verdict.

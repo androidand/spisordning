@@ -31,16 +31,6 @@ func sugarLot(id int64, qty float64, conf domain.Confidence) availability.Invent
 	}
 }
 
-func eggLot(id int64, qty float64, conf domain.Confidence) availability.InventoryLotInput {
-	return availability.InventoryLotInput{
-		ID:           id,
-		IngredientID: "egg",
-		Quantity:     qty,
-		Unit:         "stk",
-		Confidence:   conf,
-	}
-}
-
 func equivSub(from, to string, ratio float64) availability.Substitution {
 	return availability.Substitution{
 		FromIngredientID: from,
@@ -59,15 +49,6 @@ func goodSub(from, to string, ratio float64) availability.Substitution {
 	}
 }
 
-func formSub(from, to string, ratio float64) availability.Substitution {
-	return availability.Substitution{
-		FromIngredientID: from,
-		ToIngredientID:   to,
-		Category:         domain.SubstitutionForm,
-		Ratio:            ratio,
-	}
-}
-
 func line(ing string, qty float64, unit string) availability.RecipeIngredientLine {
 	return availability.RecipeIngredientLine{
 		IngredientID: ing,
@@ -75,6 +56,8 @@ func line(ing string, qty float64, unit string) availability.RecipeIngredientLin
 		Unit:         unit,
 	}
 }
+
+func ptrString(s string) *string { return &s }
 
 // --- 8.1: Domain unit tests ---
 
@@ -106,7 +89,6 @@ func TestExactOnHandMatch(t *testing.T) {
 }
 
 func TestSubstitutionEquivalent(t *testing.T) {
-	// Recipe needs milk, we have oat milk with an EQUIVALENT substitution.
 	lines := []availability.RecipeIngredientLine{
 		line("milk", 2, "dl"),
 	}
@@ -161,7 +143,6 @@ func TestSubstitutionGood(t *testing.T) {
 }
 
 func TestSubstitutionTierPreference(t *testing.T) {
-	// Both EQUIVALENT and GOOD substitutions exist; EQUIVALENT should win.
 	lines := []availability.RecipeIngredientLine{
 		line("milk", 2, "dl"),
 	}
@@ -185,8 +166,6 @@ func TestSubstitutionTierPreference(t *testing.T) {
 }
 
 func TestSubstitutionRatioApplied(t *testing.T) {
-	// Recipe needs 100g flour, substitute is potato starch at ratio 0.5,
-	// so we need 50g potato starch. We have 60g — should satisfy.
 	lines := []availability.RecipeIngredientLine{
 		{IngredientID: "flour", Quantity: 100, Unit: "g"},
 	}
@@ -206,9 +185,28 @@ func TestSubstitutionRatioApplied(t *testing.T) {
 	}
 }
 
+func TestSubstitutionRatioGreaterThanOne(t *testing.T) {
+	// Recipe needs 50g butter, substitute is oil at ratio 2.0 (need 100g oil).
+	lines := []availability.RecipeIngredientLine{
+		{IngredientID: "butter", Quantity: 50, Unit: "g"},
+	}
+	lots := []availability.InventoryLotInput{
+		{ID: 1, IngredientID: "oil", Quantity: 100, Unit: "g", Confidence: domain.ConfidenceExact},
+	}
+	subs := []availability.Substitution{
+		equivSub("butter", "oil", 2.0),
+	}
+	v := availability.ComputeRecipeAvailability("r-1", lines, lots, subs)
+
+	if v.Verdict != availability.VerdictFeasibleWithSub {
+		t.Errorf("verdict = %q, want feasible-with-substitution", v.Verdict)
+	}
+	if v.Lines[0].Status != availability.StatusSubstituted {
+		t.Errorf("status = %q, want substituted", v.Lines[0].Status)
+	}
+}
+
 func TestSubstitutionRatioInsufficient(t *testing.T) {
-	// Recipe needs 100g flour, substitute ratio 0.5 → need 50g potato starch.
-	// We only have 30g — should be unmet.
 	lines := []availability.RecipeIngredientLine{
 		{IngredientID: "flour", Quantity: 100, Unit: "g"},
 	}
@@ -247,7 +245,6 @@ func TestMissingIngredientNoSubstitute(t *testing.T) {
 }
 
 func TestUnknownConfidenceLotFlagged(t *testing.T) {
-	// Only on-hand lot has UNKNOWN confidence.
 	lines := []availability.RecipeIngredientLine{
 		line("milk", 2, "dl"),
 	}
@@ -256,7 +253,6 @@ func TestUnknownConfidenceLotFlagged(t *testing.T) {
 	}
 	v := availability.ComputeRecipeAvailability("r-1", lines, lots, nil)
 
-	// Line is satisfied but flagged.
 	l := v.Lines[0]
 	if l.Status != availability.StatusUnknown {
 		t.Errorf("status = %q, want unknown", l.Status)
@@ -264,14 +260,36 @@ func TestUnknownConfidenceLotFlagged(t *testing.T) {
 	if !l.IsUncertain {
 		t.Error("IsUncertain = false, want true")
 	}
-	// Recipe cannot be "feasible" when a line is uncertain.
 	if v.Verdict != availability.VerdictFeasibleWithSub {
 		t.Errorf("verdict = %q, want feasible-with-substitution", v.Verdict)
 	}
 }
 
+func TestSubstitutionViaUnknownLotFlagged(t *testing.T) {
+	// Recipe needs milk. No confident milk. Oat-milk is on hand but UNKNOWN.
+	lines := []availability.RecipeIngredientLine{
+		line("milk", 2, "dl"),
+	}
+	lots := []availability.InventoryLotInput{
+		{ID: 1, IngredientID: "oat-milk", Quantity: 2, Unit: "dl", Confidence: domain.ConfidenceUnknown},
+	}
+	subs := []availability.Substitution{
+		equivSub("milk", "oat-milk", 1.0),
+	}
+	v := availability.ComputeRecipeAvailability("r-1", lines, lots, subs)
+
+	if v.Verdict != availability.VerdictFeasibleWithSub {
+		t.Errorf("verdict = %q, want feasible-with-substitution", v.Verdict)
+	}
+	if v.Lines[0].Status != availability.StatusSubstituted {
+		t.Errorf("status = %q, want substituted", v.Lines[0].Status)
+	}
+	if !v.Lines[0].IsUncertain {
+		t.Error("IsUncertain = false, want true when substitute is backed by UNKNOWN lots")
+	}
+}
+
 func TestPartialQuantityIsUnmet(t *testing.T) {
-	// Recipe needs 5dl milk, we have 2dl — shortfall, not partial satisfaction.
 	lines := []availability.RecipeIngredientLine{
 		line("milk", 5, "dl"),
 	}
@@ -293,7 +311,6 @@ func TestPartialQuantityIsUnmet(t *testing.T) {
 }
 
 func TestUnitMismatchIsUnmet(t *testing.T) {
-	// Recipe needs milk in "dl", we have it in "ml" — unit mismatch.
 	lines := []availability.RecipeIngredientLine{
 		line("milk", 2, "dl"),
 	}
@@ -301,6 +318,117 @@ func TestUnitMismatchIsUnmet(t *testing.T) {
 		{ID: 1, IngredientID: "milk", Quantity: 200, Unit: "ml", Confidence: domain.ConfidenceExact},
 	}
 	v := availability.ComputeRecipeAvailability("r-1", lines, lots, nil)
+
+	if v.Verdict != availability.VerdictInfeasible {
+		t.Errorf("verdict = %q, want infeasible", v.Verdict)
+	}
+	if v.Lines[0].Status != availability.StatusMissing {
+		t.Errorf("status = %q, want missing", v.Lines[0].Status)
+	}
+}
+
+func TestPartialOnHandWithSubstitution(t *testing.T) {
+	// Recipe needs 5dl milk. We have 2dl milk (insufficient) and 5dl oat-milk.
+	// Substitution milk→oat-milk 1:1. The 2dl milk should NOT be consumed
+	// when the substitution is used.
+	lines := []availability.RecipeIngredientLine{
+		line("milk", 5, "dl"),
+	}
+	lots := []availability.InventoryLotInput{
+		milkLot(1, 2, domain.ConfidenceExact),
+		{ID: 2, IngredientID: "oat-milk", Quantity: 5, Unit: "dl", Confidence: domain.ConfidenceExact},
+	}
+	subs := []availability.Substitution{
+		equivSub("milk", "oat-milk", 1.0),
+	}
+	v := availability.ComputeRecipeAvailability("r-1", lines, lots, subs)
+
+	if v.Verdict != availability.VerdictFeasibleWithSub {
+		t.Errorf("verdict = %q, want feasible-with-substitution", v.Verdict)
+	}
+	if v.Lines[0].Status != availability.StatusSubstituted {
+		t.Errorf("status = %q, want substituted", v.Lines[0].Status)
+	}
+	if len(v.Lines[0].ConsumedLotIDs) != 1 || v.Lines[0].ConsumedLotIDs[0] != 2 {
+		t.Errorf("consumed lots = %v, want [2] (oat-milk only, partial milk preserved)", v.Lines[0].ConsumedLotIDs)
+	}
+}
+
+func TestPartialOnHandDoesNotDoubleCountWithSubstitution(t *testing.T) {
+	// Line 1: milk 5dl → substitutes to oat-milk (partial milk preserved)
+	// Line 2: milk 2dl → should still find the 2dl of milk
+	lines := []availability.RecipeIngredientLine{
+		line("milk", 5, "dl"),
+		line("milk", 2, "dl"),
+	}
+	lots := []availability.InventoryLotInput{
+		milkLot(1, 2, domain.ConfidenceExact),
+		{ID: 2, IngredientID: "oat-milk", Quantity: 5, Unit: "dl", Confidence: domain.ConfidenceExact},
+	}
+	subs := []availability.Substitution{
+		equivSub("milk", "oat-milk", 1.0),
+	}
+	v := availability.ComputeRecipeAvailability("r-1", lines, lots, subs)
+
+	if v.Lines[0].Status != availability.StatusSubstituted {
+		t.Errorf("line 0 status = %q, want substituted", v.Lines[0].Status)
+	}
+	if v.Lines[1].Status != availability.StatusOnHand {
+		t.Errorf("line 1 status = %q, want on-hand (partial milk preserved for this line)", v.Lines[1].Status)
+	}
+}
+
+func TestFormFilterOnSubstitution(t *testing.T) {
+	// Recipe needs "milk" with default_form="fresh". There's an EQUIVALENT
+	// substitution from milk→oat-milk with from_form="fresh" and another
+	// with from_form="frozen". The form-filtered one should be chosen.
+	lines := []availability.RecipeIngredientLine{
+		{IngredientID: "milk", Quantity: 2, Unit: "dl", DefaultForm: "fresh"},
+	}
+	lots := []availability.InventoryLotInput{
+		{ID: 1, IngredientID: "oat-milk", Quantity: 2, Unit: "dl", Confidence: domain.ConfidenceExact},
+	}
+	freshSub := availability.Substitution{
+		FromIngredientID: "milk",
+		FromForm:         ptrString("fresh"),
+		ToIngredientID:   "oat-milk",
+		Category:         domain.SubstitutionEquivalent,
+		Ratio:            1.0,
+	}
+	frozenSub := availability.Substitution{
+		FromIngredientID: "milk",
+		FromForm:         ptrString("frozen"),
+		ToIngredientID:   "oat-milk",
+		Category:         domain.SubstitutionEquivalent,
+		Ratio:            1.0,
+	}
+	v := availability.ComputeRecipeAvailability("r-1", lines, lots, []availability.Substitution{frozenSub, freshSub})
+
+	if v.Verdict != availability.VerdictFeasibleWithSub {
+		t.Errorf("verdict = %q, want feasible-with-substitution", v.Verdict)
+	}
+	if v.Lines[0].SubstitutedToIngredient != "oat-milk" {
+		t.Errorf("substituted to %q, want oat-milk", v.Lines[0].SubstitutedToIngredient)
+	}
+}
+
+func TestFormFilterRejectsMismatched(t *testing.T) {
+	// Recipe needs "milk" with default_form="fresh". Only substitution has
+	// from_form="frozen" — should be rejected.
+	lines := []availability.RecipeIngredientLine{
+		{IngredientID: "milk", Quantity: 2, Unit: "dl", DefaultForm: "fresh"},
+	}
+	lots := []availability.InventoryLotInput{}
+	subs := []availability.Substitution{
+		{
+			FromIngredientID: "milk",
+			FromForm:         ptrString("frozen"),
+			ToIngredientID:   "oat-milk",
+			Category:         domain.SubstitutionEquivalent,
+			Ratio:            1.0,
+		},
+	}
+	v := availability.ComputeRecipeAvailability("r-1", lines, lots, subs)
 
 	if v.Verdict != availability.VerdictInfeasible {
 		t.Errorf("verdict = %q, want infeasible", v.Verdict)
@@ -374,7 +502,6 @@ func TestOneMissingMakesInfeasible(t *testing.T) {
 }
 
 func TestAllUncertainIsFeasibleWithSub(t *testing.T) {
-	// Every line is satisfied by an UNKNOWN-confidence lot.
 	lines := []availability.RecipeIngredientLine{
 		line("milk", 2, "dl"),
 	}
@@ -383,7 +510,6 @@ func TestAllUncertainIsFeasibleWithSub(t *testing.T) {
 	}
 	v := availability.ComputeRecipeAvailability("r-1", lines, lots, nil)
 
-	// Not "feasible" because not confidently on hand.
 	if v.Verdict != availability.VerdictFeasibleWithSub {
 		t.Errorf("verdict = %q, want feasible-with-substitution", v.Verdict)
 	}
@@ -429,7 +555,6 @@ func TestExplainabilityReasons(t *testing.T) {
 	if v.Lines[1].Reason == "" {
 		t.Error("line 1 reason is empty")
 	}
-	// The recipe-level verdict must be derivable from the per-line results.
 	if v.Verdict != availability.VerdictInfeasible {
 		t.Errorf("verdict = %q, want infeasible", v.Verdict)
 	}
@@ -460,8 +585,6 @@ func TestGreedyLotConsumption(t *testing.T) {
 }
 
 func TestDeterministicLotOrder(t *testing.T) {
-	// Same lots in reverse ID order should produce the same result because
-	// matchingLots sorts by ID internally.
 	lines := []availability.RecipeIngredientLine{
 		line("milk", 2, "dl"),
 	}
@@ -484,56 +607,11 @@ func TestDeterministicLotOrder(t *testing.T) {
 	}
 }
 
-func TestFormFilterOnSubstitution(t *testing.T) {
-	// Recipe needs "milk" with default_form="fresh". There's an EQUIVALENT
-	// substitution from milk→oat-milk with from_form="fresh" and another
-	// with from_form=nil (any form). The form-filtered one should be chosen.
-	lines := []availability.RecipeIngredientLine{
-		{IngredientID: "milk", Quantity: 2, Unit: "dl", DefaultForm: "fresh"},
-	}
-	lots := []availability.InventoryLotInput{
-		{ID: 1, IngredientID: "oat-milk", Quantity: 2, Unit: "dl", Confidence: domain.ConfidenceExact},
-	}
-	freshSub := availability.Substitution{
-		FromIngredientID: "milk",
-		FromForm:         ptrString("fresh"),
-		ToIngredientID:   "oat-milk",
-		Category:         domain.SubstitutionEquivalent,
-		Ratio:            1.0,
-	}
-	anyFormSub := availability.Substitution{
-		FromIngredientID: "milk",
-		ToIngredientID:   "oat-milk",
-		Category:         domain.SubstitutionEquivalent,
-		Ratio:            1.0,
-	}
-	v := availability.ComputeRecipeAvailability("r-1", lines, lots, []availability.Substitution{anyFormSub, freshSub})
-
-	if v.Verdict != availability.VerdictFeasibleWithSub {
-		t.Errorf("verdict = %q, want feasible-with-substitution", v.Verdict)
-	}
-	// The form-matching substitution should be preferred when default_form is set.
-	if v.Lines[0].SubstitutedToIngredient != "oat-milk" {
-		t.Errorf("substituted to %q, want oat-milk", v.Lines[0].SubstitutedToIngredient)
-	}
-}
-
-func TestEmptyRecipeIsFeasible(t *testing.T) {
-	v := availability.ComputeRecipeAvailability("r-empty", nil, nil, nil)
-	if v.Verdict != availability.VerdictFeasible {
-		t.Errorf("verdict = %q, want feasible for empty recipe", v.Verdict)
-	}
-	if len(v.Lines) != 0 {
-		t.Errorf("expected 0 lines, got %d", len(v.Lines))
-	}
-}
-
 func TestBestBeforeExposure(t *testing.T) {
-	// The verdict should surface which lots would be consumed.
 	lines := []availability.RecipeIngredientLine{
 		line("milk", 2, "dl"),
 	}
-	bb := time.Now().Add(2 * 24 * time.Hour) // 2 days from now
+	bb := time.Now().Add(2 * 24 * time.Hour)
 	lots := []availability.InventoryLotInput{
 		{
 			ID:           1,
@@ -551,6 +629,12 @@ func TestBestBeforeExposure(t *testing.T) {
 	}
 }
 
-// --- ptr helpers ---
-
-func ptrString(s string) *string { return &s }
+func TestEmptyRecipeIsFeasible(t *testing.T) {
+	v := availability.ComputeRecipeAvailability("r-empty", nil, nil, nil)
+	if v.Verdict != availability.VerdictFeasible {
+		t.Errorf("verdict = %q, want feasible for empty recipe", v.Verdict)
+	}
+	if len(v.Lines) != 0 {
+		t.Errorf("expected 0 lines, got %d", len(v.Lines))
+	}
+}

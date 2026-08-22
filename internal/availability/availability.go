@@ -27,12 +27,16 @@ var subTierOrder = map[domain.IngredientSubstitutionCategory]int{
 // Partial-quantity policy: an on-hand quantity smaller than required counts as
 // unmet — the shortfall is recorded but the line is not partially satisfied.
 // This feeds implement-shopping-and-commerce' gap computation rather than
-// this capability's own verdict.
+// this capability's own verdict. When a substitution is found after partial
+// confident lots were considered, the partial lots are NOT consumed (the
+// substitution replaces the line); when no substitution is found, the partial
+// lots ARE consumed so they don't double-count for other lines.
 //
 // UNKNOWN-confidence lots are treated as satisfied but flagged (IsUncertain).
 // The recipe-level verdict elevates to feasible-with-substitution when any
 // line is uncertain, so the user sees that not everything is confidently on
-// hand.
+// hand. The same flagging applies when a substitution is backed by an
+// UNKNOWN-confidence lot.
 func ComputeRecipeAvailability(recipeID string, lines []RecipeIngredientLine, lots []InventoryLotInput, subs []Substitution) RecipeVerdict {
 	v := RecipeVerdict{
 		RecipeID: recipeID,
@@ -41,21 +45,25 @@ func ComputeRecipeAvailability(recipeID string, lines []RecipeIngredientLine, lo
 
 	subByIngredient := groupSubstitutions(subs)
 
-	// Greedy consumption tracker: lotID → remaining quantity.
 	remaining := make(map[int64]float64)
 	for i := range lots {
 		remaining[lots[i].ID] = lots[i].Quantity
 	}
 
+	lotConf := make(map[int64]domain.Confidence, len(lots))
+	for i := range lots {
+		lotConf[lots[i].ID] = lots[i].Confidence
+	}
+
 	for i := range lines {
-		v.Lines[i] = computeLine(lines[i], lots, subByIngredient, remaining)
+		v.Lines[i] = computeLine(lines[i], lots, subByIngredient, lotConf, remaining)
 	}
 
 	v.Verdict = aggregateVerdict(v.Lines)
 	return v
 }
 
-func computeLine(line RecipeIngredientLine, lots []InventoryLotInput, subByIngredient map[string][]Substitution, remaining map[int64]float64) LineVerdict {
+func computeLine(line RecipeIngredientLine, lots []InventoryLotInput, subByIngredient map[string][]Substitution, lotConf map[int64]domain.Confidence, remaining map[int64]float64) LineVerdict {
 	v := LineVerdict{
 		IngredientID: line.IngredientID,
 		Quantity:     line.Quantity,
@@ -68,7 +76,7 @@ func computeLine(line RecipeIngredientLine, lots []InventoryLotInput, subByIngre
 		v.Status = StatusMissing
 		v.Shortfall = line.Quantity
 		v.Reason = fmt.Sprintf("no on-hand match for ingredient %q (unit=%q)", line.IngredientID, line.Unit)
-		return trySubstitution(v, line, subByIngredient, lots, remaining)
+		return trySubstitution(v, line, subByIngredient, lots, lotConf, remaining)
 	}
 
 	// Separate confident from unknown-confidence candidates.
@@ -82,27 +90,37 @@ func computeLine(line RecipeIngredientLine, lots []InventoryLotInput, subByIngre
 		}
 	}
 
-	// Try confident lots first (greedy, lowest ID).
-	ok, shortfall, consumed := consumeFromLots(confident, line.Quantity, remaining)
-	if ok {
-		v.Status = StatusOnHand
-		v.Reason = fmt.Sprintf("on-hand: %s %.2f %s", line.IngredientID, line.Quantity, line.Unit)
-		v.ConsumedLotIDs = consumed
+	// Confident lots path.
+	if len(confident) > 0 {
+		confidentAvail := sumRemaining(confident, remaining)
+		if confidentAvail >= line.Quantity {
+			_, _, consumed := consumeFromLots(confident, line.Quantity, remaining)
+			v.Status = StatusOnHand
+			v.Reason = fmt.Sprintf("on-hand: %s %.2f %s", line.IngredientID, line.Quantity, line.Unit)
+			v.ConsumedLotIDs = consumed
+			return v
+		}
+
+		// Confident insufficient. Try substitution WITHOUT consuming partial
+		// confident lots (substitution replaces the line).
+		v = trySubstitution(v, line, subByIngredient, lots, lotConf, remaining)
+		if v.Status == StatusSubstituted {
+			return v
+		}
+
+		// Substitution also failed. Consume the partial confident lots so they
+		// don't double-count for other lines.
+		consumeFromLots(confident, line.Quantity, remaining)
+		v.Shortfall = line.Quantity - confidentAvail
+		v.Reason = fmt.Sprintf("partial on-hand: have %.2f %s, need %.2f %s (short %.2f) — no viable substitute",
+			line.Quantity-v.Shortfall, line.Unit, line.Quantity, line.Unit, v.Shortfall)
+		v.Status = StatusMissing
 		return v
 	}
 
-	if len(confident) > 0 {
-		v.Shortfall = shortfall
-		v.Reason = fmt.Sprintf("partial on-hand: have %.2f %s, need %.2f %s (short %.2f)",
-			line.Quantity-shortfall, line.Unit, line.Quantity, line.Unit, shortfall)
-		v.Status = StatusMissing
-		v.ConsumedLotIDs = consumed
-		return trySubstitution(v, line, subByIngredient, lots, remaining)
-	}
-
-	// No confident lot — fall back to unknown-confidence lot if available.
+	// No confident lots. Try unknown-confidence lots.
 	if len(unknown) > 0 {
-		ok, shortfall, consumed = consumeFromLots(unknown, line.Quantity, remaining)
+		ok, shortfall, consumed := consumeFromLots(unknown, line.Quantity, remaining)
 		if ok {
 			v.Status = StatusUnknown
 			v.Reason = fmt.Sprintf("on-hand (uncertain confidence): %s %.2f %s", line.IngredientID, line.Quantity, line.Unit)
@@ -110,21 +128,25 @@ func computeLine(line RecipeIngredientLine, lots []InventoryLotInput, subByIngre
 			v.ConsumedLotIDs = consumed
 			return v
 		}
+
+		// Unknown lots insufficient. Try substitution.
+		v = trySubstitution(v, line, subByIngredient, lots, lotConf, remaining)
+		if v.Status == StatusSubstituted {
+			return v
+		}
+
+		// Substitution failed. Consume partial unknown lots.
+		consumeFromLots(unknown, line.Quantity, remaining)
 		v.Shortfall = shortfall
-		v.Reason = fmt.Sprintf("only unknown-confidence lot for %q has insufficient quantity (have %.2f, need %.2f %s)",
+		v.Reason = fmt.Sprintf("only unknown-confidence lot for %q has insufficient quantity (have %.2f, need %.2f %s) — no viable substitute",
 			line.IngredientID, line.Quantity-shortfall, line.Quantity, line.Unit)
 		v.Status = StatusMissing
-		v.ConsumedLotIDs = consumed
-		return trySubstitution(v, line, subByIngredient, lots, remaining)
+		return v
 	}
 
+	// No lots at all for this ingredient.
 	v.Reason = fmt.Sprintf("no on-hand match for ingredient %q (unit=%q)", line.IngredientID, line.Unit)
-	return trySubstitution(v, line, subByIngredient, lots, remaining)
-}
-
-type lotCandidate struct {
-	l         InventoryLotInput
-	remaining float64
+	return v
 }
 
 func matchingLots(lots []InventoryLotInput, remaining map[int64]float64, ingredientID, unit string) []lotCandidate {
@@ -143,6 +165,14 @@ func matchingLots(lots []InventoryLotInput, remaining map[int64]float64, ingredi
 	// Deterministic order: lowest lot ID first.
 	sort.Slice(out, func(i, j int) bool { return out[i].l.ID < out[j].l.ID })
 	return out
+}
+
+func sumRemaining(cands []lotCandidate, remaining map[int64]float64) float64 {
+	total := 0.0
+	for i := range cands {
+		total += remaining[cands[i].l.ID]
+	}
+	return total
 }
 
 // consumeFromLots greedily consumes from the (already sorted by ID) candidates.
@@ -178,7 +208,7 @@ func consumeFromLots(cands []lotCandidate, needed float64, remaining map[int64]f
 	return false, remainingNeeded, consumed
 }
 
-func trySubstitution(v LineVerdict, line RecipeIngredientLine, subByIngredient map[string][]Substitution, lots []InventoryLotInput, remaining map[int64]float64) LineVerdict {
+func trySubstitution(v LineVerdict, line RecipeIngredientLine, subByIngredient map[string][]Substitution, lots []InventoryLotInput, lotConf map[int64]domain.Confidence, remaining map[int64]float64) LineVerdict {
 	subs := subByIngredient[line.IngredientID]
 	if len(subs) == 0 {
 		v.Reason = fmt.Sprintf("no substitute for ingredient %q (unit=%q)", line.IngredientID, line.Unit)
@@ -186,8 +216,14 @@ func trySubstitution(v LineVerdict, line RecipeIngredientLine, subByIngredient m
 	}
 
 	// Sort by tier preference: EQUIVALENT (0) first, EMERGENCY (5) last.
+	// Secondary sort by ToIngredientID for deterministic tie-breaking within
+	// the same tier.
 	sort.Slice(subs, func(i, j int) bool {
-		return subTierOrder[subs[i].Category] < subTierOrder[subs[j].Category]
+		oi, oj := subTierOrder[subs[i].Category], subTierOrder[subs[j].Category]
+		if oi != oj {
+			return oi < oj
+		}
+		return subs[i].ToIngredientID < subs[j].ToIngredientID
 	})
 
 	for _, sub := range subs {
@@ -218,6 +254,16 @@ func trySubstitution(v LineVerdict, line RecipeIngredientLine, subByIngredient m
 		v.SubstitutionTier = string(sub.Category)
 		v.Shortfall = 0
 		v.ConsumedLotIDs = consumed
+
+		// Flag uncertainty when the substitute is backed by an UNKNOWN-confidence
+		// lot. The spec requires that UNKNOWN confidence is never silently trusted.
+		for _, lid := range consumed {
+			if lotConf[lid] == domain.ConfidenceUnknown {
+				v.IsUncertain = true
+				break
+			}
+		}
+
 		return v
 	}
 
@@ -249,4 +295,9 @@ func aggregateVerdict(lines []LineVerdict) RecipeVerdictLevel {
 		return VerdictFeasibleWithSub
 	}
 	return VerdictFeasible
+}
+
+type lotCandidate struct {
+	l         InventoryLotInput
+	remaining float64
 }
