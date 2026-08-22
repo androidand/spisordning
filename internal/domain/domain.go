@@ -106,6 +106,12 @@ type PlanContext struct {
 	RecentMealIDs       []RecentMeal
 	SchoolLunchTags     []string        // tags of dishes served at school today
 	CampaignIngredients map[string]bool // canonical ingredient id -> on campaign
+	// AvailabilityVerdicts maps a recipe's mealie_recipe_id to the
+	// availability verdict string ("feasible", "feasible-with-substitution",
+	// or "infeasible"). Populated by the caller once the availability
+	// capability has been evaluated; empty means no availability data is
+	// available and the scorer falls back to effort-only feasibility.
+	AvailabilityVerdicts map[string]string
 }
 
 // RecentMeal records that a recipe was served on a day, used for the

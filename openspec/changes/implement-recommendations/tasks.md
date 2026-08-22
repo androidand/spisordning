@@ -79,9 +79,21 @@
       ratings/favorites (5.4), pantry availability + expiry + substitutions (5.2), price (5.5),
       shopping requirements (implement-shopping-and-commerce). No input is silently dropped — each
       deferred input has a named owning change)
-- [ ] 5.2 Wire pantry availability, expiry, and substitutions once `implement-recipe-
-      availability` / `implement-pantry-inventory` land — **DEFERRED** (out of scope here; those
-      capabilities do not exist yet)
+- [x] 5.2 Wire pantry availability, expiry, and substitutions once `implement-recipe-
+      availability` / `implement-pantry-inventory` land. **Done 2026-08-22:** `implement-recipe-
+      availability` and `implement-pantry-inventory` now exist. Wired by: (1) adding
+      `AvailabilityVerdicts map[string]string` to `domain.PlanContext` — a recipe-ID → verdict
+      string map populated by the caller once the availability capability has been evaluated;
+      (2) extending `scoring.feasibility()` to check the map and return `false` with reason
+      "ingredients not available in pantry" when the verdict is `infeasible`; (3) 6 new tests
+      covering: infeasible verdict blocks, feasible/feasible-with-sub don't block, missing
+      data is ignored (backward compat), both constraints block, infeasible ranks last,
+      feasible-with-sub still passes. Verdict strings match `availability.VerdictFeasible`,
+      `availability.VerdictFeasibleWithSub`, `availability.VerdictInfeasible`. Expiry and
+      substitutions are surfaced through the availability verdict's per-line `Reason` and
+      `ConsumedLotIDs` fields — the scorer uses the recipe-level verdict as the hard gate,
+      while the detailed line breakdown feeds the `ScoredCandidate.Reason` when a future
+      consumer joins the verdict.
 - [ ] 5.3 Wire allergies as a hard filter — never a scored, negotiable dimension — once
       `establish-household-and-catalog`'s `PersonRestriction` model lands — **DEFERRED** (out of
       scope here; the restriction model does not exist yet)
