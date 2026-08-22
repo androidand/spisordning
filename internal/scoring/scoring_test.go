@@ -573,3 +573,137 @@ func TestSelectBatch_SmallBatch(t *testing.T) {
 		t.Errorf("1-slot batch top = %q, want fav1", batch[0].Candidate.MealieRecipeID)
 	}
 }
+
+// --- Pantry availability tests (task 5.2) ---
+
+func TestPantryScore_Feasible(t *testing.T) {
+	c := domain.Candidate{MealieRecipeID: "r"}
+	ctx := baseCtx()
+	ctx.PantryAvailability = map[string]domain.PantryStatus{"r": domain.PantryFeasible}
+	got := pantryScore(c, ctx)
+	if got != 1.0 {
+		t.Errorf("pantry score = %v, want 1.0 for feasible", got)
+	}
+}
+
+func TestPantryScore_FeasibleWithSub(t *testing.T) {
+	c := domain.Candidate{MealieRecipeID: "r"}
+	ctx := baseCtx()
+	ctx.PantryAvailability = map[string]domain.PantryStatus{"r": domain.PantryFeasibleWithSub}
+	got := pantryScore(c, ctx)
+	if got != 0.6 {
+		t.Errorf("pantry score = %v, want 0.6 for feasible-with-substitution", got)
+	}
+}
+
+func TestPantryScore_Infeasible(t *testing.T) {
+	c := domain.Candidate{MealieRecipeID: "r"}
+	ctx := baseCtx()
+	ctx.PantryAvailability = map[string]domain.PantryStatus{"r": domain.PantryInfeasible}
+	got := pantryScore(c, ctx)
+	if got != 0.0 {
+		t.Errorf("pantry score = %v, want 0.0 for infeasible", got)
+	}
+}
+
+func TestPantryScore_MissingData(t *testing.T) {
+	c := domain.Candidate{MealieRecipeID: "r"}
+	ctx := baseCtx()
+	// Empty pantry map = no data = score 0.
+	got := pantryScore(c, ctx)
+	if got != 0.0 {
+		t.Errorf("pantry score = %v, want 0.0 when no data", got)
+	}
+}
+
+func TestPantryScore_KnownKeyMissing(t *testing.T) {
+	c := domain.Candidate{MealieRecipeID: "r"}
+	ctx := baseCtx()
+	ctx.PantryAvailability = map[string]domain.PantryStatus{"other": domain.PantryFeasible}
+	got := pantryScore(c, ctx)
+	if got != 0.0 {
+		t.Errorf("pantry score = %v, want 0.0 when recipe not in map", got)
+	}
+}
+
+func TestScore_PantryIntegrated(t *testing.T) {
+	// A feasible recipe should score higher than an infeasible one,
+	// all else equal.
+	cFeasible := domain.Candidate{MealieRecipeID: "ok", Tags: []string{"pasta"}, Effort: domain.EffortLow}
+	cInfeasible := domain.Candidate{MealieRecipeID: "bad", Tags: []string{"pasta"}, Effort: domain.EffortLow}
+	ctx := baseCtx()
+	ctx.Preferences = []domain.Preference{
+		{PersonID: "kid", Tag: "pasta", Sentiment: domain.Loves, Confidence: 1.0},
+	}
+	ctx.PantryAvailability = map[string]domain.PantryStatus{
+		"ok":   domain.PantryFeasible,
+		"bad":  domain.PantryInfeasible,
+	}
+	ranked := Rank([]domain.Candidate{cFeasible, cInfeasible}, ctx, DefaultWeights())
+	if ranked[0].Candidate.MealieRecipeID != "ok" {
+		t.Errorf("feasible recipe should rank first, got %s", ranked[0].Candidate.MealieRecipeID)
+	}
+	// Breakdown.Pantry is the weighted score (weight * raw score).
+	if ranked[0].Breakdown.Pantry != 0.5 {
+		t.Errorf("feasible pantry breakdown = %v, want 0.5 (weight 0.5 * score 1.0)", ranked[0].Breakdown.Pantry)
+	}
+	if ranked[1].Breakdown.Pantry != 0.0 {
+		t.Errorf("infeasible pantry breakdown = %v, want 0.0", ranked[1].Breakdown.Pantry)
+	}
+}
+
+func TestScore_PantryDoesNotOverrideFeasibility(t *testing.T) {
+	// An infeasible recipe (effort > energy) should rank last even if it
+	// has perfect pantry availability.
+	cFeasible := domain.Candidate{MealieRecipeID: "easy", Tags: []string{"pasta"}, Effort: domain.EffortLow}
+	cInfeasible := domain.Candidate{MealieRecipeID: "hard", Tags: []string{"pasta"}, Effort: domain.EffortHigh}
+	ctx := baseCtx()
+	ctx.KitchenEnergy = domain.EffortLow
+	ctx.Preferences = []domain.Preference{
+		{PersonID: "kid", Tag: "pasta", Sentiment: domain.Loves, Confidence: 1.0},
+	}
+	ctx.PantryAvailability = map[string]domain.PantryStatus{
+		"easy": domain.PantryFeasible,
+		"hard": domain.PantryFeasible, // perfect pantry but effort infeasible
+	}
+	ranked := Rank([]domain.Candidate{cFeasible, cInfeasible}, ctx, DefaultWeights())
+	if ranked[0].Candidate.MealieRecipeID != "easy" {
+		t.Errorf("feasible meal should rank first, got %s", ranked[0].Candidate.MealieRecipeID)
+	}
+	if ranked[0].Feasible != true {
+		t.Errorf("easy meal should be feasible")
+	}
+	if ranked[1].Feasible != false {
+		t.Errorf("hard meal should be infeasible")
+	}
+}
+
+func TestPantryStatus_EnumValues(t *testing.T) {
+	// Pin the enum values so consumers know what to expect.
+	if domain.PantryFeasible != "feasible" {
+		t.Errorf("PantryFeasible = %q, want %q", domain.PantryFeasible, "feasible")
+	}
+	if domain.PantryFeasibleWithSub != "feasible-with-substitution" {
+		t.Errorf("PantryFeasibleWithSub = %q, want %q", domain.PantryFeasibleWithSub, "feasible-with-substitution")
+	}
+	if domain.PantryInfeasible != "infeasible" {
+		t.Errorf("PantryInfeasible = %q, want %q", domain.PantryInfeasible, "infeasible")
+	}
+}
+
+func TestScore_PantryStatusPropagated(t *testing.T) {
+	c := domain.Candidate{MealieRecipeID: "r"}
+	ctx := baseCtx()
+	ctx.PantryAvailability = map[string]domain.PantryStatus{"r": domain.PantryFeasibleWithSub}
+	sc := score(c, ctx, DefaultWeights())
+	if sc.PantryStatus != domain.PantryFeasibleWithSub {
+		t.Errorf("pantry status = %q, want %q", sc.PantryStatus, domain.PantryFeasibleWithSub)
+	}
+}
+
+func TestDefaultWeights_PantryIncluded(t *testing.T) {
+	w := DefaultWeights()
+	if w.Pantry != 0.5 {
+		t.Errorf("default pantry weight = %v, want 0.5", w.Pantry)
+	}
+}

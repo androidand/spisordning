@@ -79,15 +79,18 @@
       ratings/favorites (5.4), pantry availability + expiry + substitutions (5.2), price (5.5),
       shopping requirements (implement-shopping-and-commerce). No input is silently dropped — each
       deferred input has a named owning change)
-- [ ] 5.2 Wire pantry availability, expiry, and substitutions once `implement-recipe-
-      availability` / `implement-pantry-inventory` land — **DEFERRED** (out of scope here; those
-      capabilities do not exist yet)
+- [x] 5.2 Wire pantry availability, expiry, and substitutions once `implement-recipe-
+      availability` / `implement-pantry-inventory` land — wired: added `PantryStatus` (feasible /
+      feasible-with-substitution / infeasible) to `domain.PlanContext` as `PantryAvailability
+      map[string]PantryStatus`; added `Pantry` to `Weights` (default 0.5) and `Breakdown`; added
+      `pantryScore()` returning [0,1] (1.0/0.6/0.0); added `PantryStatus` to `ScoredCandidate`;
+      pantry is a soft score (never a hard constraint); 10 new tests.
 - [ ] 5.3 Wire allergies as a hard filter — never a scored, negotiable dimension — once
       `establish-household-and-catalog`'s `PersonRestriction` model lands — **DEFERRED** (out of
       scope here; the restriction model does not exist yet)
 - [ ] 5.4 Wire ratings/favorites once `implement-meals-and-preferences`'s `MealReview`/
-      `Favorite` model lands — **DEFERRED** (out of scope here; the review/favorite model does not
-      exist yet)
+      `Favorite` model lands — **DEFERRED** (out of scope here; the review/favorite model does
+      not exist yet)
 - [ ] 5.5 Wire price once a future price-intelligence capability exists — **DEFERRED** (later
       epic; no price-intelligence capability exists yet)
 

@@ -106,7 +106,23 @@ type PlanContext struct {
 	RecentMealIDs       []RecentMeal
 	SchoolLunchTags     []string        // tags of dishes served at school today
 	CampaignIngredients map[string]bool // canonical ingredient id -> on campaign
+	// PantryAvailability maps a recipe's MealieRecipeID to its current
+	// pantry availability status. Populated by the meal planner from the
+	// recipe-availability capability. Empty map = no pantry data available
+	// (the pantry dimension scores 0).
+	PantryAvailability map[string]PantryStatus
 }
+
+// PantryStatus classifies whether a recipe can be made from the household's
+// current inventory, accounting for substitutions. Owned by
+// implement-recipe-availability; consumed read-only by the scorer.
+type PantryStatus string
+
+const (
+	PantryFeasible          PantryStatus = "feasible"
+	PantryFeasibleWithSub   PantryStatus = "feasible-with-substitution"
+	PantryInfeasible        PantryStatus = "infeasible"
+)
 
 // RecentMeal records that a recipe was served on a day, used for the
 // repetition penalty. More recent repeats are penalized harder.
