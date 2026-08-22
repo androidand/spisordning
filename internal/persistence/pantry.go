@@ -184,6 +184,9 @@ func (s *Store) RecordPurchase(ctx context.Context, ingredientID, productID, loc
 	if source == sourceShoppingOrder && productID == "" {
 		return 0, errors.New("persistence: RecordPurchase: productId is required when source is shopping_order")
 	}
+	if quantity <= 0 {
+		return 0, errors.New("persistence: RecordPurchase: quantity must be positive")
+	}
 	confidence := domain.ConfidenceForEvent(domain.EventPurchase, source, false)
 
 	tx, err := s.db.Begin(ctx)
@@ -314,6 +317,9 @@ func (s *Store) applyLotDelta(ctx context.Context, lotID int64, kind domain.Even
 // estimated controls the resulting confidence (design.md D3): false for an
 // explicit counted amount, true for a household estimate like "about half".
 func (s *Store) RecordConsume(ctx context.Context, lotID int64, quantity float64, estimated bool, source string) error {
+	if quantity <= 0 {
+		return errors.New("persistence: RecordConsume: quantity must be positive")
+	}
 	confidence := domain.ConfidenceForEvent(domain.EventConsume, source, estimated)
 	return s.applyLotDelta(ctx, lotID, domain.EventConsume, -quantity, confidence, "", source)
 }
@@ -321,6 +327,9 @@ func (s *Store) RecordConsume(ctx context.Context, lotID int64, quantity float64
 // RecordDiscard decrements lotID by quantity and appends a DISCARD event with
 // reason (expired/spoiled/other).
 func (s *Store) RecordDiscard(ctx context.Context, lotID int64, quantity float64, estimated bool, reason, source string) error {
+	if quantity <= 0 {
+		return errors.New("persistence: RecordDiscard: quantity must be positive")
+	}
 	confidence := domain.ConfidenceForEvent(domain.EventDiscard, source, estimated)
 	return s.applyLotDelta(ctx, lotID, domain.EventDiscard, -quantity, confidence, reason, source)
 }
@@ -333,6 +342,9 @@ func (s *Store) RecordDiscard(ctx context.Context, lotID int64, quantity float64
 // read the prior quantity safely, rather than reading it in a separate,
 // racy query beforehand.
 func (s *Store) RecordAdjust(ctx context.Context, lotID int64, newQuantity float64, estimated bool, reason, source string) error {
+	if newQuantity < 0 {
+		return errors.New("persistence: RecordAdjust: newQuantity must be non-negative")
+	}
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("persistence: begin RecordAdjust: %w", err)
