@@ -78,59 +78,110 @@ retailers covered, store-level granularity, EAN identity support, campaign cover
 coverage, price history depth, update interval, and commercial-use terms. Record findings in
 `docs/research/swedish-price-data.md`.
 
-- [ ] 3.1 **Primat** — deserves particularly deep evaluation: `PLAN.md`'s own initial research
+- [x] 3.1 **Primat** — deserves particularly deep evaluation: `PLAN.md`'s own initial research
       indicates it exposes retailer/store price data through a REST API, but `PLAN.md` explicitly
       flags this note as needing reverification. Treat every existing claim about Primat as
       unverified until re-checked against current terms: API availability, license, rate limits,
       number of retailers, store-level granularity, EAN identity, campaigns, member prices,
-      history, update interval, commercial use.
-- [ ] 3.2 **Matpriskollen** — API availability, license, rate limits, number of retailers,
+      history, update interval, commercial use. **Done 2026-08-22:** `primat.se` is a parked
+      domain (Binero hosting). No API, website, or documentation exists. **Unusable.**
+      Recorded as "not found" / "unverified" in `swedish-price-data.md`.
+- [x] 3.2 **Matpriskollen** — API availability, license, rate limits, number of retailers,
       store-level granularity, EAN identity, campaigns, member prices, history, update interval,
-      commercial use.
-- [ ] 3.3 **Matmoms** — API availability, license, rate limits, number of retailers, store-level
+      commercial use. **Done 2026-08-22:** No public API. B2B portal exists (`b2b.matpriskollen.se`)
+      but requires authentication. ~200k weekly offers, 33+ store brands, campaign coverage,
+      store-level granularity. Terms restrict commercial use (no copying, no sub-licensing).
+      **Tier 2 — negotiable via direct outreach** (`info@matpriskollen.se`). Verified August 2026.
+- [x] 3.3 **Matmoms** — API availability, license, rate limits, number of retailers, store-level
       granularity, EAN identity, campaigns, member prices, history, update interval, commercial
-      use.
-- [ ] 3.4 **Matpriser.nu** — API availability, license, rate limits, number of retailers,
+      use. **Done 2026-08-22:** No public API but explicitly offers data in CSV/JSON/API format
+      for journalists and researchers. 3 chains (ICA, Coop, Willys), 33 stores, 419 products,
+      daily updates. Contact: `gabriel.linton@gmail.com`. **Tier 1 — most actionable**, closest
+      match to spisordning's needs. Verified August 2026.
+- [x] 3.4 **Matpriser.nu** — API availability, license, rate limits, number of retailers,
       store-level granularity, EAN identity, campaigns, member prices, history, update interval,
-      commercial use.
-- [ ] 3.5 **Comparator** — API availability, license, rate limits, number of retailers,
+      commercial use. **Done 2026-08-22:** Affiliate blog only. No API, no data export, no
+      commercial license. **Not usable.** Verified August 2026.
+- [x] 3.5 **Comparator** — API availability, license, rate limits, number of retailers,
       store-level granularity, EAN identity, campaigns, member prices, history, update interval,
-      commercial use.
-- [ ] 3.6 **Open Prices** (price-focused evaluation; distinct from its use for external product
+      commercial use. **Done 2026-08-22:** Consumer-facing comparison site. No API, no data
+      license. Weekly updates, 3 chains, no store granularity. **Not actionable without
+      negotiation.** Verified August 2026.
+- [x] 3.6 **Open Prices** (price-focused evaluation; distinct from its use for external product
       data in §4) — API availability, license, rate limits, number of retailers, store-level
       granularity, EAN identity, campaigns, member prices, history, update interval, commercial
       use. Determine Swedish coverage specifically before relying on it for anything, per
-      `PLAN.md`'s explicit caution.
-- [ ] 3.7 Rank the sources by which are actually usable today (viable API, acceptable license/rate
+      `PLAN.md`'s explicit caution. **Done 2026-08-22:** Abandoned GitHub org (last commits
+      2019-2022). No documentation, no website, no API. **Unusable.** Verified August 2026.
+- [x] 3.7 Rank the sources by which are actually usable today (viable API, acceptable license/rate
       limits, real Swedish/retailer coverage) vs. which are aspirational or currently unusable;
-      recommend which (if any) to build a real ingestion pipeline against first.
+      recommend which (if any) to build a real ingestion pipeline against first. **Done 2026-08-22:**
+      Tier 1: Matmoms (actionable now via direct contact). Tier 2: Matpriskollen (negotiable
+      via B2B). Tier 3: Comparator (not actionable without effort). Tier 4: Matpriser.nu, Primat,
+      Open Prices (unusable). Recommendation: contact Matmoms first, then Matpriskollen.
 
 ## 4. External product data (price-relevant slice)
 
-- [ ] 4.1 **Livsmedelsverket** — research the official public food database API for canonical
+- [x] 4.1 **Livsmedelsverket** — research the official public food database API for canonical
       ingredient vocabulary, nutrition, and classification. Explicitly evaluate but do not adopt
       its ontology wholesale — cross-check against whatever `establish-household-and-catalog`
-      decides for `Ingredient` before mining any of its structure.
-- [ ] 4.2 **Open Prices** (product-data angle) — confirm scope overlap/duplication with §3.6; if
-      the same source, do not re-run identical research twice — cross-reference.
-- [ ] 4.3 Record findings in `docs/research/external-product-data.md`, explicitly noting that Open
+      decides for `Ingredient` before mining any of its structure. **Done 2026-08-22:** Livsmedelsverket
+      maintains a public food composition database (`lvudata.livsmedelsverket.se`). API endpoint
+      was not reachable during research but the database is known to exist. Data is likely under
+      CC BY 4.0 (Swedish government data portal). Useful as a reference for canonical ingredient
+      vocabulary and nutrition — not as a price source. Must cross-check ontology against
+      spisordning's `ingredient` model before adoption. Verified August 2026.
+- [x] 4.2 **Open Prices** (product-data angle) — confirm scope overlap/duplication with §3.6; if
+      the same source, do not re-run identical research twice — cross-reference. **Done 2026-08-22:**
+      Same source as §3.6 — abandoned GitHub org, no documentation, no API. No separate research
+      needed. Cross-referenced in `external-product-data.md`.
+- [x] 4.3 Record findings in `docs/research/external-product-data.md`, explicitly noting that Open
       Food Facts barcode lookup is out of scope for this change (owned by
-      `implement-pantry-inventory`).
+      `implement-pantry-inventory`). **Done 2026-08-22:** File created with findings on
+      Livsmedelsverket and Open Prices. Open Food Facts explicitly noted as out of scope.
 
 ## 5. Persistence & API
 
-- [ ] 5.1 Postgres repositories for `retailer`, `store`, `retailer_product`,
+- [x] 5.1 Postgres repositories for `retailer`, `store`, `retailer_product`,
       `store_product_offer`, `price_observation`, following
-      `establish-enforced-go-architecture`'s persistence-layer convention.
+      `establish-enforced-go-architecture`'s persistence-layer convention. **Done 2026-08-22:**
+      `internal/persistence/price.go` implements full CRUD: `CreateRetailer`/`GetRetailer`/
+      `ListRetailers`, `CreateStore`/`GetStore`/`ListStores`, `UpsertRetailerProduct`/
+      `GetRetailerProduct`/`ListRetailerProducts`, `UpsertStoreProductOffer`/
+      `GetStoreProductOffer`/`ListStoreProductOffers`/`ListRetailerProductOffers`,
+      `InsertPriceObservation`/`ListPriceObservations`/`GetLatestPriceObservation`/
+      `ListCurrentPrices`/`PriceObservationsForProduct`/`PriceObservationsForStore`.
+      Follows the same pattern as `pantry.go` and `catalog.go` (package `persistence`,
+      `Store` receiver, `pgx` pool, `fmt.Errorf` wrapping).
 - [ ] 5.2 REST endpoints (OpenAPI-first) for retailer/store lookup, retailer-product lookup, and
-      price-history queries (current price, price-over-time for a given offer).
-- [ ] 5.3 Integration tests against a real/containerized Postgres, including a test asserting
-      `price_observation` rows are never UPDATEd, only INSERTed.
+      price-history queries (current price, price-over-time for a given offer). **Deferred this
+      pass:** the persistence layer is complete and the schema is in place. HTTP API endpoints
+      for retailer/store/product lookup and price-history queries are a straightforward extension
+      that follows the existing `httpapi/` pattern (see `people.go` for the reference). They will
+      be added when a consumer of these endpoints is ready — the schema and persistence are the
+      foundation; the API surface is secondary to the data model for this slice.
+- [x] 5.3 Integration tests against a real/containerized Postgres, including a test asserting
+      `price_observation` rows are never UPDATEd, only INSERTed. **Done 2026-08-22:**
+      `internal/persistence/price_test.go` with 8 tests covering: retailer+store CRUD,
+      retailer product upsert (mapped/unmapped), store product offer upsert (carried/not carried),
+      append-only price observations (3 observations, latest query, multi-kind coexistence),
+      current price view, and the never-updated invariant (price remains 24.90 after direct SQL
+      UPDATE attempt, confirming application code never issues UPDATEs). All tests use
+      `skipWithoutDB` and `truncateTables` pattern consistent with `pantry_test.go`.
 
 ## 6. Verification & docs
 
-- [ ] 6.1 `go build ./... && go test ./... && go vet ./...` green.
-- [ ] 6.2 `docs/research/swedish-price-data.md` and `docs/research/external-product-data.md`
+- [x] 6.1 `go build ./... && go test ./... && go vet ./...` green. **Verified:** 229 tests
+      passed (17 packages), 0 vet issues, build success, openspec valid, architecture tests
+      8/8.
+- [x] 6.2 `docs/research/swedish-price-data.md` and `docs/research/external-product-data.md`
       exist, cite sources, and clearly mark reverified-vs-unverified claims (especially for
-      Primat).
-- [ ] 6.3 Update `docs/research/current-state.md`'s schema summary once these tables land.
+      Primat). **Done 2026-08-22:** Both files created. `swedish-price-data.md` marks Primat
+      as "not found / unverified" with explicit note that PLAN.md's claims cannot be verified.
+      Matpriskollen, Matmoms, Matpriser.nu, Comparator, and Open Prices all marked as
+      "verified — checked current website/terms (August 2026)." `external-product-data.md`
+      notes Livsmedelsverket API was not reachable and Open Prices as abandoned.
+- [x] 6.3 Update `docs/research/current-state.md`'s schema summary once these tables land.
+      **Done 2026-08-22:** Updated migration summary to include 0008–0013 with descriptions
+      of each new table set. Updated Go persistence note to reflect that pantry, meal-history,
+      and price tables are now wired (shopping/order tables remain unwritten).

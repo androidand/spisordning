@@ -25,8 +25,8 @@ internal/
   retailer/client.go     Go-side client for the willys-adapter HTTP service
   scoring/scoring.go     deterministic candidate scorer
   skolmaten/client.go    school-lunch client
-migrations/0001-0007      Postgres schema (0001 first-slice … 0007 order) — applied by
-                          docker-compose; Go persistence now wired (establish-enforced-go-architecture)
+migrations/0001-0013      Postgres schema (0001 first-slice … 0013 price intelligence) —
+                          applied by docker-compose; Go persistence wired for all (see below)
 api/openapi.yaml          design-first OpenAPI 3.0.3 contract; server code generated from this
 openspec/                 see below
 ```
@@ -115,10 +115,23 @@ extend it:
 - `0007_order.sql` — `order` + `order_item` (actual purchase record; `source` is an explicit
   enum `'manual'|'retailer_api'|'receipt_import'`; `order_item.substituted_for_item_id` is a
   self-reference; forward extension point for a future `inventory_event(kind='PURCHASE')`).
+- `0008_household_catalog_minimal.sql` — `household`, `product`, `product_identifier`,
+  `product_ingredient_mapping` (minimal slice for pantry and price; full catalog in 0011).
+- `0009_pantry_inventory.sql` — `inventory_location`, `inventory_lot`, `inventory_event`
+  (pantry inventory ledger, implement-pantry-inventory).
+- `0010_migrate_persons_to_household.sql` — backfills `household` + `household_membership`
+  for existing flat-person data.
+- `0011_household_and_catalog.sql` — full catalog: `account`, `person_restriction`,
+  `ingredient_form`, `ingredient_substitution`, `unit`/`unit_conversion`/`ingredient_unit_conversion`.
+- `0012_meal_history.sql` — `meal_participant`, `meal_review`, `favorite`, `meal_event`→`meal_plan`
+  link (implement-meals-and-preferences).
+- `0013_price_intelligence.sql` — `retailer`, `store`, `retailer_product`,
+  `store_product_offer`, `price_observation`, `current_store_product_price` view
+  (implement-price-intelligence).
 
-All migrations are applied by docker-compose's Postgres. **Nothing in the Go code writes to the
-new shopping/order tables yet** — that persistence is tracked, known, open work gated on
-`establish-enforced-go-architecture` (see `implement-shopping-and-commerce` tasks 2.2, 3.2, 6.1–6.4).
+All migrations are applied by docker-compose's Postgres. Go persistence is wired for all
+new tables (pantry, meal-history, price). The shopping/order tables (0006–0007) remain
+unwritten in Go — tracked in `implement-shopping-and-commerce`.
 
 ## CI / Docker
 
