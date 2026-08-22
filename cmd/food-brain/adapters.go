@@ -103,17 +103,35 @@ func (a storeAdapter) CreateMealEvent(ctx context.Context, in httpapi.MealEventN
 	if err != nil {
 		return httpapi.MealEventResponse{}, fmt.Errorf("meals create: invalid served_on %q: %w", in.ServedOn, err)
 	}
-	eventID, err := a.db.CreateMealEvent(ctx, in.MealieRecipeID, servedOn)
+	// Wrap event + reactions in a transaction so they commit atomically.
+	tx, err := a.db.BeginTx(ctx)
 	if err != nil {
-		return httpapi.MealEventResponse{}, fmt.Errorf("meals create: %w", err)
+		return httpapi.MealEventResponse{}, fmt.Errorf("meals create: begin tx: %w", err)
 	}
+	defer tx.Rollback(ctx)
+
+	// Insert the event inside the tx.
+	const insertEventQ = `INSERT INTO meal_event (mealie_recipe_id, served_on) VALUES ($1, $2) RETURNING id`
+	var eventID int64
+	if err := tx.QueryRow(ctx, insertEventQ, in.MealieRecipeID, servedOn).Scan(&eventID); err != nil {
+		return httpapi.MealEventResponse{}, fmt.Errorf("meals create: insert event: %w", err)
+	}
+
+	// Insert reactions inside the same tx.
 	for _, rx := range in.Reactions {
-		if err := a.db.AddMealReaction(ctx, persistence.MealReaction{
-			MealEventID: eventID, PersonID: rx.PersonID, Sentiment: rx.Sentiment,
-		}); err != nil {
+		const insertRxQ = `INSERT INTO meal_reaction (meal_event_id, person_id, sentiment, note)
+			VALUES ($1, $2, $3, $4)
+			ON CONFLICT (meal_event_id, person_id) DO UPDATE SET sentiment = EXCLUDED.sentiment,
+				note = EXCLUDED.note`
+		if _, err := tx.Exec(ctx, insertRxQ, eventID, rx.PersonID, rx.Sentiment, ""); err != nil {
 			return httpapi.MealEventResponse{}, fmt.Errorf("meals create: add reaction: %w", err)
 		}
 	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return httpapi.MealEventResponse{}, fmt.Errorf("meals create: commit tx: %w", err)
+	}
+
 	rxns, err := a.db.ListMealReactions(ctx, eventID)
 	if err != nil {
 		return httpapi.MealEventResponse{}, fmt.Errorf("meals create: read reactions: %w", err)

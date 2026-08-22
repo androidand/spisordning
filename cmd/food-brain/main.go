@@ -3,10 +3,12 @@
 //	food-brain demo         — in-memory demonstration of the scoring pipe (no services)
 //	food-brain plan         — live weekly plan: Mealie → scorer (+Skolmaten, +Olla) →
 //	                          shopping requirements → willys-adapter (optional wishlist)
+//	                          --write-tonight writes the ambient projection for HA
 //	food-brain serve        — HTTP server (api/openapi.yaml); /health and /people routes
 //	                          are wired, more as the contract is implemented (tasks 3.3+).
 //	                          Persistence-backed handlers require a Postgres connection
 //	                          (POSTGRES_* / DATABASE_URL); without one, /health still serves.
+//	food-brain tonight      — show tonight's dinner + one-tap reactions via HA (task 3.4)
 //	food-brain ingredients  — review surface: show the curated Swedish-unit → grams →
 //	                          package-size ingredient mappings (task 2.3)
 //
@@ -43,10 +45,15 @@ func main() {
 			fmt.Fprintln(os.Stderr, "❌", err)
 			os.Exit(1)
 		}
+	case "tonight":
+		if err := runTonight(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "❌", err)
+			os.Exit(1)
+		}
 	case "ingredients":
 		runIngredients()
 	default:
-		fmt.Fprintf(os.Stderr, "unknown command %q (want: demo, plan, serve, ingredients)\n", cmd)
+		fmt.Fprintf(os.Stderr, "unknown command %q (want: demo, plan, serve, tonight, ingredients)\n", cmd)
 		os.Exit(2)
 	}
 }

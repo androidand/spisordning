@@ -24,7 +24,7 @@
     },
     {
       "parameters": {
-        "command": "/opt/spisordning/food-brain plan --write-tonight /opt/spisordning/tonight.json --create-wishlist"
+        "command": "/opt/spisordning/food-brain plan --write-tonight --create-wishlist"
       },
       "id": "run-food-brain-plan",
       "name": "Run food-brain plan (Go pipe)",

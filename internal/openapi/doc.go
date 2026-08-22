@@ -6,7 +6,7 @@
 // sync with the spec by `go generate ./internal/openapi` (see doc.go) and the CI
 // `codegen` job (`verify-codegen` Makefile target).
 //
-// Tool: github.com/oapi-codegen/oapi-codegen/v2 (v2.5.1), matching tengil's
+// Tool: github.com/oapi-codegen/oapi-codegen/v2 (v2.8.0), matching tengil's
 // choice. Codegen uses `-generate types` only (stdlib net/http servers, no chi).
 package openapi
 

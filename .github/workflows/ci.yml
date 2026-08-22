@@ -115,7 +115,7 @@ jobs:
           # food-brain now runs an HTTP server (api/openapi.yaml); this build
           # ensures the multi-stage Dockerfile stays buildable (task 4.1).
 
-   codegen:
+  codegen:
      name: openapi codegen up-to-date
      runs-on: ubuntu-latest
      # Fails if api/openapi.yaml drifts from internal/openapi/types.gen.go.
@@ -131,4 +131,4 @@ jobs:
        - name: assert no diff (spec ↔ generated types in sync)
          run: git diff --exit-code -- internal/openapi/types.gen.go
 
-   migrations:
+

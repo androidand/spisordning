@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/androidand/spisordning/internal/ambient"
 	"github.com/androidand/spisordning/internal/domain"
 	"github.com/androidand/spisordning/internal/llm"
 	"github.com/androidand/spisordning/internal/mealie"
@@ -40,6 +41,7 @@ func runPlan(args []string) error {
 	days := fs.Int("days", 7, "number of dinners to plan, starting Monday")
 	weekStr := fs.String("week", "", "ISO week to plan, e.g. 2026-W31 (default: next week)")
 	createWishlist := fs.Bool("create-wishlist", false, "resolve products and create the Willys wishlist (default: dry-run print)")
+	writeTonight := fs.Bool("write-tonight", false, "write the ambient projection (tonight.json) for HA display")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -159,6 +161,35 @@ func runPlan(args []string) error {
 		} else {
 			fmt.Printf("✅ persisted plan for week %d-W%02d to Postgres (meal_plan + candidates + decisions + shopping_requirements)\n", year, week)
 		}
+	}
+
+	// ── Write ambient projection for HA (task 3.4) ─────────────────────────────
+	if *writeTonight {
+		weekLabel := fmt.Sprintf("%d-W%02d", year, week)
+		slots := make([]ambient.Slot, 0, len(planned))
+		for _, s := range planned {
+			reason := s.Winner.Reason
+			if olla != nil {
+				if expl, err := llm.Explain(olla, ctx, s.Winner); err == nil && expl != "" {
+					reason = strings.TrimSpace(expl)
+				}
+			}
+			slots = append(slots, ambient.Slot{
+				Date:   s.Date.Format("2006-01-02"),
+				Title:  s.Winner.Candidate.Title,
+				Reason: reason,
+				Tags:   s.Winner.Candidate.Tags,
+			})
+		}
+		plan := ambient.PlanFile{Week: weekLabel, Slots: slots}
+		out, err := json.MarshalIndent(plan, "", "  ")
+		if err != nil {
+			return fmt.Errorf("write-tonight: marshal: %w", err)
+		}
+		if err := os.WriteFile("tonight.json", append(out, '\n'), 0o644); err != nil {
+			return fmt.Errorf("write-tonight: %w", err)
+		}
+		fmt.Printf("✅ wrote ambient projection to tonight.json (%d slots)\n", len(slots))
 	}
 
 	fmt.Printf("\nShopping requirements (%d; %d assumed-staple item(s) skipped):\n", len(reqs), len(staples))

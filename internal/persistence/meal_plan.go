@@ -16,9 +16,15 @@ import (
 // module uses; cmd/food-brain constructs it once and passes it down.
 //
 // All operations run outside an explicit transaction here; callers that need
-// multi-statement atomicity should use a pgx.Tx obtained from the pool.
+// multi-statement atomicity should use a pgx.Tx obtained via BeginTx.
 type Store struct {
 	db *pgxpool.Pool
+}
+
+// BeginTx starts a new transaction on the underlying pool. Callers are
+// responsible for committing or rolling back.
+func (s *Store) BeginTx(ctx context.Context) (pgx.Tx, error) {
+	return s.db.Begin(ctx)
 }
 
 // New opens a pooled connection to Postgres using cfg.
@@ -45,9 +51,10 @@ type MealPlan struct {
 }
 
 // CreateMealPlan inserts a plan for weekStart and returns its id. The UNIQUE
-// week_start constraint makes this idempotent via ON CONFLICT DO NOTHING.
+// week_start constraint makes this idempotent: ON CONFLICT DO NOTHING skips
+// the insert on collision, and RETURNING id returns the existing row's id.
 func (s *Store) CreateMealPlan(ctx context.Context, weekStart time.Time) (int64, error) {
-	const q = `INSERT INTO meal_plan (week_start, status) VALUES ($1, 'draft')
+	const q = `INSERT INTO meal_plan (week_start) VALUES ($1)
 		ON CONFLICT (week_start) DO NOTHING RETURNING id`
 	var id int64
 	err := s.db.QueryRow(ctx, q, weekStart).Scan(&id)
