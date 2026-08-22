@@ -125,7 +125,7 @@ func (a dbAdapter) CreateMealEvent(ctx context.Context, in MealEventNew) (MealEv
 	if err != nil {
 		return MealEventResponse{}, err
 	}
-	eventID, err := a.store.CreateMealEvent(ctx, in.MealieRecipeID, servedOn)
+	eventID, err := a.store.CreateMealEvent(ctx, in.MealieRecipeID, servedOn, nil)
 	if err != nil {
 		return MealEventResponse{}, err
 	}

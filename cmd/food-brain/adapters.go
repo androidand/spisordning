@@ -110,7 +110,7 @@ func (a storeAdapter) CreateMealEvent(ctx context.Context, in httpapi.MealEventN
 	}
 	defer tx.Rollback(ctx)
 
-	// Insert the event inside the tx.
+	// Insert the event inside the tx. Ad-hoc meals have no plan link.
 	const insertEventQ = `INSERT INTO meal_event (mealie_recipe_id, served_on) VALUES ($1, $2) RETURNING id`
 	var eventID int64
 	if err := tx.QueryRow(ctx, insertEventQ, in.MealieRecipeID, servedOn).Scan(&eventID); err != nil {
