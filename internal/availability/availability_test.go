@@ -346,6 +346,110 @@ func TestEvaluateRecipe_AcceptableFormsAllowMismatch(t *testing.T) {
 	}
 }
 
+func TestEvaluateRecipe_SubstitutionShortfallDoesNotBlockLowerTier(t *testing.T) {
+	// EQUIVALENT sub exists but target lot is short; GOOD sub fully covers.
+	// The line should be satisfied via GOOD, not reported as missing.
+	inputs := makeInputs("r1", []RecipeLine{
+		{IngredientID: "chicken", Quantity: 100, Unit: "g"},
+	}, []LotInfo{
+		{ID: 1, IngredientID: "seitan", Quantity: 10, Unit: "g", Confidence: domain.ConfidenceExact},
+		{ID: 2, IngredientID: "tofu", Quantity: 100, Unit: "g", Confidence: domain.ConfidenceExact},
+	}, []domain.IngredientSubstitution{
+		{ID: "eq", FromIngredientID: "chicken", ToIngredientID: "seitan", Category: domain.TierEquivalent, Ratio: 1.0},
+		{ID: "good", FromIngredientID: "chicken", ToIngredientID: "tofu", Category: domain.TierGood, Ratio: 1.0},
+	})
+	v := EvaluateRecipe(inputs)
+	l := v.Lines[0]
+	if l.Status != StatusSubstituted {
+		t.Errorf("status = %q, want substituted", l.Status)
+	}
+	if l.SubstitutionTier == nil || *l.SubstitutionTier != domain.TierGood {
+		t.Errorf("tier = %v, want GOOD (EQUIVALENT short lot should not block)", l.SubstitutionTier)
+	}
+	if l.Shortfall != 0 {
+		t.Errorf("shortfall = %v, want 0", l.Shortfall)
+	}
+}
+
+func TestEvaluateRecipe_ConsumedLotIDsPopulated(t *testing.T) {
+	now := time.Now()
+	threeDays := now.AddDate(0, 0, 3)
+	inputs := EvaluateInputs{
+		RecipeID: "r1",
+		Lines: []RecipeLine{
+			{IngredientID: "milk", Quantity: 500, Unit: "ml"},
+		},
+		Lots: []LotInfo{
+			{ID: 1, IngredientID: "milk", Quantity: 1000, Unit: "ml", Confidence: domain.ConfidenceExact, BestBefore: &threeDays},
+		},
+		Now: now,
+	}
+	v := EvaluateRecipe(inputs)
+	if len(v.ConsumedLotIDs) != 1 || v.ConsumedLotIDs[0] != 1 {
+		t.Errorf("consumed lot ids = %v, want [1]", v.ConsumedLotIDs)
+	}
+	if len(v.NearExpiryLotIDs) != 1 || v.NearExpiryLotIDs[0] != 1 {
+		t.Errorf("near-expiry lot ids = %v, want [1]", v.NearExpiryLotIDs)
+	}
+}
+
+func TestEvaluateRecipe_ConsumedLotIDsForSubstitution(t *testing.T) {
+	inputs := makeInputs("r1", []RecipeLine{
+		{IngredientID: "chicken", Quantity: 100, Unit: "g"},
+	}, []LotInfo{
+		{ID: 1, IngredientID: "tofu", Quantity: 100, Unit: "g", Confidence: domain.ConfidenceExact},
+	}, []domain.IngredientSubstitution{
+		{ID: "s1", FromIngredientID: "chicken", ToIngredientID: "tofu", Category: domain.TierEquivalent, Ratio: 1.0},
+	})
+	v := EvaluateRecipe(inputs)
+	l := v.Lines[0]
+	if l.Status != StatusSubstituted {
+		t.Fatalf("status = %q, want substituted", l.Status)
+	}
+	if len(l.ConsumedLotIDs) != 1 || l.ConsumedLotIDs[0] != 1 {
+		t.Errorf("consumed lot ids = %v, want [1]", l.ConsumedLotIDs)
+	}
+}
+
+func TestEvaluateRecipe_SubstitutionToFormEnforced(t *testing.T) {
+	// Sub says "chicken → tofu (frozen)". On-hand tofu is fresh only.
+	// Should not match; line should be missing.
+	frozen, fresh := domain.FormFrozen, domain.FormFresh
+	inputs := makeInputs("r1", []RecipeLine{
+		{IngredientID: "chicken", Quantity: 100, Unit: "g"},
+	}, []LotInfo{
+		{ID: 1, IngredientID: "tofu", Quantity: 100, Unit: "g", Confidence: domain.ConfidenceExact, Form: ptrForm(fresh)},
+	}, []domain.IngredientSubstitution{
+		{ID: "s1", FromIngredientID: "chicken", ToIngredientID: "tofu", ToForm: ptrForm(frozen), Category: domain.TierEquivalent, Ratio: 1.0},
+	})
+	v := EvaluateRecipe(inputs)
+	l := v.Lines[0]
+	if l.Status != StatusMissing {
+		t.Errorf("status = %q, want missing (toForm=frozen, on-hand is fresh)", l.Status)
+	}
+}
+
+func TestEvaluateRecipe_SubstitutionToFormAllowsMatch(t *testing.T) {
+	// Sub says "chicken → tofu (frozen)". On-hand tofu is frozen.
+	// Should match via substitution.
+	frozen := domain.FormFrozen
+	inputs := makeInputs("r1", []RecipeLine{
+		{IngredientID: "chicken", Quantity: 100, Unit: "g"},
+	}, []LotInfo{
+		{ID: 1, IngredientID: "tofu", Quantity: 100, Unit: "g", Confidence: domain.ConfidenceExact, Form: ptrForm(frozen)},
+	}, []domain.IngredientSubstitution{
+		{ID: "s1", FromIngredientID: "chicken", ToIngredientID: "tofu", ToForm: ptrForm(frozen), Category: domain.TierEquivalent, Ratio: 1.0},
+	})
+	v := EvaluateRecipe(inputs)
+	l := v.Lines[0]
+	if l.Status != StatusSubstituted {
+		t.Errorf("status = %q, want substituted (toForm matched)", l.Status)
+	}
+	if l.SubstitutionTier == nil || *l.SubstitutionTier != domain.TierEquivalent {
+		t.Errorf("tier = %v, want EQUIVALENT", l.SubstitutionTier)
+	}
+}
+
 func TestSubstitutionTierOrder(t *testing.T) {
 	order := domain.SubstitutionTierOrder()
 	expected := []domain.SubstitutionTier{

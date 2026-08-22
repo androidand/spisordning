@@ -168,6 +168,7 @@ func evaluateLine(line RecipeLine, lots []LotInfo, subs []domain.IngredientSubst
 			v.Reason = "on-hand"
 		}
 		v.OnHandQuantity = bestLot.Quantity
+		v.ConsumedLotIDs = []int64{bestLot.ID}
 		if bestLot.BestBefore != nil && !now.IsZero() {
 			days := bestLot.BestBefore.Sub(now).Hours() / 24
 			if days >= 0 && days <= 7 {
@@ -184,6 +185,9 @@ func evaluateLine(line RecipeLine, lots []LotInfo, subs []domain.IngredientSubst
 	}
 
 	// Step 2: walk substitutions in decreasing preference order.
+	// Track the best shortfall seen across all tiers so we can surface it
+	// in the final "missing" explanation if no substitution fully covers.
+	bestShortfall := 0.0
 	for _, tier := range domain.SubstitutionTierOrder() {
 		for _, sub := range subs {
 			if sub.Retired {
@@ -199,44 +203,57 @@ func evaluateLine(line RecipeLine, lots []LotInfo, subs []domain.IngredientSubst
 			if sub.FromForm != nil && line.PreferredForm != nil && *sub.FromForm != *line.PreferredForm {
 				continue
 			}
-			// Find lots of the target ingredient.
-			subLot := findBestDirectLot(
-				RecipeLine{IngredientID: sub.ToIngredientID, Quantity: line.Quantity * sub.Ratio, Unit: line.Unit},
-				lots,
-			)
+			// Find lots of the target ingredient, enforcing the target form
+			// if the substitution specifies one (design.md invariant:
+			// non-nil ToForm means "applies to that form only").
+			subLine := RecipeLine{
+				IngredientID: sub.ToIngredientID,
+				Quantity:     line.Quantity * sub.Ratio,
+				Unit:         line.Unit,
+				PreferredForm: sub.ToForm,
+			}
+			subLot := findBestDirectLot(subLine, lots)
 			if subLot == nil {
 				continue
 			}
-			v.Status = StatusSubstituted
-			v.SubstitutionTier = &tier
-			v.SubstitutedFromID = line.IngredientID
-			v.OnHandQuantity = subLot.Quantity
-			v.Reason = "substituted-" + string(tier)
-			if subLot.Confidence == domain.ConfidenceUnknown {
-				v.Confidence = domain.ConfidenceUnknown
-				v.Reason += "-uncertain"
-			} else {
-				v.Confidence = subLot.Confidence
-			}
-			if subLot.BestBefore != nil && !now.IsZero() {
-				days := subLot.BestBefore.Sub(now).Hours() / 24
-				if days >= 0 && days <= 7 {
-					v.NearExpiryLotIDs = []int64{subLot.ID}
+			needed := line.Quantity * sub.Ratio
+			if subLot.Quantity >= needed {
+				// Full coverage at this tier — take it.
+				v.Status = StatusSubstituted
+				v.SubstitutionTier = &tier
+				v.SubstitutedFromID = line.IngredientID
+				v.OnHandQuantity = subLot.Quantity
+				v.Reason = "substituted-" + string(tier)
+				v.ConsumedLotIDs = []int64{subLot.ID}
+				if subLot.Confidence == domain.ConfidenceUnknown {
+					v.Confidence = domain.ConfidenceUnknown
+					v.Reason += "-uncertain"
+				} else {
+					v.Confidence = subLot.Confidence
 				}
-			}
-			if v.OnHandQuantity < line.Quantity*sub.Ratio {
-				v.Shortfall = line.Quantity*sub.Ratio - v.OnHandQuantity
-				v.Status = StatusMissing
-				v.Reason = "missing-shortfall"
+				if subLot.BestBefore != nil && !now.IsZero() {
+					days := subLot.BestBefore.Sub(now).Hours() / 24
+					if days >= 0 && days <= 7 {
+						v.NearExpiryLotIDs = []int64{subLot.ID}
+					}
+				}
 				return v
 			}
-			return v
+			// Insufficient at this tier — record the shortfall and keep
+			// walking. A lower-tier sub may fully cover the line.
+			if subLot.Quantity > bestShortfall {
+				bestShortfall = subLot.Quantity
+			}
 		}
 	}
 
 	// Step 3: no match, no substitution.
 	v.Status = StatusMissing
 	v.Reason = "missing"
+	if bestShortfall > 0 {
+		v.Shortfall = bestShortfall
+		v.Reason = "missing-shortfall"
+	}
 	return v
 }
 
