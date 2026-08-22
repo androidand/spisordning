@@ -1,40 +1,38 @@
-# Review — implement-recipe-availability (round 2)
+# Review — implement-recipe-availability (round 4)
 
-**Summary**: Fixed two blocking issues from the first review round.
+**Summary**: Round 3 issues fixed. Pure-domain `internal/availability` package now correctly handles
+multi-lot aggregation, substitution shortfall in target units, and deduplication.
 
-**Fixes applied**:
+**Fixes from round 3**:
 
-1. **Substitution walk no longer short-circuits on shortfall** (`availability.go:186-238`).
-   Previously: when a substitution's target lot existed but was quantity-insufficient,
-   `evaluateLine` returned `missing` immediately, blocking lower-tier substitutions that
-   would have fully covered the line. Fix: track `bestShortfall` across all tiers and
-   all substitutions; `continue` past insufficient lots; only report `missing` after
-   exhausting all tiers. The shortfall value is surfaced in the final reason
-   (`missing-shortfall`).
+1. **Multi-lot aggregation** (`aggregateDirectLots`): Replaced `findBestDirectLot` (single-lot) with
+   `aggregateDirectLots` that sums quantities across ALL matching lots. Direct path now aggregates
+   all on-hand lots first; if total < required, walks substitutions for the residual. Test:
+   `TestEvaluateRecipe_MultiLotAggregation` (500+500 >= 800 → feasible),
+   `TestEvaluateRecipe_MultiLotAggregationStillShort` (300+400 < 800 → missing shortfall 100),
+   `TestEvaluateRecipe_MultiLotSubstitutionForResidual` (300g direct + 600g sub covers 800g residual).
 
-2. **`ConsumedLotIDs` now populated** (`availability.go:170-171,217`).
-   Previously: `ConsumedLotIDs` was never assigned — only `NearExpiryLotIDs` was set,
-   making the field a dead letter. Fix: `ConsumedLotIDs` is set to `[lotID]` on both
-   direct on-hand matches and substituted matches. `NearExpiryLotIDs` is now correctly
-   a subset of `ConsumedLotIDs`.
+2. **Substitution shortfall in target units** (`walkSubstitutions`): `bestNeeded` now tracks the
+   target-unit quantity (`needed * sub.Ratio`) instead of source-unit quantity. Shortfall is
+   `bestNeeded - bestAvailable` in target units. Test:
+   `TestEvaluateRecipe_SubstitutionShortfallCorrect` (100g fresh → 33g dried, 20g on-hand →
+   shortfall 13, not 80).
 
-3. **`ToForm` enforcement** (`availability.go:212-214`).
-   Previously: `sub.ToForm` was stored but never checked when matching the target lot.
-   Fix: when looking for a target lot, pass `PreferredForm: sub.ToForm` to
-   `findBestDirectLot` so form-constrained substitutions only match lots of the
-   specified form.
+3. **Short direct lot now walks substitutions for residual** (minor, round 3): When direct lots
+   exist but are insufficient, the code now falls through to substitution walk for the residual
+   before declaring missing.
 
-**New tests** (27 total, up from 22):
-- `TestEvaluateRecipe_SubstitutionShortfallDoesNotBlockLowerTier` — verifies
-  EQUIVALENT sub with short lot doesn't block GOOD sub that fully covers.
-- `TestEvaluateRecipe_ConsumedLotIDsPopulated` — verifies direct match surfaces lot id.
-- `TestEvaluateRecipe_ConsumedLotIDsForSubstitution` — verifies sub match surfaces lot id.
-- `TestEvaluateRecipe_SubstitutionToFormEnforced` — verifies ToForm=frozen blocks fresh lot.
-- `TestEvaluateRecipe_SubstitutionToFormAllowsMatch` — verifies ToForm=frozen matches frozen lot.
+4. **Recipe-level deduplication** (`EvaluateRecipe`): `ConsumedLotIDs` and `NearExpiryLotIDs` are
+   deduplicated via `dedupInt64s`. Test: `TestEvaluateRecipe_MultiLotDeduplication`.
 
-**Minor notes from round 1** (deferred):
-- `LotInfo.Unit` unused — cross-unit normalization is out of scope (deferred to unit system work).
-- Lots past best-before silently not surfaced as near-expiry — correct by design (only
-  within 7-day window is "near"; expired lots are handled by pantry expiration logic).
+5. **`worstConf` initialization**: `aggregateDirectLots` now initializes `worstConf = EXACT` so
+   UNKNOWN lots are correctly detected (was `""` which had rank 0, never updated).
 
-**Verdict**: PASS (round 2)
+6. **Near-expiry computation**: Moved into `aggregateDirectLots` with `now` parameter. Correctly
+   surfaces lots within 7 days.
+
+7. **Comments**: Removed references to non-existent `design.md`.
+
+**Tests**: 32 total (up from 27). All pass. `openspec validate` passes. `go vet` clean.
+
+**Verdict**: PASS (round 4)

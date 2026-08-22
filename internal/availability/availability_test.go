@@ -450,6 +450,132 @@ func TestEvaluateRecipe_SubstitutionToFormAllowsMatch(t *testing.T) {
 	}
 }
 
+func TestEvaluateRecipe_MultiLotAggregation(t *testing.T) {
+	// Two lots of the same ingredient in different locations.
+	// 500g + 500g = 1000g total, recipe needs 800g → feasible.
+	inputs := makeInputs("r1", []RecipeLine{
+		{IngredientID: "flour", Quantity: 800, Unit: "g"},
+	}, []LotInfo{
+		{ID: 1, IngredientID: "flour", Quantity: 500, Unit: "g", Confidence: domain.ConfidenceExact},
+		{ID: 2, IngredientID: "flour", Quantity: 500, Unit: "g", Confidence: domain.ConfidenceExact},
+	}, nil)
+
+	v := EvaluateRecipe(inputs)
+	if v.Status != RecipeFeasible {
+		t.Errorf("status = %q, want feasible (500+500 >= 800)", v.Status)
+	}
+	l := v.Lines[0]
+	if l.Status != StatusOnHand {
+		t.Errorf("line status = %q, want on-hand", l.Status)
+	}
+	if l.OnHandQuantity != 1000 {
+		t.Errorf("on-hand quantity = %v, want 1000 (aggregated)", l.OnHandQuantity)
+	}
+	if l.Shortfall != 0 {
+		t.Errorf("shortfall = %v, want 0", l.Shortfall)
+	}
+	if len(l.ConsumedLotIDs) != 2 {
+		t.Errorf("consumed lot ids = %v, want 2 lots", l.ConsumedLotIDs)
+	}
+}
+
+func TestEvaluateRecipe_MultiLotAggregationStillShort(t *testing.T) {
+	// Two lots: 300g + 400g = 700g, recipe needs 800g → missing with shortfall 100.
+	inputs := makeInputs("r1", []RecipeLine{
+		{IngredientID: "flour", Quantity: 800, Unit: "g"},
+	}, []LotInfo{
+		{ID: 1, IngredientID: "flour", Quantity: 300, Unit: "g", Confidence: domain.ConfidenceExact},
+		{ID: 2, IngredientID: "flour", Quantity: 400, Unit: "g", Confidence: domain.ConfidenceExact},
+	}, nil)
+
+	v := EvaluateRecipe(inputs)
+	if v.Status != RecipeInfeasible {
+		t.Errorf("status = %q, want infeasible", v.Status)
+	}
+	l := v.Lines[0]
+	if l.Status != StatusMissing {
+		t.Errorf("line status = %q, want missing", l.Status)
+	}
+	if l.Shortfall != 100 {
+		t.Errorf("shortfall = %v, want 100", l.Shortfall)
+	}
+}
+
+func TestEvaluateRecipe_MultiLotSubstitutionForResidual(t *testing.T) {
+	// Direct lots: 300g, need 800g → residual 500g.
+	// EQUIVALENT sub target has 600g → covers residual.
+	inputs := makeInputs("r1", []RecipeLine{
+		{IngredientID: "chicken", Quantity: 800, Unit: "g"},
+	}, []LotInfo{
+		{ID: 1, IngredientID: "chicken", Quantity: 300, Unit: "g", Confidence: domain.ConfidenceExact},
+		{ID: 2, IngredientID: "tofu", Quantity: 600, Unit: "g", Confidence: domain.ConfidenceExact},
+	}, []domain.IngredientSubstitution{
+		{ID: "s1", FromIngredientID: "chicken", ToIngredientID: "tofu", Category: domain.TierEquivalent, Ratio: 1.0},
+	})
+	v := EvaluateRecipe(inputs)
+	l := v.Lines[0]
+	if l.Status != StatusSubstituted {
+		t.Errorf("status = %q, want substituted (direct short, sub covers residual)", l.Status)
+	}
+	if l.SubstitutionTier == nil || *l.SubstitutionTier != domain.TierEquivalent {
+		t.Errorf("tier = %v, want EQUIVALENT", l.SubstitutionTier)
+	}
+	if l.Shortfall != 0 {
+		t.Errorf("shortfall = %v, want 0", l.Shortfall)
+	}
+}
+
+func TestEvaluateRecipe_SubstitutionShortfallCorrect(t *testing.T) {
+	// Recipe needs 100g fresh basil, substitute is dried basil with ratio 0.33.
+	// Required dried = 33g. On-hand dried basil is 20g → shortfall = 13.
+	dried := domain.FormDried
+	inputs := makeInputs("r1", []RecipeLine{
+		{IngredientID: "basil", Quantity: 100, Unit: "g", PreferredForm: ptrForm(domain.FormFresh)},
+	}, []LotInfo{
+		{ID: 1, IngredientID: "basil", Quantity: 20, Unit: "g", Confidence: domain.ConfidenceExact, Form: ptrForm(dried)},
+	}, []domain.IngredientSubstitution{
+		{ID: "s1", FromIngredientID: "basil", FromForm: ptrForm(domain.FormFresh),
+			ToIngredientID: "basil", ToForm: ptrForm(dried),
+			Category: domain.TierForm, Ratio: 0.33},
+	})
+	v := EvaluateRecipe(inputs)
+	l := v.Lines[0]
+	if l.Status != StatusMissing {
+		t.Errorf("status = %q, want missing (20g < 33g required)", l.Status)
+	}
+	if l.Shortfall != 13 {
+		t.Errorf("shortfall = %v, want 13 (33 - 20)", l.Shortfall)
+	}
+	if l.OnHandQuantity != 20 {
+		t.Errorf("on-hand quantity = %v, want 20", l.OnHandQuantity)
+	}
+}
+
+func TestEvaluateRecipe_MultiLotDeduplication(t *testing.T) {
+	// Two recipe lines consume the same lot id — should be deduped at recipe level.
+	now := time.Now()
+	threeDays := now.AddDate(0, 0, 3)
+	inputs := EvaluateInputs{
+		RecipeID: "r1",
+		Lines: []RecipeLine{
+			{IngredientID: "milk", Quantity: 200, Unit: "ml"},
+			{IngredientID: "milk", Quantity: 200, Unit: "ml"},
+		},
+		Lots: []LotInfo{
+			{ID: 1, IngredientID: "milk", Quantity: 1000, Unit: "ml", Confidence: domain.ConfidenceExact, BestBefore: &threeDays},
+		},
+		Now: now,
+	}
+	v := EvaluateRecipe(inputs)
+	// Both lines consume lot 1, but recipe-level should dedup.
+	if len(v.ConsumedLotIDs) != 1 || v.ConsumedLotIDs[0] != 1 {
+		t.Errorf("consumed lot ids = %v, want [1] (deduped)", v.ConsumedLotIDs)
+	}
+	if len(v.NearExpiryLotIDs) != 1 || v.NearExpiryLotIDs[0] != 1 {
+		t.Errorf("near-expiry lot ids = %v, want [1] (deduped)", v.NearExpiryLotIDs)
+	}
+}
+
 func TestSubstitutionTierOrder(t *testing.T) {
 	order := domain.SubstitutionTierOrder()
 	expected := []domain.SubstitutionTier{

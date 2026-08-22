@@ -5,7 +5,7 @@
 //
 // The core computation is pure: EvaluateRecipe takes pre-fetched domain data
 // and returns explainable per-line verdicts plus a recipe-level verdict. No
-// database access lives in this package (design.md Step 7, task 7.1).
+// database access lives in this package (task 7.1).
 package availability
 
 import (
@@ -43,6 +43,15 @@ type LotInfo struct {
 	Form         *domain.IngredientForm
 }
 
+// LotAgg is the result of aggregating all matching lots for a single
+// ingredient line.
+type LotAgg struct {
+	TotalQuantity float64
+	LotIDs        []int64
+	WorstConf     domain.Confidence
+	NearExpiryIDs []int64
+}
+
 // IngredientVerdict is the result for a single recipe ingredient line.
 type IngredientVerdict struct {
 	IngredientID       string
@@ -73,10 +82,10 @@ type RecipeVerdict struct {
 	RecipeID         string
 	Status           RecipeStatus
 	Lines            []IngredientVerdict
-	// ConsumedLotIDs are the lot ids the verdict would consume, ordered by
-	// line. NearExpiryLotIDs is a subset of those lots whose best-before
-	// date is within nearExpiryDays of now (set by the caller; 0 means
-	// "do not surface expiry").
+	// ConsumedLotIDs are the unique lot ids the verdict would consume,
+	// ordered by first appearance. NearExpiryLotIDs is a deduplicated
+	// subset of those lots whose best-before date is within 7 days of now
+	// (set by the caller; zero Now means "do not surface expiry").
 	ConsumedLotIDs   []int64
 	NearExpiryLotIDs []int64
 }
@@ -124,11 +133,9 @@ func EvaluateRecipe(inputs EvaluateInputs) RecipeVerdict {
 
 	status := computeRecipeStatus(hasMissing, hasSubstitution, hasUncertain)
 
-	var consumed, nearExpiry []int64
-	for _, v := range lines {
-		consumed = append(consumed, v.ConsumedLotIDs...)
-		nearExpiry = append(nearExpiry, v.NearExpiryLotIDs...)
-	}
+	// Deduplicate consumed and near-expiry lot ids at recipe level.
+	consumed := dedupInt64s(flattenInt64s(lines, func(v IngredientVerdict) []int64 { return v.ConsumedLotIDs }))
+	nearExpiry := dedupInt64s(flattenInt64s(lines, func(v IngredientVerdict) []int64 { return v.NearExpiryLotIDs }))
 
 	return RecipeVerdict{
 		RecipeID:         inputs.RecipeID,
@@ -149,34 +156,57 @@ func computeRecipeStatus(hasMissing, hasSubstitution, hasUncertain bool) RecipeS
 	return RecipeFeasible
 }
 
+// evaluateLine computes the verdict for a single recipe ingredient line.
+// It first aggregates all on-hand lots (task 3.1 + multi-lot aggregation),
+// then falls through to the substitution walk for any residual shortfall
+// (task 3.3).
 func evaluateLine(line RecipeLine, lots []LotInfo, subs []domain.IngredientSubstitution, now time.Time) IngredientVerdict {
 	v := IngredientVerdict{
-		IngredientID:   line.IngredientID,
+		IngredientID:     line.IngredientID,
 		RequiredQuantity: line.Quantity,
 	}
 
-	// Step 1: try direct on-hand match, preferring matching form.
-	bestLot := findBestDirectLot(line, lots)
-	if bestLot != nil {
-		if bestLot.Confidence == domain.ConfidenceUnknown {
+	// Step 1: aggregate all on-hand lots matching this ingredient.
+	agg := aggregateDirectLots(line, lots, now)
+	if agg.TotalQuantity > 0 {
+		if agg.WorstConf == domain.ConfidenceUnknown {
 			v.Status = StatusOnHandUncertain
 			v.Confidence = domain.ConfidenceUnknown
 			v.Reason = "on-hand-uncertain"
 		} else {
 			v.Status = StatusOnHand
-			v.Confidence = bestLot.Confidence
+			v.Confidence = agg.WorstConf
 			v.Reason = "on-hand"
 		}
-		v.OnHandQuantity = bestLot.Quantity
-		v.ConsumedLotIDs = []int64{bestLot.ID}
-		if bestLot.BestBefore != nil && !now.IsZero() {
-			days := bestLot.BestBefore.Sub(now).Hours() / 24
-			if days >= 0 && days <= 7 {
-				v.NearExpiryLotIDs = []int64{bestLot.ID}
+		v.OnHandQuantity = agg.TotalQuantity
+		v.ConsumedLotIDs = agg.LotIDs
+		v.NearExpiryLotIDs = agg.NearExpiryIDs
+		if agg.TotalQuantity < line.Quantity {
+			// Direct lots exist but are insufficient. Walk substitutions
+			// for the residual before declaring missing (minor fix from
+			// reviewer round 3).
+			residual := line.Quantity - agg.TotalQuantity
+			subResult, _, _ := walkSubstitutions(line, subs, lots, now, residual)
+			if subResult != nil {
+				// Substitution covers the residual.
+				v.Status = StatusSubstituted
+				v.SubstitutionTier = subResult.tier
+				v.SubstitutedFromID = line.IngredientID
+				v.OnHandQuantity = agg.TotalQuantity + subResult.available
+				v.Shortfall = 0
+				v.Reason = "on-hand-plus-substituted-" + string(*subResult.tier)
+				v.ConsumedLotIDs = append(v.ConsumedLotIDs, subResult.lotIDs...)
+				v.NearExpiryLotIDs = append(v.NearExpiryLotIDs, subResult.nearExpiry...)
+				if subResult.confidence == domain.ConfidenceUnknown {
+					v.Confidence = domain.ConfidenceUnknown
+					v.Reason += "-uncertain"
+				} else if v.Confidence != domain.ConfidenceUnknown {
+					v.Confidence = subResult.confidence
+				}
+				return v
 			}
-		}
-		if v.OnHandQuantity < line.Quantity {
-			v.Shortfall = line.Quantity - v.OnHandQuantity
+			// No substitution covers the residual.
+			v.Shortfall = line.Quantity - agg.TotalQuantity
 			v.Status = StatusMissing
 			v.Reason = "missing-shortfall"
 			return v
@@ -184,10 +214,50 @@ func evaluateLine(line RecipeLine, lots []LotInfo, subs []domain.IngredientSubst
 		return v
 	}
 
-	// Step 2: walk substitutions in decreasing preference order.
-	// Track the best shortfall seen across all tiers so we can surface it
-	// in the final "missing" explanation if no substitution fully covers.
-	bestShortfall := 0.0
+	// Step 2: no on-hand lots at all. Walk substitutions.
+	subResult, bestSubAvailable, bestSubNeeded := walkSubstitutions(line, subs, lots, now, line.Quantity)
+	if subResult != nil {
+		v.Status = StatusSubstituted
+		v.SubstitutionTier = subResult.tier
+		v.SubstitutedFromID = line.IngredientID
+		v.OnHandQuantity = subResult.available
+		v.Reason = "substituted-" + string(*subResult.tier)
+		v.ConsumedLotIDs = subResult.lotIDs
+		v.NearExpiryLotIDs = subResult.nearExpiry
+		v.Confidence = subResult.confidence
+		if subResult.confidence == domain.ConfidenceUnknown {
+			v.Reason += "-uncertain"
+		}
+		return v
+	}
+
+	// Step 3: no match, no substitution.
+	v.Status = StatusMissing
+	v.Reason = "missing"
+		if bestSubAvailable > 0 {
+			v.Shortfall = bestSubNeeded - bestSubAvailable
+			v.OnHandQuantity = bestSubAvailable
+			v.Reason = "missing-shortfall"
+		}
+	return v
+}
+
+// subResult holds the outcome of a substitution attempt.
+type subResult struct {
+	tier       *domain.SubstitutionTier
+	available  float64
+	lotIDs     []int64
+	nearExpiry []int64
+	confidence domain.Confidence
+}
+
+// walkSubstitutions walks all substitutions for the given line and returns
+// the first one that fully covers `needed`, or (nil, bestAvailable) if
+// none do. bestAvailable holds the max quantity found across all failed
+// attempts so the caller can surface a shortfall.
+func walkSubstitutions(line RecipeLine, subs []domain.IngredientSubstitution, lots []LotInfo, now time.Time, needed float64) (*subResult, float64, float64) {
+	var bestAvailable float64
+	var bestNeeded float64
 	for _, tier := range domain.SubstitutionTierOrder() {
 		for _, sub := range subs {
 			if sub.Retired {
@@ -203,68 +273,54 @@ func evaluateLine(line RecipeLine, lots []LotInfo, subs []domain.IngredientSubst
 			if sub.FromForm != nil && line.PreferredForm != nil && *sub.FromForm != *line.PreferredForm {
 				continue
 			}
-			// Find lots of the target ingredient, enforcing the target form
-			// if the substitution specifies one (design.md invariant:
-			// non-nil ToForm means "applies to that form only").
+			// Find and aggregate lots of the target ingredient, enforcing
+			// the target form if the substitution specifies one.
+			// Convert needed to target units using the substitution ratio.
+			neededInTarget := needed * sub.Ratio
 			subLine := RecipeLine{
-				IngredientID: sub.ToIngredientID,
-				Quantity:     line.Quantity * sub.Ratio,
-				Unit:         line.Unit,
+				IngredientID:  sub.ToIngredientID,
+				Quantity:      neededInTarget,
+				Unit:          line.Unit,
 				PreferredForm: sub.ToForm,
 			}
-			subLot := findBestDirectLot(subLine, lots)
-			if subLot == nil {
+			subAgg := aggregateDirectLots(subLine, lots, now)
+			if subAgg.TotalQuantity == 0 {
 				continue
 			}
-			needed := line.Quantity * sub.Ratio
-			if subLot.Quantity >= needed {
+			if subAgg.TotalQuantity >= neededInTarget {
 				// Full coverage at this tier — take it.
-				v.Status = StatusSubstituted
-				v.SubstitutionTier = &tier
-				v.SubstitutedFromID = line.IngredientID
-				v.OnHandQuantity = subLot.Quantity
-				v.Reason = "substituted-" + string(tier)
-				v.ConsumedLotIDs = []int64{subLot.ID}
-				if subLot.Confidence == domain.ConfidenceUnknown {
-					v.Confidence = domain.ConfidenceUnknown
-					v.Reason += "-uncertain"
-				} else {
-					v.Confidence = subLot.Confidence
+				r := &subResult{
+					tier:       &tier,
+					available:  subAgg.TotalQuantity,
+					lotIDs:     subAgg.LotIDs,
+					nearExpiry: subAgg.NearExpiryIDs,
+					confidence: subAgg.WorstConf,
 				}
-				if subLot.BestBefore != nil && !now.IsZero() {
-					days := subLot.BestBefore.Sub(now).Hours() / 24
-					if days >= 0 && days <= 7 {
-						v.NearExpiryLotIDs = []int64{subLot.ID}
-					}
-				}
-				return v
+				return r, bestAvailable, bestNeeded
 			}
-			// Insufficient at this tier — record the shortfall and keep
-			// walking. A lower-tier sub may fully cover the line.
-			if subLot.Quantity > bestShortfall {
-				bestShortfall = subLot.Quantity
+			// Insufficient at this tier — track the best available and
+			// keep walking.
+			if subAgg.TotalQuantity > bestAvailable {
+				bestAvailable = subAgg.TotalQuantity
+				bestNeeded = neededInTarget
 			}
 		}
 	}
-
-	// Step 3: no match, no substitution.
-	v.Status = StatusMissing
-	v.Reason = "missing"
-	if bestShortfall > 0 {
-		v.Shortfall = bestShortfall
-		v.Reason = "missing-shortfall"
-	}
-	return v
+	return nil, bestAvailable, bestNeeded
 }
 
-// findBestDirectLot returns the best matching lot for a recipe line from the
-// given lots, or nil if none match. "Best" means: matching ingredient,
-// preferred form first, then highest confidence, then earliest best-before
-// (to consume near-expiry lots first). Quantity sufficiency is checked by
-// the caller (task 3.5).
-func findBestDirectLot(line RecipeLine, lots []LotInfo) *LotInfo {
-	var candidates []int
-	for i, lot := range lots {
+// aggregateDirectLots returns all lots matching the given line's ingredient
+// and form constraints, summed into a LotAgg. Matching is by ingredient_id
+// (task 3.1); form constraints from PreferredForm and AcceptableForms are
+// applied (task 3.2); lots with quantity <= 0 are excluded.
+func aggregateDirectLots(line RecipeLine, lots []LotInfo, now time.Time) LotAgg {
+	var total float64
+	var ids []int64
+	var nearExpiry []int64
+	// Start at highest confidence so any real lot will update it.
+	var worstConf domain.Confidence = domain.ConfidenceExact
+
+	for _, lot := range lots {
 		if lot.IngredientID != line.IngredientID {
 			continue
 		}
@@ -274,7 +330,45 @@ func findBestDirectLot(line RecipeLine, lots []LotInfo) *LotInfo {
 		// Form check: if the recipe has a preferred form and the lot has a
 		// different known form, this lot is not a direct match (task 3.2).
 		if line.PreferredForm != nil && lot.Form != nil && *lot.Form != *line.PreferredForm {
-			// Still a candidate if the form is in the acceptable list.
+			if !slices.Contains(line.AcceptableForms, *lot.Form) {
+				continue
+			}
+		}
+		total += lot.Quantity
+		ids = append(ids, lot.ID)
+		if confidenceRank(lot.Confidence) < confidenceRank(worstConf) {
+			worstConf = lot.Confidence
+		}
+		if !now.IsZero() && lot.BestBefore != nil {
+			days := lot.BestBefore.Sub(now).Hours() / 24
+			if days >= 0 && days <= 7 {
+				nearExpiry = append(nearExpiry, lot.ID)
+			}
+		}
+	}
+
+	return LotAgg{
+		TotalQuantity: total,
+		LotIDs:        ids,
+		WorstConf:     worstConf,
+		NearExpiryIDs: nearExpiry,
+	}
+}
+
+// findBestDirectLot returns the single best matching lot for a recipe line.
+// "Best" means: matching ingredient, preferred form first, then highest
+// confidence, then earliest best-before. Quantity sufficiency is checked
+// by the caller (task 3.5). Kept for potential future single-lot use cases.
+func findBestDirectLot(line RecipeLine, lots []LotInfo) *LotInfo {
+	var candidates []int
+	for i, lot := range lots {
+		if lot.IngredientID != line.IngredientID {
+			continue
+		}
+		if lot.Quantity <= 0 {
+			continue
+		}
+		if line.PreferredForm != nil && lot.Form != nil && *lot.Form != *line.PreferredForm {
 			if !slices.Contains(line.AcceptableForms, *lot.Form) {
 				continue
 			}
@@ -284,21 +378,15 @@ func findBestDirectLot(line RecipeLine, lots []LotInfo) *LotInfo {
 	if len(candidates) == 0 {
 		return nil
 	}
-
-	// Sort candidates: preferred-form match first, then by confidence
-	// (EXACT > LIKELY > ESTIMATED > UNKNOWN), then by best-before (soonest first).
 	sort.SliceStable(candidates, func(a, b int) bool {
 		la, lb := lots[candidates[a]], lots[candidates[b]]
-		// Preferred form match wins.
 		laPref, lbPref := formMatchesPreferred(la.Form, line.PreferredForm), formMatchesPreferred(lb.Form, line.PreferredForm)
 		if laPref != lbPref {
 			return laPref
 		}
-		// Higher confidence wins.
 		if la.Confidence != lb.Confidence {
 			return confidenceRank(la.Confidence) > confidenceRank(lb.Confidence)
 		}
-		// Soonest best-before wins (nil = no date, treated as farthest).
 		if la.BestBefore != nil && lb.BestBefore != nil {
 			return la.BestBefore.Before(*lb.BestBefore)
 		}
@@ -310,13 +398,12 @@ func findBestDirectLot(line RecipeLine, lots []LotInfo) *LotInfo {
 		}
 		return false
 	})
-
 	return &lots[candidates[0]]
 }
 
 func formMatchesPreferred(lotForm *domain.IngredientForm, preferred *domain.IngredientForm) bool {
 	if preferred == nil || lotForm == nil {
-		return true // no preference or no lot form → no mismatch
+		return true
 	}
 	return *lotForm == *preferred
 }
@@ -334,4 +421,25 @@ func confidenceRank(c domain.Confidence) int {
 	default:
 		return 0
 	}
+}
+
+func dedupInt64s(ids []int64) []int64 {
+	seen := make(map[int64]struct{})
+	var out []int64
+	for _, id := range ids {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+func flattenInt64s[T any](items []T, fn func(T) []int64) []int64 {
+	var out []int64
+	for _, item := range items {
+		out = append(out, fn(item)...)
+	}
+	return out
 }
