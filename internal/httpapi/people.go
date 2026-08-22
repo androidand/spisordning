@@ -53,6 +53,10 @@ type Dependencies struct {
 	Plans                     PlanService
 	EffortProfiles            EffortProfileService
 	PlanningConstraints       PlanningConstraintService
+	ShoppingLists             ShoppingListService
+	ShoppingListItems         ShoppingListItemService
+	ShoppingPush              ShoppingPushService
+	Orders                    OrderService
 }
 
 type peopleHandler struct {
@@ -120,6 +124,42 @@ func RegisterHandlers(mux *http.ServeMux, deps Dependencies) {
 		mux.HandleFunc("GET /constraints", h.listConstraints)
 		h2 := planningConstraintCreateHandler{svc: deps.PlanningConstraints}
 		mux.HandleFunc("POST /constraints", h2.createConstraint)
+	}
+	if deps.ShoppingLists != nil {
+		h := shoppingListListHandler{svc: deps.ShoppingLists}
+		mux.HandleFunc("GET /shopping-lists", h.listShoppingLists)
+		h2 := shoppingListCreateHandler{svc: deps.ShoppingLists}
+		mux.HandleFunc("POST /shopping-lists", h2.createShoppingList)
+		h3 := shoppingListGetHandler{svc: deps.ShoppingLists}
+		mux.HandleFunc("GET /shopping-lists/{listId}", h3.getShoppingList)
+		h4 := shoppingListArchiveHandler{svc: deps.ShoppingLists}
+		mux.HandleFunc("DELETE /shopping-lists/{listId}", h4.archiveShoppingList)
+	}
+	if deps.ShoppingListItems != nil {
+		h := shoppingItemListHandler{svc: deps.ShoppingListItems}
+		mux.HandleFunc("GET /shopping-lists/{listId}/items", h.listShoppingListItems)
+		h2 := shoppingItemCreateHandler{svc: deps.ShoppingListItems}
+		mux.HandleFunc("POST /shopping-lists/{listId}/items", h2.addShoppingListItem)
+		h3 := shoppingItemToggleHandler{svc: deps.ShoppingListItems}
+		mux.HandleFunc("PATCH /shopping-lists/{listId}/items/{itemId}", h3.toggleShoppingListItem)
+		h4 := shoppingItemDeleteHandler{svc: deps.ShoppingListItems}
+		mux.HandleFunc("DELETE /shopping-lists/{listId}/items/{itemId}", h4.deleteShoppingListItem)
+	}
+	if deps.ShoppingPush != nil {
+		h := pushShoppingListHandler{svc: deps.ShoppingPush}
+		mux.HandleFunc("POST /shopping-lists/{listId}/push", h.pushShoppingList)
+		h2 := listShoppingCartsHandler{svc: deps.ShoppingPush}
+		mux.HandleFunc("GET /shopping-lists/{listId}/carts", h2.listShoppingCarts)
+		h3 := toCartHandler{svc: deps.ShoppingPush}
+		mux.HandleFunc("POST /shopping-lists/{listId}/push/to-cart", h3.toCart)
+	}
+	if deps.Orders != nil {
+		h := listOrdersHandler{svc: deps.Orders}
+		mux.HandleFunc("GET /orders", h.listOrders)
+		h2 := getOrderHandler{svc: deps.Orders}
+		mux.HandleFunc("GET /orders/{orderId}", h2.getOrder)
+		h3 := listOrderItemsHandler{svc: deps.Orders}
+		mux.HandleFunc("GET /orders/{orderId}/items", h3.listOrderItems)
 	}
 }
 

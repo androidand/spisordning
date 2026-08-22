@@ -409,6 +409,272 @@ func (a storeAdapter) CreatePlanningConstraint(ctx context.Context, in httpapi.P
 	return httpapi.PlanningConstraintResponse{ID: int(id), Kind: in.Kind, Value: in.Value, Active: in.Active}, nil
 }
 
+func (a storeAdapter) ListShoppingLists(ctx context.Context) ([]httpapi.ShoppingListResponse, error) {
+	lists, err := a.db.ListShoppingLists(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("shopping lists list: %w", err)
+	}
+	out := make([]httpapi.ShoppingListResponse, 0, len(lists))
+	for _, l := range lists {
+		out = append(out, httpapi.ShoppingListResponse{
+			ID: int(l.ID), OwnerPersonID: l.OwnerPersonID,
+			Name: l.Name, Status: l.Status, CreatedAt: l.CreatedAt,
+		})
+	}
+	return out, nil
+}
+
+func (a storeAdapter) CreateShoppingList(ctx context.Context, in httpapi.ShoppingListInput) (httpapi.ShoppingListResponse, error) {
+	l, err := a.db.CreateShoppingList(ctx, persistence.ShoppingList{
+		OwnerPersonID: in.OwnerPersonID, Name: in.Name, Status: "active",
+	})
+	if err != nil {
+		return httpapi.ShoppingListResponse{}, fmt.Errorf("shopping list create: %w", err)
+	}
+	return httpapi.ShoppingListResponse{ID: int(l), Name: in.Name, Status: "active", CreatedAt: time.Now()}, nil
+}
+
+func (a storeAdapter) GetShoppingList(ctx context.Context, listID int64) (httpapi.ShoppingListResponse, error) {
+	l, err := a.db.GetShoppingList(ctx, listID)
+	if err != nil {
+		return httpapi.ShoppingListResponse{}, httpapi.ErrNotFound
+	}
+	return httpapi.ShoppingListResponse{
+		ID: int(l.ID), OwnerPersonID: l.OwnerPersonID,
+		Name: l.Name, Status: l.Status, CreatedAt: l.CreatedAt,
+	}, nil
+}
+
+func (a storeAdapter) ArchiveShoppingList(ctx context.Context, listID int64) error {
+	_, err := a.db.GetShoppingList(ctx, listID)
+	if err != nil {
+		return httpapi.ErrNotFound
+	}
+	if err := a.db.UpdateShoppingListStatus(ctx, listID, "archived"); err != nil {
+		return fmt.Errorf("shopping list archive: %w", err)
+	}
+	return nil
+}
+
+func intPtr64ToIntPtr(v *int64) *int {
+	if v == nil {
+		return nil
+	}
+	r := int(*v)
+	return &r
+}
+
+func float64ToFloat32(v float64) float32 {
+	return float32(v)
+}
+
+func float64PtrToFloat32Ptr(v *float64) *float32 {
+	if v == nil {
+		return nil
+	}
+	r := float32(*v)
+	return &r
+}
+
+func int64PtrToIntPtr(v *int64) *int {
+	if v == nil {
+		return nil
+	}
+	r := int(*v)
+	return &r
+}
+
+func (a storeAdapter) ListShoppingListItems(ctx context.Context, listID int64) ([]httpapi.ShoppingListItemResponse, error) {
+	items, err := a.db.ListShoppingListItems(ctx, listID)
+	if err != nil {
+		return nil, fmt.Errorf("shopping list items list: %w", err)
+	}
+	out := make([]httpapi.ShoppingListItemResponse, 0, len(items))
+	for _, it := range items {
+		out = append(out, httpapi.ShoppingListItemResponse{
+			ID: int(it.ID), ShoppingListID: int(it.ShoppingListID),
+			ShoppingRequirementID: int64PtrToIntPtr(it.ShoppingRequirementID),
+			IngredientID: it.IngredientID, Label: it.Label,
+			Quantity: float64ToFloat32(it.Quantity), Unit: it.Unit, Checked: it.Checked, AddedAt: it.AddedAt,
+		})
+	}
+	return out, nil
+}
+
+func (a storeAdapter) AddShoppingListItem(ctx context.Context, listID int64, in httpapi.ShoppingListItemInput) (httpapi.ShoppingListItemResponse, error) {
+	it, err := a.db.CreateShoppingListItem(ctx, persistence.ShoppingListItem{
+		ShoppingListID: listID, ShoppingRequirementID: func() *int64 {
+			if in.ShoppingRequirementID != nil {
+				v := int64(*in.ShoppingRequirementID)
+				return &v
+			}
+			return nil
+		}(),
+		IngredientID: in.IngredientID, Label: in.Label,
+		Quantity: float64(in.Quantity), Unit: in.Unit, Checked: false,
+	})
+	if err != nil {
+		return httpapi.ShoppingListItemResponse{}, fmt.Errorf("shopping list item create: %w", err)
+	}
+	return httpapi.ShoppingListItemResponse{
+		ID: int(it), ShoppingListID: int(listID),
+		ShoppingRequirementID: inPtrToIntPtr(in.ShoppingRequirementID),
+		IngredientID: in.IngredientID, Label: in.Label,
+		Quantity: in.Quantity, Unit: in.Unit, Checked: false, AddedAt: time.Now(),
+	}, nil
+}
+
+func inPtrToIntPtr(v *int) *int { return v }
+
+func (a storeAdapter) ToggleShoppingListItem(ctx context.Context, listID, itemID int64, checked bool) (httpapi.ShoppingListItemResponse, error) {
+	if err := a.db.UpdateShoppingListItemChecked(ctx, itemID, checked); err != nil {
+		return httpapi.ShoppingListItemResponse{}, httpapi.ErrNotFound
+	}
+	items, err := a.db.ListShoppingListItems(ctx, listID)
+	if err != nil {
+		return httpapi.ShoppingListItemResponse{}, fmt.Errorf("shopping list item toggle: %w", err)
+	}
+	for _, it := range items {
+		if it.ID == itemID {
+			return httpapi.ShoppingListItemResponse{
+				ID: int(it.ID), ShoppingListID: int(it.ShoppingListID),
+				ShoppingRequirementID: int64PtrToIntPtr(it.ShoppingRequirementID),
+				IngredientID: it.IngredientID, Label: it.Label,
+				Quantity: float64ToFloat32(it.Quantity), Unit: it.Unit, Checked: it.Checked, AddedAt: it.AddedAt,
+			}, nil
+		}
+	}
+	return httpapi.ShoppingListItemResponse{}, httpapi.ErrNotFound
+}
+
+func (a storeAdapter) DeleteShoppingListItem(ctx context.Context, listID, itemID int64) error {
+	if err := a.db.DeleteShoppingListItem(ctx, itemID); err != nil {
+		return httpapi.ErrNotFound
+	}
+	return nil
+}
+
+func (a storeAdapter) PushShoppingList(ctx context.Context, listID int64, retailer string) (httpapi.RetailerListBindingResponse, error) {
+	if _, err := PushShoppingList(ctx, a.db, listID, envOr("ADAPTER_URL", "http://localhost:8402"), retailer); err != nil {
+		return httpapi.RetailerListBindingResponse{}, err
+	}
+	binding, err := a.db.GetRetailerListBinding(ctx, listID, retailer)
+	if err != nil {
+		return httpapi.RetailerListBindingResponse{}, fmt.Errorf("push shopping list: get binding: %w", err)
+	}
+	out := httpapi.RetailerListBindingResponse{
+		ID: int(binding.ID), ShoppingListID: int(binding.ShoppingListID),
+		Retailer: binding.Retailer, ExternalListID: binding.ExternalListID,
+		SyncDirection: binding.SyncDirection, LastPushedAt: binding.LastPushedAt,
+	}
+	if binding.LastPushStatus != nil {
+		s := httpapi.RetailerListBindingLastPushStatus(*binding.LastPushStatus)
+		out.LastPushStatus = &s
+	}
+	return out, nil
+}
+
+func (a storeAdapter) ListShoppingCarts(ctx context.Context, listID int64) ([]httpapi.ShoppingCartResponse, error) {
+	bindings, err := a.db.ListRetailerListBindings(ctx, listID)
+	if err != nil {
+		return nil, fmt.Errorf("shopping carts list: %w", err)
+	}
+	out := make([]httpapi.ShoppingCartResponse, 0)
+	for _, b := range bindings {
+		carts, err := a.db.ListShoppingCarts(ctx, b.ID)
+		if err != nil {
+			continue
+		}
+		for _, c := range carts {
+			out = append(out, httpapi.ShoppingCartResponse{
+				ID: int(c.ID), RetailerListBindingID: int(c.RetailerListBindingID),
+				CreatedAt: c.CreatedAt, Status: c.Status,
+			})
+		}
+	}
+	return out, nil
+}
+
+func (a storeAdapter) ToCart(ctx context.Context, listID int64, retailer string) (httpapi.ShoppingCartResponse, error) {
+	binding, err := a.db.GetRetailerListBinding(ctx, listID, retailer)
+	if err != nil {
+		return httpapi.ShoppingCartResponse{}, httpapi.ErrNotFound
+	}
+	carts, err := a.db.ListShoppingCarts(ctx, binding.ID)
+	if err != nil {
+		return httpapi.ShoppingCartResponse{}, fmt.Errorf("to cart: %w", err)
+	}
+	if len(carts) == 0 {
+		return httpapi.ShoppingCartResponse{}, fmt.Errorf("to cart: no carts for binding %d", binding.ID)
+	}
+	c := carts[0]
+	return httpapi.ShoppingCartResponse{
+		ID: int(c.ID), RetailerListBindingID: int(c.RetailerListBindingID),
+		CreatedAt: c.CreatedAt, Status: c.Status,
+	}, nil
+}
+
+func (a storeAdapter) ListOrders(ctx context.Context, retailer *string, cartID *int64) ([]httpapi.OrderResponse, error) {
+	orders, err := a.db.ListOrders(ctx, cartID, retailer)
+	if err != nil {
+		return nil, fmt.Errorf("orders list: %w", err)
+	}
+	out := make([]httpapi.OrderResponse, 0, len(orders))
+	for _, o := range orders {
+		out = append(out, httpapi.OrderResponse{
+			ID: int(o.ID), ShoppingCartID: int64PtrToIntPtr(o.ShoppingCartID),
+			Retailer: o.Retailer, Source: o.Source,
+			OrderedAt: o.OrderedAt, TotalPrice: float64PtrToFloat32Ptr(o.TotalPrice),
+		})
+	}
+	return out, nil
+}
+
+func (a storeAdapter) GetOrder(ctx context.Context, orderID int64) (httpapi.OrderViewResponse, error) {
+	o, err := a.db.GetOrder(ctx, orderID)
+	if err != nil {
+		return httpapi.OrderViewResponse{}, httpapi.ErrNotFound
+	}
+	items, err := a.db.ListOrderItems(ctx, orderID)
+	if err != nil {
+		return httpapi.OrderViewResponse{}, fmt.Errorf("get order: %w", err)
+	}
+	out := httpapi.OrderViewResponse{
+		Order: httpapi.OrderResponse{
+			ID: int(o.ID), ShoppingCartID: int64PtrToIntPtr(o.ShoppingCartID),
+			Retailer: o.Retailer, Source: o.Source,
+			OrderedAt: o.OrderedAt, TotalPrice: float64PtrToFloat32Ptr(o.TotalPrice),
+		},
+	}
+	for _, it := range items {
+		out.Items = append(out.Items, httpapi.OrderItemResponse{
+			ID: int(it.ID), OrderID: int(it.OrderID),
+			RetailerProductID: it.RetailerProductID,
+			Quantity: float64ToFloat32(it.Quantity), UnitPrice: float64PtrToFloat32Ptr(it.UnitPrice),
+			TotalPrice: float64PtrToFloat32Ptr(it.TotalPrice), SubstitutedForItemID: int64PtrToIntPtr(it.SubstitutedForItemID),
+		})
+	}
+	return out, nil
+}
+
+func (a storeAdapter) ListOrderItems(ctx context.Context, orderID int64) ([]httpapi.OrderItemResponse, error) {
+	items, err := a.db.ListOrderItems(ctx, orderID)
+	if err != nil {
+		return nil, fmt.Errorf("order items list: %w", err)
+	}
+	out := make([]httpapi.OrderItemResponse, 0, len(items))
+	for _, it := range items {
+		out = append(out, httpapi.OrderItemResponse{
+			ID: int(it.ID), OrderID: int(it.OrderID),
+			RetailerProductID: it.RetailerProductID,
+			Quantity: float64ToFloat32(it.Quantity), UnitPrice: float64PtrToFloat32Ptr(it.UnitPrice),
+			TotalPrice: float64PtrToFloat32Ptr(it.TotalPrice), SubstitutedForItemID: int64PtrToIntPtr(it.SubstitutedForItemID),
+		})
+	}
+	return out, nil
+}
+
+
 // newPersonID generates a 16-char hex id from crypto/rand (stdlib only — no new dep).
 func newPersonID() (string, error) {
 	var b [8]byte

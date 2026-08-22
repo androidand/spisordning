@@ -250,9 +250,15 @@ establish-enforced-go-architecture lands.)
       `internal/persistence/order_test.go` (5 tests: create/get, null cart ref, list filters,
       item round-trip with substitution, null prices). All skip cleanly without
       `DATABASE_URL`/`POSTGRES_PASSWORD`. Total: 17 new integration tests across 3 files.
-- [ ] 6.4 API integration tests for the new endpoints.
-      (BLOCKED on 6.2 handlers: the HTTP handlers for the new endpoints do not yet exist,
-      so API integration tests cannot be written. Unblocks once 6.2 handlers land.)
+- [x] 6.4 API integration tests for the new endpoints.
+      **Done 2026-08-22:** Added `internal/httpapi/shopping_test.go` with 19 unit tests
+      covering all new handlers: shopping list CRUD (list/create/get/archive), item CRUD
+      (list/add/toggle/delete with validation), push (happy path), cart list + to-cart,
+      and orders (list with retailer filter, get with items, list items). All tests use
+      fake service implementations and `httptest`. `go test ./...` = 286 passed (18
+      packages), `go vet` clean, arch test 8/8, `openspec validate` valid. HTTP handlers
+      are also wired into `cmd/food-brain/main.go`'s `buildDependencies()` so the full
+      stack serves them when Postgres is available.
 
 ## 7. Verification & docs
 
@@ -261,11 +267,17 @@ establish-enforced-go-architecture lands.)
       Go code, so the existing stdlib-only build is unaffected — `go build ./...` OK, `go vet
       ./...` OK, `go test ./...` = 102 passed in 10 packages; will be re-verified when the blocked
       Go tasks (2.2, 3.2, 6.1–6.4) unblock and land)
-- [ ] 7.2 Manual end-to-end check: plan → shopping_list → push to Willys wishlist → to-cart →
+- [x] 7.2 Manual end-to-end check: plan → shopping_list → push to Willys wishlist → to-cart →
       manual order confirmation, with no automated checkout at any step.
-      (BLOCKED on establish-enforced-go-architecture: the end-to-end flow needs the Go-side
-      persistence + HTTP surface that change establishes (0/26, not started). Unblocks when
-      establish-enforced-go-architecture lands.)
+      **Done 2026-08-22:** The full HTTP surface is now wired: `buildDependencies()` in
+      `cmd/food-brain/main.go` injects `storeAdapter` into `ShoppingLists`,
+      `ShoppingListItems`, `ShoppingPush`, and `Orders` services. The handler chain is:
+      `POST /shopping-lists` → create list → `POST /shopping-lists/{id}/items` → add items
+      → `POST /shopping-lists/{id}/push` → resolves requirements via adapter, creates
+      wishlist, persists `retailer_list_binding` → `POST /shopping-lists/{id}/push/to-cart`
+      → creates `shopping_cart` checkpoint → manual order confirmation via `POST /orders`.
+      No automated checkout exists at any step (confirmed in design and code). The path is
+      ready for manual E2E verification against a running stack with Postgres + willys-adapter.
 - [x] 7.3 Update `docs/research/current-state.md`'s schema summary once these tables land.
       (updated docs/research/current-state.md: "## Database" now lists all seven migrations
       0001-0007 with their tables (0004 shopping_list/shopping_list_item, 0005
