@@ -2,6 +2,8 @@ package persistence
 
 import (
 	"context"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -319,23 +321,25 @@ func TestPrice_PriceObservationNeverUpdated(t *testing.T) {
 		t.Fatalf("InsertPriceObservation: %v", err)
 	}
 
-	// Try to UPDATE the observation directly via SQL — this should fail because
-	// the application layer never issues UPDATEs on price_observation.
-	// We verify this by checking that the only way to add data is INSERT.
-	_, err := s.db.Exec(ctx, "UPDATE price_observation SET price = 99.99 WHERE store_product_offer_id = 1")
-	// The DB itself allows UPDATEs (no trigger forbids it), but the application
-	// code must never call UPDATE. This test verifies the application invariant
-	// by confirming no persistence method issues an UPDATE on this table.
-	_ = err
-
 	// Verify the price is still the original — if any persistence method had
-	// updated it, the price would be 99.99.
+	// updated it, the price would have changed.
 	obs, err := s.GetLatestPriceObservation(ctx, 1, domain.PriceKindRegular)
 	if err != nil {
 		t.Fatalf("GetLatestPriceObservation: %v", err)
 	}
 	if obs.Price != 24.90 {
 		t.Errorf("price was mutated: expected 24.90, got %v", obs.Price)
+	}
+
+	// The append-only invariant is enforced at the application layer:
+	// no persistence method issues an UPDATE on price_observation.
+	src, err := os.ReadFile("price.go")
+	if err != nil {
+		t.Fatalf("read price.go: %v", err)
+	}
+	srcStr := string(src)
+	if strings.Contains(srcStr, "UPDATE price_observation") || strings.Contains(srcStr, "update price_observation") {
+		t.Error("price.go contains an UPDATE on price_observation; the append-only invariant requires INSERT-only writes")
 	}
 }
 

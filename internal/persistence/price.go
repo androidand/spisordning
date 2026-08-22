@@ -92,8 +92,7 @@ func (s *Store) UpsertRetailerProduct(ctx context.Context, rp domain.RetailerPro
 		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT (retailer_id, retailer_sku) DO UPDATE SET
 			product_id = EXCLUDED.product_id,
-			display_name = EXCLUDED.display_name,
-			updated_at = now()`
+			display_name = EXCLUDED.display_name`
 	if _, err := s.db.Exec(ctx, q, rp.ID, rp.RetailerID, nullableText(rp.ProductID), rp.RetailerSKU, nullableText(rp.DisplayName)); err != nil {
 		return fmt.Errorf("persistence: upsert retailer_product: %w", err)
 	}
@@ -220,7 +219,7 @@ func (s *Store) InsertPriceObservation(ctx context.Context, obs domain.PriceObse
 // ListPriceObservations returns all observations for an offer, ordered by
 // observed_at descending.
 func (s *Store) ListPriceObservations(ctx context.Context, offerID int64) ([]domain.PriceObservation, error) {
-	const q = `SELECT id, store_product_offer_id, observed_at, price, price_kind, source, created_at FROM price_observation WHERE store_product_offer_id = $1 ORDER BY observed_at DESC`
+	const q = `SELECT id, store_product_offer_id, observed_at, price, price_kind, source, created_at FROM price_observation WHERE store_product_offer_id = $1 ORDER BY observed_at DESC, id DESC`
 	rows, err := s.db.Query(ctx, q, offerID)
 	if err != nil {
 		return nil, fmt.Errorf("persistence: list price_observations: %w", err)
@@ -235,7 +234,7 @@ func (s *Store) ListPriceObservations(ctx context.Context, offerID int64) ([]dom
 func (s *Store) GetLatestPriceObservation(ctx context.Context, offerID int64, kind domain.PriceKind) (domain.PriceObservation, error) {
 	const q = `SELECT id, store_product_offer_id, observed_at, price, price_kind, source, created_at
 		FROM price_observation WHERE store_product_offer_id = $1 AND price_kind = $2
-		ORDER BY observed_at DESC LIMIT 1`
+		ORDER BY observed_at DESC, id DESC LIMIT 1`
 	var obs domain.PriceObservation
 	if err := s.db.QueryRow(ctx, q, offerID, string(kind)).Scan(&obs.ID, &obs.StoreProductOfferID, &obs.ObservedAt, &obs.Price,
 		(*string)(&obs.PriceKind), &obs.Source, &obs.CreatedAt); err != nil {

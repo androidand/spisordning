@@ -98,6 +98,6 @@ SELECT DISTINCT ON (spo.id, po.price_kind)
     po.source
 FROM store_product_offer spo
 JOIN price_observation po ON po.store_product_offer_id = spo.id
-ORDER BY spo.id, po.price_kind, po.observed_at DESC;
+ORDER BY spo.id, po.price_kind, po.observed_at DESC, po.id DESC;
 
 COMMIT;
