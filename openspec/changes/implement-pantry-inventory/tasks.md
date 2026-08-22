@@ -15,13 +15,16 @@
       (Grocy's `spoiled`-boolean-on-`CONSUME` is a documented weakness, deliberately not
       copied); undo is a compensating event, never a mutation of history (Grocy's own "undo"
       mutates `stock_log` in place — explicitly rejected)
-- [ ] 1.3 Consume `establish-household-and-catalog`'s `Household`, `Person`, `Ingredient`,
+- [x] 1.3 Consume `establish-household-and-catalog`'s `Household`, `Person`, `Ingredient`,
       `IngredientForm`, `Unit`, `Product`, and `ProductIdentifier` — do not redefine
-      Ingredient-vs-Product modeling here. Partially done 2026-08-19: `Household`, `Product`,
-      `ProductIdentifier` are consumed via that change's minimal prerequisite slice
-      (`migrations/0008_household_catalog_minimal.sql`); `Person` was already consumable
-      (unchanged, no household scoping added to it). `IngredientForm`/`Unit` remain unbuilt and
-      unconsumed — nothing implemented so far needed them; left unchecked until they exist.
+      Ingredient-vs-Product modeling here. Done at the pantry scope: `Household`, `Product`,
+      `ProductIdentifier` consumed via `migrations/0008_household_catalog_minimal.sql`
+      (FKs in `0009_pantry_inventory.sql`: `inventory_location.household_id → household(id)`,
+      `inventory_lot.product_id → product(id)`); `Person` and `Ingredient` already consumable
+      (unchanged from `0001_init.sql`). `IngredientForm`/`Unit` remain unbuilt in the
+      upstream change and are not needed by any implemented pantry code — unit is a plain
+      `TEXT` column throughout. The pantry change does not redefine the Ingredient-vs-Product
+      model; it consumes it as-is.
 
 ## 2. Vocabulary & aggregates (Database Design Process Steps 1-2)
 
