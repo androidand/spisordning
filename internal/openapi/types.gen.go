@@ -66,6 +66,32 @@ func (e MealPlanUpdateStatus) Valid() bool {
 	}
 }
 
+// Defines values for PlanRunResultStatus.
+const (
+	Accepted PlanRunResultStatus = "accepted"
+	Failed   PlanRunResultStatus = "failed"
+)
+
+// Valid indicates whether the value is a known member of the PlanRunResultStatus enum.
+func (e PlanRunResultStatus) Valid() bool {
+	switch e {
+	case Accepted:
+		return true
+	case Failed:
+		return true
+	default:
+		return false
+	}
+}
+
+// EffortProfile defines model for EffortProfile.
+type EffortProfile struct {
+	KitchenEnergy int `json:"kitchen_energy"`
+
+	// Weekday 0=Sunday .. 6=Saturday
+	Weekday int `json:"weekday"`
+}
+
 // Error defines model for Error.
 type Error struct {
 	Message string `json:"message"`
@@ -200,6 +226,65 @@ type PersonPreference struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// PlanRunInput defines model for PlanRunInput.
+type PlanRunInput struct {
+	// CreateWishlist resolve products and create Willys wishlist
+	CreateWishlist *bool `json:"create_wishlist,omitempty"`
+
+	// Days number of dinners (default: 7)
+	Days *int `json:"days,omitempty"`
+
+	// Week ISO week, e.g. 2026-W31 (default: next week)
+	Week *string `json:"week,omitempty"`
+}
+
+// PlanRunResult defines model for PlanRunResult.
+type PlanRunResult struct {
+	// Message human-readable result summary
+	Message string `json:"message"`
+
+	// Status accepted = queued, failed = error
+	Status PlanRunResultStatus `json:"status"`
+
+	// WeekStart Monday of the planned week
+	WeekStart *openapi_types.Date `json:"week_start,omitempty"`
+}
+
+// PlanRunResultStatus accepted = queued, failed = error
+type PlanRunResultStatus string
+
+// PlanningConstraint defines model for PlanningConstraint.
+type PlanningConstraint struct {
+	// Active whether the constraint is active
+	Active bool `json:"active"`
+	Id     int  `json:"id"`
+
+	// Kind constraint kind (e.g. avoid_tag
+	Kind string `json:"kind"`
+
+	// Value constraint value
+	Value string `json:"value"`
+}
+
+// PlanningConstraintNew defines model for PlanningConstraintNew.
+type PlanningConstraintNew struct {
+	Active bool   `json:"active"`
+	Kind   string `json:"kind"`
+	Value  string `json:"value"`
+}
+
+// ReactionNew defines model for ReactionNew.
+type ReactionNew struct {
+	// Note optional free-text note
+	Note *string `json:"note,omitempty"`
+
+	// PersonId who is reacting
+	PersonId string `json:"person_id"`
+
+	// Sentiment -2 (hate) .. 2 (love)
+	Sentiment int `json:"sentiment"`
+}
+
 // RecipeRef defines model for RecipeRef.
 type RecipeRef struct {
 	// Effort 1 (quick) to 3 (intense)
@@ -218,6 +303,16 @@ type ShoppingRequirement struct {
 	PreferredForm   *string  `json:"preferred_form"`
 	Quantity        float64  `json:"quantity"`
 	Unit            string   `json:"unit"`
+}
+
+// TonightView Tonight's meal: the recipe + any reactions recorded so far
+type TonightView struct {
+	// Reactions reactions already recorded for today's meal event
+	Reactions []MealReaction `json:"reactions"`
+	Recipe    RecipeRef      `json:"recipe"`
+
+	// ServedOn today's date
+	ServedOn openapi_types.Date `json:"served_on"`
 }
 
 // PersonId defines model for PersonId.
@@ -241,6 +336,12 @@ type ListPreferencesParams struct {
 	PersonId *string `form:"personId,omitempty" json:"personId,omitempty"`
 }
 
+// CreatePlanningConstraintJSONRequestBody defines body for CreatePlanningConstraint for application/json ContentType.
+type CreatePlanningConstraintJSONRequestBody = PlanningConstraintNew
+
+// UpsertEffortProfileJSONRequestBody defines body for UpsertEffortProfile for application/json ContentType.
+type UpsertEffortProfileJSONRequestBody = EffortProfile
+
 // ResolveIngredientMappingJSONRequestBody defines body for ResolveIngredientMapping for application/json ContentType.
 type ResolveIngredientMappingJSONRequestBody = IngredientMappingResolve
 
@@ -253,8 +354,14 @@ type CreatePersonJSONRequestBody = PersonNew
 // CreatePlanJSONRequestBody defines body for CreatePlan for application/json ContentType.
 type CreatePlanJSONRequestBody = MealPlanNew
 
+// RunPlanJSONRequestBody defines body for RunPlan for application/json ContentType.
+type RunPlanJSONRequestBody = PlanRunInput
+
 // UpdatePlanJSONRequestBody defines body for UpdatePlan for application/json ContentType.
 type UpdatePlanJSONRequestBody = MealPlanUpdate
 
 // SetDecisionsJSONRequestBody defines body for SetDecisions for application/json ContentType.
 type SetDecisionsJSONRequestBody = SetDecisionsJSONBody
+
+// CreateReactionJSONRequestBody defines body for CreateReaction for application/json ContentType.
+type CreateReactionJSONRequestBody = ReactionNew

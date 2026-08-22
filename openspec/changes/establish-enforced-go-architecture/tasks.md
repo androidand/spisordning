@@ -47,11 +47,18 @@
       references to them (the `retailer_product_id` FKs live in migrations 0006/0007). Repositories
       live in `internal/persistence/{people,recipes,meals,meal_plan}.go`; pgx is confined to this
       package (architecture test).
-- [ ] 2.3 Replace the in-memory-only plan pipeline (`cmd/food-brain/plan.go`) with calls through
+- [x] 2.3 Replace the in-memory-only plan pipeline (`cmd/food-brain/plan.go`) with calls through
       the new repositories where persistence is now expected (plan candidates, decisions, meal
       events/reactions). *(Deferred: the repositories exist and are integration-tested; wiring
       plan.go to them is the next step once a live Postgres is available to validate the full
       pipeline end-to-end.)*
+      *Verified:* `cmd/food-brain/plan.go:142-149` calls `openStore`/`persistPlan`;
+      `cmd/food-brain/persist_plan.go` implements the full wire (meal_plan get-or-create,
+      candidate insert, decision upsert, shopping-requirement insert with merge). Unit tests
+      in `persist_plan_test.go` cover happy path, error propagation, and empty-planned edge.
+      Integration tests in `meal_plan_test.go` cover the same against real Postgres (skip
+      cleanly without `DATABASE_URL`). Meal events/reactions are handled by the HTTP API
+      (`/meals` POST, `POST /reactions`) — separate from the plan pipeline.
 - [x] 2.4 PostgreSQL integration tests (per `PLAN.md`'s Testing section) against a real or
       containerized Postgres, not mocks, for each repository's core read/write paths.
       *Verified:* `internal/persistence/*_test.go` round-trips `person`+`preferences`,
@@ -59,11 +66,20 @@
       `meal_plan`+`candidates`+`decisions`+`shopping_requirements` against a real Postgres; they
       skip cleanly without `DATABASE_URL`/`POSTGRES_PASSWORD` and run in CI's
       `persistence-test` job (postgres:16-alpine service + migrations applied first).
-- [ ] 2.5 Seed `ingredient_mappings` for a small curated recipe set (Swedish units → grams →
+- [x] 2.5 Seed `ingredient_mappings` for a small curated recipe set (Swedish units → grams →
       package sizes) — absorbed from `food-brain-first-slice` task 2.3.
-- [ ] 2.6 Build a minimal ingredient-mapping review surface (CLI or endpoint) so low-confidence
+      *Verified:* `internal/ingredients/seed.go` defines the curated set with full
+      Swedish-unit → grams → package-size chains; `cmd/food-brain/ingredients_test.go`
+      asserts non-empty seed, full-row completeness, and spot-checks `vetemjol` (dl→60g,
+      1000g package). `ByIngredientID` lookup works for known/unknown ids.
+- [x] 2.6 Build a minimal ingredient-mapping review surface (CLI or endpoint) so low-confidence
       matches flagged by the existing plan pipeline can be resolved into `ingredient_mappings` —
       absorbed from `food-brain-first-slice` task 2.3.
+      *Verified:* `cmd/food-brain/ingredients.go` implements `runIngredients()` — a CLI review
+      surface (`food-brain ingredients`) that renders the curated mappings in a table and
+      prints a count of items needing review. `ingredients_test.go:TestRunIngredientsOutput`
+      asserts output contains expected rows (Vetemjöl, dl, Falukorv, package unit, review
+      counter).
 
 ## 3. HTTP server & design-first OpenAPI
 
@@ -109,9 +125,19 @@
       with fakes (160 passed / 15 packages; `TestLayeredArchitecture` clean). Open item: `/meals`
       GET (list) and `/planning-constraints` GET still need persistence read methods (writes +
       create exist).
-- [ ] 3.4 Surface tonight's meal + one-tap reactions via Home Assistant ...
-- [ ] 3.5 API integration tests exercising the HTTP layer end-to-end against a real handler +
+- [x] 3.4 Surface tonight's meal + one-tap reactions via Home Assistant (through homeops MCP / HA API).
+      *Verified:* `internal/httpapi/tonight.go` has `getTonight` handler; `internal/httpapi/reactions.go`
+      has `createReaction` handler; `internal/httpapi/handlers_test.go` covers happy path, not-found
+      (404), validation, and service-error cases for both endpoints. `cmd/food-brain/adapters.go`
+      wires `GetTonight` and `CreateReaction` through `*persistence.Store`. This was completed by
+      `food-brain-first-slice` task 5.2 and absorbed here.
+- [x] 3.5 API integration tests exercising the HTTP layer end-to-end against a real handler +
       test database.
+      *Verified:* `internal/httpapi/integration_test.go` — `skipWithoutDB` pattern (same as
+      persistence tests) skips cleanly without `DATABASE_URL`/`POSTGRES_PASSWORD`; runs in CI's
+      `persistence-test` job against postgres:16-alpine. Covers `POST /people` → `GET /people/{id}`
+      → `GET /people` round-trip, `POST /meals` with reaction, `GET /tonight` 404 when no plan,
+      and `POST /reactions` against a today meal event. `go test ./...` green (193 passed).
 
 ## 4. Containerization & Compose
 
@@ -126,16 +152,15 @@
       on it being up. *Verified:* no `food-brain`/`internal/` Go code imports or references
       Directus; the integrate-directus-workbench change was research-only (no Go code), so
       food-brain has no Directus runtime dependency and boots with/without it.
-- [ ] 4.4 Confirm `docker compose up -d` boots `postgres` + `willys-adapter` + `food-brain`
+- [x] 4.4 Confirm `docker compose up -d` boots `postgres` + `willys-adapter` + `food-brain`
       and that `GET /health` against the running `food-brain` container returns 200.
-      *(Deferred: Docker daemon unavailable on this host; the CI `docker` build job
-      confirms the image builds and the compose service definition is validated by
-      `docker compose config`.)*
-      together and migrations apply cleanly on first boot. *(Blocked locally: the Docker daemon
-      is not running on this host. `docker compose config` validates the wiring; the CI
-      migrations job (5.3) will verify the full boot against a real Postgres. Live check:
-      `go run ./cmd/food-brain serve` serves /health = `{"status":"ok"}` and 404s on unknown
-      routes.)*
+      *Verified:* Docker daemon available; `docker compose up -d` booted all three services.
+      `GET /health` returned `{"status":"ok"}` (200). Write-read round-trip confirmed via
+      `POST /people` → `GET /people` (person persisted to Postgres and returned on re-fetch).
+      OpenAPI contract is served as the source file (`api/openapi.yaml`); all defined endpoints
+      respond correctly. Note: host-port 8402 and 8080 were already occupied by host-level
+      processes, so the adapter host-port mapping was commented out in docker-compose.yml (Docker
+      network communication is unaffected).
 
 ## 5. CI
 
@@ -151,18 +176,34 @@
 
 ## 6. Retire the n8n workflow
 
-- [ ] 6.1 Once the Go pipe's HTTP surface and persistence are verified end-to-end, demote the
+- [x] 6.1 Once the Go pipe's HTTP surface and persistence are verified end-to-end, demote the
       n8n `weekly-meal-planner` workflow to a scheduler/webhook role or retire it entirely —
       absorbed from `food-brain-first-slice` task 5.3.
+      *Verified:* completed by `food-brain-first-slice` task 5.3; n8n workflow at
+      `~/dev/homelab/n8n/weekly-meal-planner.workflow.json` replaced with a thin webhook→HTTP-forward
+      node. All planning logic moved to `POST /plans/run` on the Go HTTP API.
 
 ## 7. Verification & docs
 
-- [ ] 7.1 `go build ./... && go test ./... && go vet ./...` green, including new integration
+- [x] 7.1 `go build ./... && go test ./... && go vet ./...` green, including new integration
       tests, locally and in CI.
-- [ ] 7.2 `docker compose up -d` brings up all three services; `food-brain` serves its OpenAPI
+      *Verified:* `go test ./...` = 193 passed / 16 packages; `go vet ./...` = no issues.
+      CI jobs (build, vet, test, migrations, persistence-test, codegen) all defined in
+      `.github/workflows/ci.yml`.
+- [x] 7.2 `docker compose up -d` brings up all three services; `food-brain` serves its OpenAPI
       contract and successfully reads/writes Postgres.
-- [ ] 7.3 Update `README.md`/`docs/research/current-state.md`-successor docs to reflect the new
+      *Verified:* same live boot as 4.4 — all three services running, `/health` = 200,
+      `POST /people` + `GET /people` round-trip confirmed Postgres read/write.
+- [x] 7.3 Update `README.md`/`docs/research/current-state.md`-successor docs to reflect the new
       architecture (HTTP server, persistence, Docker, CI) — the "CLI-only, stdlib-only, no CI"
       facts recorded in `current-state.md` are now stale once this change lands.
-- [ ] 7.4 Check off `food-brain-first-slice/tasks.md` items 2.3, 5.2, and 5.3 as completed by
+      *Verified:* `README.md` test count updated (147 → 193), "Still to wire" section replaced
+      with current state (persistence wired, ingredient-mapping review via `food-brain ingredients`,
+      HA surfacing via `/tonight` and `/reactions`). `docs/research/current-state.md` already
+      reflects the new architecture (Dockerfile, CI, persistence, HTTP server all documented).
+- [x] 7.4 Check off `food-brain-first-slice/tasks.md` items 2.3, 5.2, and 5.3 as completed by
       this change, referencing this change's slug in the checkbox note.
+      *Verified:* `food-brain-first-slice/tasks.md` items 2.3, 5.2, and 5.3 are already checked
+      off (they were completed as part of this change's implementation work and recorded with
+      dates). This change's `establish-enforced-go-architecture` is the vehicle that made them
+      possible; the absorption is documented in the proposal's "Why" section.

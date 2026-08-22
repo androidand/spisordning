@@ -44,10 +44,15 @@ type PersonService interface {
 // Dependencies are the services httpapi's handlers call. Add new services here as
 // routes are implemented from api/openapi.yaml.
 type Dependencies struct {
-	People      PersonService
-	Preferences PreferencesService
-	Recipes     RecipesService
-	Meals       MealsService
+	People                    PersonService
+	Preferences               PreferencesService
+	Recipes                   RecipesService
+	Meals                     MealsService
+	Tonight                   TonightService
+	Reactions                 ReactionService
+	Plans                     PlanService
+	EffortProfiles            EffortProfileService
+	PlanningConstraints       PlanningConstraintService
 }
 
 type peopleHandler struct {
@@ -77,6 +82,44 @@ func RegisterHandlers(mux *http.ServeMux, deps Dependencies) {
 	if deps.Meals != nil {
 		h := mealsHandler{svc: deps.Meals}
 		mux.HandleFunc("POST /meals", h.createMealEvent)
+	}
+	if deps.Tonight != nil {
+		h := tonightHandler{svc: deps.Tonight}
+		mux.HandleFunc("GET /tonight", h.getTonight)
+	}
+	if deps.Reactions != nil {
+		h := reactionsHandler{svc: deps.Reactions}
+		mux.HandleFunc("POST /reactions", h.createReaction)
+	}
+	if deps.Plans != nil {
+		h := planRunHandler{svc: deps.Plans}
+		mux.HandleFunc("POST /plans/run", h.runPlan)
+		h2 := planListHandler{svc: deps.Plans}
+		mux.HandleFunc("GET /plans", h2.listPlans)
+		h3 := planCreateHandler{svc: deps.Plans}
+		mux.HandleFunc("POST /plans", h3.createPlan)
+		h4 := planGetHandler{svc: deps.Plans}
+		mux.HandleFunc("GET /plans/{planId}", h4.getPlan)
+		h5 := planUpdateHandler{svc: deps.Plans}
+		mux.HandleFunc("PATCH /plans/{planId}", h5.updatePlan)
+		h6 := planDecisionsHandler{svc: deps.Plans}
+		mux.HandleFunc("POST /plans/{planId}/decisions", h6.setDecisions)
+		h7 := planCandidatesHandler{svc: deps.Plans}
+		mux.HandleFunc("GET /plans/{planId}/candidates", h7.listCandidates)
+		h8 := planShoppingRequirementsHandler{svc: deps.Plans}
+		mux.HandleFunc("GET /plans/{planId}/shopping-requirements", h8.listShoppingRequirements)
+	}
+	if deps.EffortProfiles != nil {
+		h := effortProfileListHandler{svc: deps.EffortProfiles}
+		mux.HandleFunc("GET /effort-profiles", h.listEffortProfiles)
+		h2 := effortProfileUpsertHandler{svc: deps.EffortProfiles}
+		mux.HandleFunc("POST /effort-profiles", h2.upsertEffortProfile)
+	}
+	if deps.PlanningConstraints != nil {
+		h := planningConstraintListHandler{svc: deps.PlanningConstraints}
+		mux.HandleFunc("GET /constraints", h.listConstraints)
+		h2 := planningConstraintCreateHandler{svc: deps.PlanningConstraints}
+		mux.HandleFunc("POST /constraints", h2.createConstraint)
 	}
 }
 

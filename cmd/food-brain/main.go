@@ -74,6 +74,11 @@ func buildDependencies() httpapi.Dependencies {
 	deps.Preferences = adapters
 	deps.Recipes = adapters
 	deps.Meals = adapters
+	deps.Tonight = adapters
+	deps.Reactions = adapters
+	deps.Plans = adapters
+	deps.EffortProfiles = adapters
+	deps.PlanningConstraints = adapters
 	return deps
 }
 

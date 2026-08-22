@@ -18,11 +18,12 @@ decides what the family eats this week and gets it into the shopping basket.
 A homelab recon found much of the generic layer already running:
 
 - **A working v1 meal planner** — `~/dev/homelab/n8n/weekly-meal-planner.workflow.json`:
-  Skolmaten school-lunch → LLM dinner plan (via local **Olla** proxy) → shopping list →
-  optional Mealie write → optional Willys enrichment. **Spisordning absorbs this as its v1**:
-  the durable domains and scoring move into tested Go; n8n is demoted to a thin
-  scheduler/webhook (or retired). Two overlapping planners is exactly the integration
-  nightmare this project's rule forbids.
+  **Demoted 2026-08-21** (task 5.3). The n8n workflow is now a thin webhook-only
+  scheduler: it accepts `POST /meal/weekly-plan` and forwards to
+  `POST /plans/run` on the Go service. All planning logic (Mealie sync, scoring,
+  Skolmaten dedup, Olla explanations, shopping requirements, Willys wishlist) lives
+  in the tested Go pipe (`cmd/food-brain/plan.go`). Two overlapping planners is
+  exactly the integration nightmare this project's rule forbids.
 - **Mealie** — already deployed (tengil app `hlab-mealie`). Reuse it; don't stand up another.
 - **Olla** — local Ollama/OpenAI-compatible LLM proxy (`192.168.1.240:40114`). Food Brain uses
   it for candidate variation and human-readable explanations (see suggestion engine below).
@@ -38,8 +39,9 @@ A homelab recon found much of the generic layer already running:
 Hard constraints and scoring (preferences, effort, repetition penalty, pantry-awareness,
 campaign bias, school-lunch dedup) are **deterministic, tested Go** — reproducible and
 explainable. **Olla** proposes and varies candidates and writes the natural-language
-"why this meal" text. The LLM never decides feasibility; Go does. Windmill/n8n decides *when*
-to run; Food Brain decides *what* the answer is.
+"why this meal" text. The LLM never decides feasibility; Go does. n8n is a thin webhook scheduler
+(see above) that calls `POST /plans/run` on Food Brain. Food Brain decides
+*what* the answer is and *when* to run.
 
 ## Guiding principle
 
@@ -186,8 +188,9 @@ while existing apps provide the generic 80%.
 The deterministic planning core is built and tested without any database, LLM, or network:
 
 ```bash
-go test ./...                # 147 tests incl. an end-to-end plan test against fake services;
-                          # 7 persistence integration tests skip without Postgres (run in CI)
+go test ./...                # 193 tests incl. plan, persistence, HTTP handler, and
+                           # integration tests; persistence + HTTP integration tests
+                           # skip without Postgres (run in CI's persistence-test job)
 go run ./cmd/food-brain demo # in-memory demo: ranks a sample week + prints requirements
 go run ./cmd/food-brain serve # HTTP server on :8080 — /health and OpenAPI-backed /people
 ```
@@ -232,9 +235,13 @@ repo (`apps/willys-adapter`, `npm run adapter`, port 8402); the Go side talks to
 `internal/retailer`. `docker-compose.yml` here runs Postgres (schema auto-applied) + the
 adapter — copy `.env.example` to `.env` first.
 
-Still to wire: Postgres persistence (the schema is ready; `plan` currently syncs per run),
-the ingredient-mapping review surface, and Home Assistant surfacing. Tracked in
-`openspec/changes/food-brain-first-slice/tasks.md`.
+Postgres persistence is wired (the `plan` pipeline writes meal plans, candidates, decisions,
+and shopping requirements through `internal/persistence`; see `cmd/food-brain/persist_plan.go`).
+The ingredient-mapping review surface is available via `food-brain ingredients`
+(`internal/ingredients/seed.go`). Home Assistant surfacing is via `GET /tonight` and
+`POST /reactions` (`internal/httpapi/tonight.go`, `internal/httpapi/reactions.go`).
+All three were completed by `establish-enforced-go-architecture` and absorbed from
+`food-brain-first-slice`.
 
 ## Related repos
 

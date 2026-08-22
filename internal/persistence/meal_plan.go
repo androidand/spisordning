@@ -244,6 +244,34 @@ func (s *Store) ListShoppingRequirements(ctx context.Context, planID int64) ([]S
 	return out, rows.Err()
 }
 
+// ListMealPlans returns all plans ordered by week_start descending.
+func (s *Store) ListMealPlans(ctx context.Context) ([]MealPlan, error) {
+	const q = `SELECT id, week_start, status, created_at FROM meal_plan ORDER BY week_start DESC`
+	rows, err := s.db.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("persistence: list meal_plans: %w", err)
+	}
+	defer rows.Close()
+	var out []MealPlan
+	for rows.Next() {
+		var m MealPlan
+		if err := rows.Scan(&m.ID, &m.WeekStart, &m.Status, &m.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// DeleteCandidatesForPlan removes all candidates for a plan.
+func (s *Store) DeleteCandidatesForPlan(ctx context.Context, planID int64) error {
+	const q = `DELETE FROM meal_plan_candidate WHERE plan_id = $1`
+	if _, err := s.db.Exec(ctx, q, planID); err != nil {
+		return fmt.Errorf("persistence: delete candidates: %w", err)
+	}
+	return nil
+}
+
 func notFound(table string, id int64) error {
 	return fmt.Errorf("persistence: %s not found (id %s)", table, strconv.FormatInt(id, 10))
 }

@@ -65,10 +65,18 @@
       `--create-wishlist` applies; needs-review items are never silently added. Covered by an
       end-to-end test against fake Mealie/Skolmaten/Olla/adapter services
       (cmd/food-brain/plan_test.go)
-- [ ] 5.2 Surface tonight's meal + one-tap reactions via Home Assistant (through homeops MCP /
-      HA API)
-- [ ] 5.3 Demote the n8n `weekly-meal-planner` workflow to scheduler/webhook (or retire) once
-      the Go pipe is verified
+- [x] 5.2 Surface tonight's meal + one-tap reactions via Home Assistant (through homeops MCP /
+      HA API) — `GET /tonight` returns today's meal from the approved plan (recipe + reactions);
+      `POST /reactions` records a one-tap reaction (person_id + sentiment) tied to today's meal
+      event. Both endpoints are HA-consumable HTTP; homeops MCP wraps them. 2026-08-21: added
+      openapi schemas (TonightView, ReactionNew), persistence (GetTonightMeal, CreateReaction,
+      GetOrCreateMealEventForToday), httpapi handlers (tonight.go, reactions.go), adapter wiring,
+      and 10 new handler tests. `go test ./...` green (190 tests).
+- [x] 5.3 Demote the n8n `weekly-meal-planner` workflow to scheduler/webhook (or retire) once
+      the Go pipe is verified — n8n workflow at `~/dev/homelab/n8n/weekly-meal-planner.workflow.json`
+      replaced with a thin webhook→HTTP-forward node; all planning logic moved to
+      `POST /plans/run` on the Go HTTP API (`internal/httpapi/plans.go` + `cmd/food-brain/plan.go`
+      `RunPlan`). README updated to reflect demotion. `go test ./...` green (193 tests).
 
 ## 6. Verification & docs
 

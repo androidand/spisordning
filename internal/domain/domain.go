@@ -128,3 +128,155 @@ type ShoppingRequirement struct {
 	AcceptableForms []string
 	PreferredForm   string
 }
+
+// Household is the unit that plans, cooks, and shops together. It owns member
+// ship records (HouseholdMembership) but not the Person records themselves —
+// a Person may exist without a membership (a former member, or a child without
+// a login). Household is mutable (rename) and never hard-deleted while it has
+// history.
+type Household struct {
+	ID        string
+	Name      string
+	CreatedAt time.Time
+}
+
+// Account is a login identity. It is separate from Person — a Person may exist
+// without an Account (a child), and an Account may exist without being linked
+// to a Person (pending link). Real auth logic is a future change; this type
+// reserves the domain shape.
+type Account struct {
+	ID          string
+	Username    *string
+	Email       *string
+	AuthMethod  string // 'NONE' | 'LOCAL' | 'OIDC'
+	PersonID    *string
+	CreatedAt   time.Time
+	LastLoginAt *time.Time
+}
+
+// PersonRestriction is a safety-critical allergy or hard restriction a Person
+// holds against an ingredient or tag. It is categorical, not scored, and never
+// derived from PreferenceObservation — only set and cleared by an explicit
+// command with an attributed actor.
+type PersonRestriction struct {
+	PersonID    string
+	Tag         string
+	Kind        RestrictionKind
+	Note        *string
+	RecordedBy  *string // account id
+	RecordedAt  time.Time
+	ClearedAt   *time.Time
+	ClearedBy   *string // account id
+}
+
+// RestrictionKind is the kind of a PersonRestriction.
+type RestrictionKind string
+
+const (
+	RestrictionAllergy          RestrictionKind = "ALLERGY"
+	RestrictionHardRestriction  RestrictionKind = "HARD_RESTRICTION"
+)
+
+// IngredientForm is a preparation/preservation state of an Ingredient (fresh,
+// dried, canned, frozen) that changes how it's used and measured.
+type IngredientForm struct {
+	IngredientID string
+	Form         string
+	Notes        *string
+	CreatedAt    time.Time
+}
+
+// IngredientSubstitutionCategory is the category of an IngredientSubstitution.
+type IngredientSubstitutionCategory string
+
+const (
+	SubstitutionEquivalent IngredientSubstitutionCategory = "EQUIVALENT"
+	SubstitutionGood       IngredientSubstitutionCategory = "GOOD"
+	SubstitutionAcceptable IngredientSubstitutionCategory = "ACCEPTABLE"
+	SubstitutionForm       IngredientSubstitutionCategory = "FORM"
+	SubstitutionDietary    IngredientSubstitutionCategory = "DIETARY"
+	SubstitutionEmergency  IngredientSubstitutionCategory = "EMERGENCY"
+)
+
+// IngredientSubstitution is a directed, categorized relationship from one
+// Ingredient(+Form) to another, with a non-implied quantity ratio. Substitution
+// is directional: A→B does not imply B→A.
+type IngredientSubstitution struct {
+	ID               int64
+	FromIngredientID string
+	FromForm         *string
+	ToIngredientID   string
+	ToForm           *string
+	Category         IngredientSubstitutionCategory
+	Ratio            float64
+	RetiredAt        *time.Time
+	CreatedAt        time.Time
+}
+
+// Unit is a universal, dimensioned measure (mass/volume/count).
+type Unit struct {
+	Code      string
+	Name      string
+	Dimension UnitDimension
+}
+
+// UnitDimension is the physical dimension of a Unit.
+type UnitDimension string
+
+const (
+	UnitDimensionMass   UnitDimension = "mass"
+	UnitDimensionVolume UnitDimension = "volume"
+	UnitDimensionCount  UnitDimension = "count"
+)
+
+// UnitConversion is a universal conversion factor between two Units of the same
+// dimension (e.g. kg↔g, l↔dl↔ml). It is never cross-dimension — mass↔volume
+// conversions are ingredient-specific and live on IngredientUnitConversion.
+type UnitConversion struct {
+	FromUnit string
+	ToUnit   string
+	Factor   float64
+}
+
+// IngredientUnitConversion is an ingredient-specific cross-dimension conversion
+// (e.g. dl flour → g). The system does not invent a universal density — if no
+// row exists for an ingredient+unit pair, the conversion is undefined.
+type IngredientUnitConversion struct {
+	IngredientID string
+	FromUnit     string
+	ToUnit       string
+	Factor       float64
+}
+
+// Product is a concrete, purchasable good ("Garant Kycklingfilé 900g"),
+// household-facing and retailer-agnostic. Distinct from RetailerProduct /
+// StoreOffer (Epic F), which attach a specific retailer SKU and price to a
+// Product. A Product may be unmapped (no ProductIngredientMapping row), in
+// which case it is flagged for review.
+type Product struct {
+	ID          string
+	Name        string
+	Brand       *string
+	PackageSize *string
+	Kind        *ProductKind
+	CreatedAt   time.Time
+}
+
+// ProductKind classifies a Product.
+type ProductKind string
+
+const (
+	ProductPackaged   ProductKind = "PACKAGED"
+	ProductUnpackaged ProductKind = "UNPACKAGED"
+	ProductManual     ProductKind = "MANUAL"
+)
+
+// ProductIngredientMapping links a Product to the canonical Ingredient(s) it
+// represents. A Product may map to more than one Ingredient (e.g. a spice mix);
+// a single Ingredient may be mapped from many Products (e.g. different brands
+// of chicken breast).
+type ProductIngredientMapping struct {
+	ProductID    string
+	IngredientID string
+	Quantity     *float64 // how much of the ingredient one unit of the product yields
+}

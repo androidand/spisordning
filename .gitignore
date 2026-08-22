@@ -8,6 +8,8 @@ build/
 bin/
 *.o
 *.exe
+food-brain
+mcp-server
 
 # Env & secrets
 .env

@@ -49,3 +49,26 @@ pantry availability, expiry, substitutions, allergies as a hard filter, ratings,
 - **THEN** pantry availability, expiry, substitutions, allergy filtering, ratings, and price are
   each documented as not-yet-wired, with the dependency that unblocks them named
 - **AND** none of these inputs silently appear to already be handled
+
+### Requirement: Extension seams are explicit for deferred Recommendation Domain inputs
+
+The system SHALL expose interface points (not implementations) for every deferred input so
+later changes can wire them without reshaping this one. The seams are:
+
+- **Pantry availability / expiry / substitutions**: blocked on `implement-pantry-inventory`
+  and `implement-recipe-availability`. Seam: `domain.Candidate` carries `Ingredients` and
+  `Tags`; the scorer's `feasibility()` function can be extended to check pantry stock.
+- **Allergies as a hard filter**: blocked on `establish-household-and-catalog`'s
+  `PersonRestriction` (likes/dislikes-vs-allergies split). Seam: `domain.PlanContext.People`
+  will carry restrictions; `feasibility()` can gate on allergy matches.
+- **Ratings / per-slot people-eating**: blocked on `implement-meals-and-preferences`'s
+  `MealReview`/`Favorite`/attendance model. Seam: `domain.PlanContext.People` will carry
+  ratings; the scorer's `preferenceScore()` can weight by rating history.
+- **Price**: blocked on a later price-intelligence epic. Seam: `domain.Candidate` can carry
+  price data; a new `Price` weight in `scoring.Weights` can be added.
+
+#### Scenario: A developer can identify the seam for adding pantry availability
+
+- **WHEN** a developer wants to wire pantry availability into scoring
+- **THEN** they can extend `domain.Candidate` with stock data and add a check in
+  `scoring.feasibility()` without modifying the `PlanService` interface or the HTTP handlers

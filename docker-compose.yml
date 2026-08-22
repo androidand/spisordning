@@ -6,7 +6,7 @@
 #   docker compose up -d
 #
 # NOTE: the willys-adapter build context points at the sibling willys-client
-# repo; keep ~/dev/willys checked out next to ~/dev/spisordning.
+# repo; keep ~/dev/store-clients/willys-client checked out next to ~/dev/spisordning.
 
 services:
   postgres:
@@ -30,15 +30,18 @@ services:
 
   willys-adapter:
     build:
-      context: ../willys/willys-client
+      context: ../store-clients/willys-client
       dockerfile: Dockerfile.adapter
     restart: unless-stopped
     environment:
       ADAPTER_PORT: '8402'
       WILLYS_USERNAME: ${WILLYS_USERNAME:?set in .env}
       WILLYS_PASSWORD: ${WILLYS_PASSWORD:?set in .env}
-    ports:
-      - '8402:8402'
+    # Host port 8402 may be occupied by a host-level willys-adapter instance.
+    # The Docker-network link (food-brain → willys-adapter:8402) works
+    # regardless; uncomment the line below if host-port access is needed.
+    # ports:
+    #   - '8402:8402'
 
   food-brain:
     build:
@@ -51,6 +54,7 @@ services:
     environment:
       # food-brain reads postgres + homelab services from .env; see .env.example.
       DATABASE_URL: postgres://spisordning:${POSTGRES_PASSWORD}@postgres:5432/spisordning?sslmode=disable
+      TZ: Europe/Stockholm
       MEALIE_BASE_URL: ${MEALIE_BASE_URL:-http://hlab-mealie:9000}
       MEALIE_API_TOKEN: ${MEALIE_API_TOKEN:-}
       OLLA_OPENAI_BASE_URL: ${OLLA_OPENAI_BASE_URL:-}
@@ -58,6 +62,23 @@ services:
       ADAPTER_URL: ${ADAPTER_URL:-http://willys-adapter:8402}
     ports:
       - '8080:8080'
+
+  mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://spisordning:${POSTGRES_PASSWORD}@postgres:5432/spisordning?sslmode=disable
+      TZ: Europe/Stockholm
+    # Default: Streamable HTTP on :8401 (matching Dockerfile.mcp CMD).
+    # For stdio mode (agent subprocess), override: command: ["--stdio"]
+    # For a custom port: command: ["--port", "9000"]
+    ports:
+      - '8401:8401'
 
 volumes:
   pgdata:
