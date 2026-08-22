@@ -119,6 +119,31 @@ func TestMealPlan_GetOrCreateMealPlan(t *testing.T) {
 	}
 }
 
+func TestMealPlan_CreateMealPlan_Idempotent(t *testing.T) {
+	s := skipWithoutDB(t)
+	ctx := context.Background()
+	weekStart := date(t, "2043-04-04") // a fresh week
+
+	// First call inserts a new row and returns its id.
+	id1, err := s.CreateMealPlan(ctx, weekStart)
+	if err != nil {
+		t.Fatalf("first CreateMealPlan: %v", err)
+	}
+	if id1 == 0 {
+		t.Fatal("expected non-zero id from first insert")
+	}
+
+	// Second call with the same week must NOT error (the old DO NOTHING
+	// RETURNING id returned no rows on conflict, causing pgx.ErrNoRows).
+	id2, err := s.CreateMealPlan(ctx, weekStart)
+	if err != nil {
+		t.Fatalf("second CreateMealPlan: %v", err)
+	}
+	if id2 != id1 {
+		t.Fatalf("expected same id on collision, got %d and %d", id1, id2)
+	}
+}
+
 func TestMealPlan_GetOrCreateMealPlan_NotDuplicatedAcrossWeeks(t *testing.T) {
 	s := skipWithoutDB(t)
 	ctx := context.Background()

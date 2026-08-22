@@ -41,7 +41,8 @@ func runPlan(args []string) error {
 	days := fs.Int("days", 7, "number of dinners to plan, starting Monday")
 	weekStr := fs.String("week", "", "ISO week to plan, e.g. 2026-W31 (default: next week)")
 	createWishlist := fs.Bool("create-wishlist", false, "resolve products and create the Willys wishlist (default: dry-run print)")
-	writeTonight := fs.Bool("write-tonight", false, "write the ambient projection (tonight.json) for HA display")
+	writeTonight := fs.Bool("write-tonight", false, "write the ambient projection for HA display")
+	tonightOutput := fs.String("tonight-output", "tonight.json", "path to write the ambient projection (default: tonight.json in CWD)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -119,6 +120,16 @@ func runPlan(args []string) error {
 		},
 	}, monday, *days)
 
+	// ── Compute LLM explanations once (shared between display and write-tonight) ──
+	explanations := map[string]string{} // mealie_recipe_id -> explanation
+	if olla != nil {
+		for _, s := range planned {
+			if expl, err := llm.Explain(olla, ctx, s.Winner); err == nil && expl != "" {
+				explanations[s.Winner.Candidate.MealieRecipeID] = strings.TrimSpace(expl)
+			}
+		}
+	}
+
 	// ── Present the plan ──────────────────────────────────────────────────────
 	fmt.Println("\nProposed week:")
 	byDate := make(map[string]planning.PlannedSlot, len(planned))
@@ -133,10 +144,8 @@ func runPlan(args []string) error {
 			continue
 		}
 		reason := s.Winner.Reason
-		if olla != nil {
-			if expl, err := llm.Explain(olla, ctx, s.Winner); err == nil && expl != "" {
-				reason = strings.TrimSpace(expl)
-			}
+		if expl, ok := explanations[s.Winner.Candidate.MealieRecipeID]; ok {
+			reason = expl
 		}
 		fmt.Printf("  %s  %-30s %s\n", date.Format("Mon 02/01"), s.Winner.Candidate.Title, reason)
 	}
@@ -169,10 +178,8 @@ func runPlan(args []string) error {
 		slots := make([]ambient.Slot, 0, len(planned))
 		for _, s := range planned {
 			reason := s.Winner.Reason
-			if olla != nil {
-				if expl, err := llm.Explain(olla, ctx, s.Winner); err == nil && expl != "" {
-					reason = strings.TrimSpace(expl)
-				}
+			if expl, ok := explanations[s.Winner.Candidate.MealieRecipeID]; ok {
+				reason = expl
 			}
 			slots = append(slots, ambient.Slot{
 				Date:   s.Date.Format("2006-01-02"),
@@ -186,10 +193,10 @@ func runPlan(args []string) error {
 		if err != nil {
 			return fmt.Errorf("write-tonight: marshal: %w", err)
 		}
-		if err := os.WriteFile("tonight.json", append(out, '\n'), 0o644); err != nil {
+		if err := os.WriteFile(*tonightOutput, append(out, '\n'), 0o644); err != nil {
 			return fmt.Errorf("write-tonight: %w", err)
 		}
-		fmt.Printf("✅ wrote ambient projection to tonight.json (%d slots)\n", len(slots))
+		fmt.Printf("✅ wrote ambient projection to %s (%d slots)\n", *tonightOutput, len(slots))
 	}
 
 	fmt.Printf("\nShopping requirements (%d; %d assumed-staple item(s) skipped):\n", len(reqs), len(staples))

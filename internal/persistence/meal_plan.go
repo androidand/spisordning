@@ -51,11 +51,13 @@ type MealPlan struct {
 }
 
 // CreateMealPlan inserts a plan for weekStart and returns its id. The UNIQUE
-// week_start constraint makes this idempotent: ON CONFLICT DO NOTHING skips
-// the insert on collision, and RETURNING id returns the existing row's id.
+// week_start constraint makes this idempotent: ON CONFLICT updates the
+// (no-op) week_start column and RETURNING id always returns a row — the new
+// row's id on insert, the existing row's id on collision.
 func (s *Store) CreateMealPlan(ctx context.Context, weekStart time.Time) (int64, error) {
 	const q = `INSERT INTO meal_plan (week_start) VALUES ($1)
-		ON CONFLICT (week_start) DO NOTHING RETURNING id`
+		ON CONFLICT (week_start) DO UPDATE SET week_start = EXCLUDED.week_start
+		RETURNING id`
 	var id int64
 	err := s.db.QueryRow(ctx, q, weekStart).Scan(&id)
 	if err != nil {
