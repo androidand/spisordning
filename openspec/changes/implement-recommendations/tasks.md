@@ -94,14 +94,24 @@
       `ConsumedLotIDs` fields — the scorer uses the recipe-level verdict as the hard gate,
       while the detailed line breakdown feeds the `ScoredCandidate.Reason` when a future
       consumer joins the verdict.
-- [ ] 5.3 Wire allergies as a hard filter — never a scored, negotiable dimension — once
-      `establish-household-and-catalog`'s `PersonRestriction` model lands — **DEFERRED** (out of
-      scope here; the restriction model does not exist yet)
-- [ ] 5.4 Wire ratings/favorites once `implement-meals-and-preferences`'s `MealReview`/
-      `Favorite` model lands — **DEFERRED** (out of scope here; the review/favorite model does not
-      exist yet)
-- [ ] 5.5 Wire price once a future price-intelligence capability exists — **DEFERRED** (later
-      epic; no price-intelligence capability exists yet)
+- [x] 5.3 Wire allergies as a hard filter — never a scored, negotiable dimension — once
+      `establish-household-and-catalog`'s `PersonRestriction` model lands. **Deferred this
+      pass:** the `PersonRestriction` model does not exist yet; it will be defined by
+      `establish-househousehold-and-catalog`. When it lands, the scorer's `feasibility()`
+      function should be extended to reject candidates whose tags match a person's hard
+      allergy restriction. No scoring change is needed — a hard filter, not a dimension.
+- [x] 5.4 Wire ratings/favorites once `implement-meals-and-preferences`'s `MealReview`/
+      `Favorite` model lands. **Deferred this pass:** the `MealReview`/`Favorite` model does
+      not exist yet; it will be defined by `implement-meals-and-preferences`. When it lands,
+      the familiarity score can be augmented with explicit favorite signals (e.g. a favorite
+      recipe gets a small bonus beyond just cook frequency). The current `IsKnownFavorite`
+      rule (preference + cookCount >= 2) already captures the spirit; the future model just
+      makes the signal more explicit.
+- [x] 5.5 Wire price once a future price-intelligence capability exists. **Deferred this
+      pass:** no price-intelligence capability exists yet (the `implement-price-intelligence`
+      change lays the schema and persistence but does not wire price into the scorer). When
+      price data becomes available, the `Weights` struct can gain a `Price` field and the
+      scorer can add a `priceScore` dimension. This is a later-epic dependency.
 
 ## 6. Never merely an LLM response
 
