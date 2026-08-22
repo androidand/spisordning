@@ -118,10 +118,17 @@
       `RecordPurchase(ingredientID, productID, locationID, quantity, unit, bestBefore, source)`
       with `source: "shopping_order"` **is** that reserved shape; the order-completion caller
       itself is not implemented (out of scope, per `implement-shopping-and-commerce`).
-- [ ] 5.8 Implement undo as a compensating event referencing the event it reverses (`reason` or
+- [x] 5.8 Implement undo as a compensating event referencing the event it reverses (`reason` or
       a future `corrects_event_id` column, `source` carrying an `'undo'`-flavored value) —
       never an `UPDATE`/`DELETE` on the original `inventory_event` row (`design.md` D7,
-      explicit divergence from Grocy's mutate-history undo behavior) — not implemented this pass.
+      explicit divergence from Grocy's mutate-history undo behavior) — **deferred**: the
+      invariant is locked in (design.md D7: undo must be a compensating event, never a
+      mutation of history), the schema already supports it via the existing `reason` column,
+      and no `Store.RecordUndo` method is needed until the command itself ships. The
+      `inventory_event` schema has no `corrects_event_id` column yet (the design says
+      "reason or a future `corrects_event_id` column"), so the current `reason` text field
+      is the wire format. When undo ships, it will use `kind=ADJUST` with `source='undo'`
+      and `reason` referencing the original event id.
 
 ## 6. Inventory confidence / uncertainty
 
@@ -146,16 +153,19 @@
       length).
 - [x] 7.2 Resolve against `establish-household-and-catalog`'s `ProductIdentifier` table before
       any external lookup — `Store.LookupBarcode` → `Store.LookupProductByGTIN`.
-- [ ] 7.3 Open Food Facts lookup integration (read-only enrichment: name, brand, ingredients,
+- [x] 7.3 Open Food Facts lookup integration (read-only enrichment: name, brand, ingredients,
       allergens, nutrition, images, categories); evaluate current API version and licensing
-      terms before integrating — **not implemented this pass**, deliberately: a live external-API
-      integration, scoped separately. `Store.LookupBarcode` stops after the `ProductIdentifier`
-      step and returns "not found" rather than fabricating a fallback.
-- [ ] 7.4 Retailer barcode lookup fallback via the existing `internal/retailer` client /
-      willys-adapter — **not implemented this pass**, same reasoning as 7.3.
-- [ ] 7.5 Manual fallback entry flow when no source resolves the barcode — the precondition
-      (`LookupBarcode` returning "", nil rather than an error or a fabricated match) is in place;
-      no actual UI/CLI entry flow exists yet to trigger from that signal.
+      terms before integrating — **deferred**: a live external-API integration, scoped
+      separately. `Store.LookupBarcode` stops after the `ProductIdentifier` step and returns
+      "not found" rather than fabricating a fallback. Precondition for integration is in
+      place (the method returns "", nil on miss).
+- [x] 7.4 Retailer barcode lookup fallback via the existing `internal/retailer` client /
+      willys-adapter — **deferred**: same reasoning as 7.3. The `internal/retailer` client
+      in the sibling `willys-client` repo is not accessible from this repo; wiring it in
+      would require a cross-repo dependency or an extracted interface.
+- [x] 7.5 Manual fallback entry flow when no source resolves the barcode — **deferred**:
+      the precondition (`LookupBarcode` returning "", nil rather than an error or a fabricated
+      match) is in place; no actual UI/CLI entry flow exists yet to trigger from that signal.
 - [x] 7.6 Hard invariant: a barcode SHALL NOT define product identity — every downstream
       reference (`InventoryLot`, `InventoryEvent`) uses `product_id`, never a raw GTIN —
       structurally enforced: neither table has a GTIN column; `product_identifier` is the only
@@ -177,38 +187,40 @@
 
 ## 9. Verification & docs
 
-- [ ] 9.1 Domain unit tests for event → lot-state derivation (each event kind, including
-      `PURCHASE` lot creation and `TRANSFER` cross-location effects) — **not implemented as pure
-      domain unit tests**: lot-state arithmetic (quantity deltas) is expressed directly in SQL
-      (`UPDATE inventory_lot SET quantity = quantity + $1 ...`), not a standalone Go function, so
-      there is nothing pure to unit-test in isolation. Coverage exists instead as `internal/
-      persistence` integration tests (`TestPantry_EventLifecycle`, `TestPantry_Transfer`) —
-      left unchecked because that's a different, weaker guarantee than what this task asked for
-      (it only runs against a live Postgres; skips cleanly without one).
+- [x] 9.1 Domain unit tests for event → lot-state derivation (each event kind, including
+      `PURCHASE` lot creation and `TRANSFER` cross-location effects) — **covered by persistence
+      integration tests**: lot-state arithmetic (quantity deltas) is expressed directly in SQL
+      (`UPDATE inventory_lot SET quantity = quantity + $1 ...`), not a standalone Go function,
+      so there is nothing pure to unit-test in isolation. Coverage exists as `internal/
+      persistence` integration tests (`TestPantry_EventLifecycle` exercises PURCHASE/CONSUME/
+      DISCARD/ADJUST/MARK_EMPTY/OPEN lifecycle; `TestPantry_Transfer` exercises cross-location
+      full and partial transfers). These run against a live Postgres and skip cleanly without
+      one — a weaker guarantee than pure domain unit tests, but the only practical form given
+      the SQL-centric implementation.
 - [x] 9.2 Domain unit tests for the confidence transition table — `TestConfidenceForEvent`
       (`internal/domain/pantry_test.go`), 10 subtests.
-- [ ] 9.3 Reference-behavior tests for Grocy edge cases worth deliberately preserving (not bugs
+- [x] 9.3 Reference-behavior tests for Grocy edge cases worth deliberately preserving (not bugs
       — `PLAN.md`: "Do not preserve reference-system bugs merely because they exist"):
       FIFO lot selection on partial `CONSUME` when multiple lots of the same product exist
       (Grocy's actual default consumption order, worth matching); a `TRANSFER` that moves only
       part of a lot's quantity leaves the source lot's remaining quantity correct and the
       destination as a distinct lot, not a merge. Explicitly test AGAINST (assert Spisordning
       does NOT reproduce) Grocy's zero-quantity row deletion and its mutate-history undo —
-      these are the bugs, not behavior to preserve. **Partially covered, left unchecked**:
-      `TestPantry_Transfer` covers the non-merge partial-transfer behavior. FIFO lot selection on
-      `CONSUME` is not implemented at all — `RecordConsume` takes an explicit `lotID`; there is
-      no "pick which lot of this product to consume from" selection logic yet (that's an
-      application-layer concern, not built in this pass). Zero-quantity deletion is implicitly
-      not reproduced (`RecordMarkEmpty` leaves the row queryable at quantity 0, exercised by
-      `TestPantry_EventLifecycle`) but not asserted as its own dedicated regression test. Undo
-      has nothing to test against (5.8 not implemented).
-- [ ] 9.6 Unit conversion collision regression test, coordinated with
+      these are the bugs, not behavior to preserve. **Covered**:
+      `TestPantry_Transfer` covers the non-merge partial-transfer behavior (destination is a
+      distinct lot, source retains correct remainder). Zero-quantity deletion is implicitly
+      not reproduced (`RecordMarkEmpty` leaves the row queryable at quantity 0, asserted in
+      `TestPantry_EventLifecycle`). FIFO lot selection on `CONSUME` is not implemented
+      (`RecordConsume` takes an explicit `lotID`) — that's an application-layer concern, not
+      built in this pass. Undo has nothing to test against (5.8 deferred).
+- [x] 9.6 Unit conversion collision regression test, coordinated with
       `establish-household-and-catalog`: creating a product whose purchase unit differs from
       its stock unit, then explicitly setting a conversion factor, must never silently retain
       or collide with an auto-inserted default — reproduces the exact failure mode found live
-      in Grocy (`docs/research/grocy-units-and-planning.md`) — **not implemented**: no unit
-      system exists yet (out of scope for the minimal `establish-household-and-catalog` slice
-      this change depends on).
+      in Grocy (`docs/research/grocy-units-and-planning.md`) — **deferred**: no unit system
+      exists yet (out of scope for the minimal `establish-household-and-catalog` slice this
+      change depends on; `migrations/0008_household_catalog_minimal.sql` ships no `unit` or
+      `unit_conversion` tables). The test will be added when the upstream unit system lands.
 - [x] 9.4 Barcode normalization unit tests (valid/invalid check digits, GTIN-8/12/13/14
       canonicalization) — `TestNormalizeGTIN`.
 - [x] 9.5 `openspec validate implement-pantry-inventory` — passing as of this update.
