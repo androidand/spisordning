@@ -128,3 +128,55 @@ type ShoppingRequirement struct {
 	AcceptableForms []string
 	PreferredForm   string
 }
+
+// IngredientForm is one of the preservation/preparation states an ingredient
+// can be in. Owned by establish-household-and-catalog (design.md Step 4) and
+// consumed read-only by downstream capabilities such as recipe availability
+// (task 3.2 of implement-recipe-availability).
+type IngredientForm string
+
+const (
+	FormFresh  IngredientForm = "fresh"
+	FormDried  IngredientForm = "dried"
+	FormCanned IngredientForm = "canned"
+	FormFrozen IngredientForm = "frozen"
+)
+
+// SubstitutionTier is the preference category of an IngredientSubstitution.
+// Walked in decreasing order: EQUIVALENT first, EMERGENCY last. Owned by
+// establish-household-and-catalog (design.md Step 3) and consumed read-only
+// here; this capability does not define a parallel taxonomy.
+type SubstitutionTier string
+
+const (
+	TierEquivalent SubstitutionTier = "EQUIVALENT"
+	TierGood       SubstitutionTier = "GOOD"
+	TierAcceptable SubstitutionTier = "ACCEPTABLE"
+	TierForm       SubstitutionTier = "FORM"
+	TierDietary    SubstitutionTier = "DIETARY"
+	TierEmergency  SubstitutionTier = "EMERGENCY"
+)
+
+// SubstitutionTierOrder returns the tiers in decreasing preference order,
+// for walking substitutions from best to worst.
+func SubstitutionTierOrder() []SubstitutionTier {
+	return []SubstitutionTier{
+		TierEquivalent, TierGood, TierAcceptable, TierForm, TierDietary, TierEmergency,
+	}
+}
+
+// IngredientSubstitution is a directional substitution from one ingredient to
+// another, with an explicit quantity ratio (to's quantity per from's
+// quantity). Owned by establish-household-and-catalog; consumed read-only by
+// recipe availability. A nil FromForm/ToForm means "applies to any form."
+// Retired rows are kept so past recommendations remain explainable.
+type IngredientSubstitution struct {
+	ID                 string
+	FromIngredientID   string
+	FromForm           *IngredientForm
+	ToIngredientID     string
+	ToForm             *IngredientForm
+	Category           SubstitutionTier
+	Ratio              float64 // to_qty per from_qty
+	Retired            bool
+}
