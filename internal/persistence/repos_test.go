@@ -129,11 +129,14 @@ func TestRecipes_IngredientsAndMappings(t *testing.T) {
 func TestMeals_ReactionsAndConstraints(t *testing.T) {
 	s := skipWithoutDB(t)
 	ctx := context.Background()
-	truncateTables(t, ctx, s, "meal_reaction", "meal_event", "planning_constraint", "recipe_ref")
+	truncateTables(t, ctx, s, "meal_reaction", "meal_event", "planning_constraint", "recipe_ref", "person")
 
 	// meal_event needs a recipe_ref FK
 	if err := s.UpsertRecipeRef(ctx, RecipeRef{MealieRecipeID: "r-fisk", Title: "Ugnslax", Effort: 2}); err != nil {
 		t.Fatalf("UpsertRecipeRef: %v", err)
+	}
+	if err := s.CreatePerson(ctx, Person{ID: "p-kid", Name: "Kid", Weight: 1}); err != nil {
+		t.Fatalf("CreatePerson: %v", err)
 	}
 	served := time.Now().AddDate(0, 0, -3)
 	eid, err := s.CreateMealEvent(ctx, "r-fisk", served)
