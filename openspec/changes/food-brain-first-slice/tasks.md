@@ -65,15 +65,23 @@
       `--create-wishlist` applies; needs-review items are never silently added. Covered by an
       end-to-end test against fake Mealie/Skolmaten/Olla/adapter services
       (cmd/food-brain/plan_test.go)
-- [ ] 5.2 Surface tonight's meal + one-tap reactions via Home Assistant (through homeops MCP /
+- [x] 5.2 Surface tonight's meal + one-tap reactions via Home Assistant (through homeops MCP /
       HA API)
-- [ ] 5.3 Demote the n8n `weekly-meal-planner` workflow to scheduler/webhook (or retire) once
+      *Completed by `establish-enforced-go-architecture` (absorbed):* `internal/ambient`
+      (week projection + `RecordReaction` confidence update, 8 tests) + `food-brain tonight`
+      CLI (show / `--json` HA payload / `--person … --sentiment …` records a reaction and
+      updates `family.json`); `plan --write-tonight` emits the projection.
+- [x] 5.3 Demote the n8n `weekly-meal-planner` workflow to scheduler/webhook (or retire) once
       the Go pipe is verified
+      *Completed by `establish-enforced-go-architecture` (absorbed):* Go pipe verified
+      (6.2); the in-n8n planner is retired in favor of a thin weekly scheduler that shells
+      out to `food-brain plan --write-tonight … --create-wishlist`
+      (`n8n/weekly-meal-planner.demoted.workflow.json`). Original left archived/inactive.
 
 ## 6. Verification & docs
 
-- [x] 6.1 `go test ./...` green (28 tests across 8 packages incl. the end-to-end plan test);
-      `go vet` clean. In-memory demo: `go run ./cmd/food-brain demo`
+- [x] 6.1 `go test ./...` green (41 tests across 10 packages incl. the end-to-end plan test
+      and the ambient-surface tests); `go vet` clean. In-memory demo: `go run ./cmd/food-brain demo`
 - [x] 6.2 Integration smoke: ran `food-brain plan --create-wishlist` against real Mealie (4 ICA recipes) + real Willys; created wishlist "Vecka 30", no cart/payment side effects
 - [x] 6.3 README updated with run instructions; architecture decisions reflected
 - [x] 6.4 Generated a real week plan and created the Willys wishlist (2026-07-19); owner to eyeball "Vecka 30" in the app. FOUND: confidence model caps correct-but-piece/weight-mismatched matches at 0.65, under the 0.7 review threshold -> wishlist under-filled; see live-findings memory

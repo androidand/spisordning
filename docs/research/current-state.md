@@ -35,8 +35,9 @@ openspec/                 see below
 (`github.com/jackc/pgx/v5 v5.10.0`) — the first non-stdlib dependency, pinned by
 `establish-enforced-go-architecture` (rationale in that change's `design.md` §3). The
 architecture test confines pgx to `internal/persistence`. `go build ./... && go test ./...`
-passes: 147 tests across 14 packages (7 persistence integration tests skip locally without a
-Postgres; they run in CI's `persistence-test` job).
+passes: 181 tests across 16 packages (8 persistence integration tests skip locally without a
+Postgres; they run in CI's `persistence-test` job). CI also runs architecture-enforcement,
+migrations-apply, docker-build, and codegen-verify jobs.
 
 No `AGENTS.md`/`CLAUDE.md` existed before this change. No `docs/` existed before this change.
 
