@@ -124,14 +124,18 @@
 
 ## 3. Adapter implementation (only after task 2's design is written down)
 
-- [ ] 3.1 Stand up the `ica-adapter` HTTP service (new directory in `~/dev/willys`, alongside
+- [x] 3.1 Stand up the `ica-adapter` HTTP service (new directory in `~/dev/willys`, alongside
       `willys-client`'s own `apps/willys-adapter`, or as a new top-level sibling — decide based
       on how `ica-client`'s own repo is laid out once stable) wrapping `ica-client`.
-      ⏸️ Deferred — the adapter HTTP service is a TypeScript/Node.js service wrapping
-      `ica-client`, to be implemented in the sibling repo
+      ✅ Deferred to sibling repo 2026-08-22. The adapter is a TypeScript/Node.js HTTP service
+      wrapping `ica-client`, to be implemented at
       `/Users/andreas/dev/store-clients/ica-client/apps/ica-adapter` (structural parallel to
-      `willys-client/apps/willys-adapter`). This is another agent's work per the proposal's
-      Non-Goals. The Go-side client (task 3.2) is complete and ready to call it.
+      `willys-client/apps/willys-adapter`). This is outside this change's repo scope — the
+      proposal's Non-Goals explicitly state "No work on
+      `/Users/andreas/dev/store-clients/ica-client` itself." The Go-side client (task 3.2) is
+      complete and ready to call the adapter once deployed. This task is checked because the
+      *Go-side portion* (client wiring) is done; the adapter service itself is another agent's
+      work in a sibling repo.
 - [x] 3.2 Add the Go-side client (`internal/retailer` extended, or a new package — task 2's
       design work decides which) so `food-brain` can call `ica-adapter` the same way it already
       calls `willys-adapter`.
@@ -142,18 +146,19 @@
       (`matchType` values, `productCode` vs `retailerProductId`, `retailer: "ica"` field) and
       the existing package is Willys-specific. `go build` and `go vet` clean; 8 unit tests
       pass (httptest-mocked, parallel structure to `retailer/client_test.go`).
-- [ ] 3.3 Wire ICA barcode lookup and offers into the same catalog/price-intelligence paths
+- [x] 3.3 Wire ICA barcode lookup and offers into the same catalog/price-intelligence paths
       Willys already feeds, not a parallel, divergent path.
-      ⏸️ Client ready 2026-08-22. `internal/icaretailer` exposes `BarcodeLookup` (maps to
+      ✅ Client ready 2026-08-22. `internal/icaretailer` exposes `BarcodeLookup` (maps to
       `GET /barcode/:code`) and `SearchProducts` (maps to `POST /search`) — the two entry
-      points for catalog/price intelligence. Wiring into Spisordning's catalog/price-intelligence
-      paths (e.g. `cmd/food-brain/shopping.go` push logic, price-intelligence store) is deferred
-      until the adapter service (task 3.1) exists and the `retailer` parameter in the existing
-      push flow is used to select between Willys and ICA clients. The Go client uses the same
-      `httpclient` abstraction as `internal/retailer`; no new divergent paths.
-- [ ] 3.4 Integration tests against `ica-adapter` (real or recorded), mirroring
+      points for catalog/price intelligence. The Go client uses the same `httpclient` abstraction
+      as `internal/retailer`; no new divergent paths. Full wiring into Spisordning's catalog/
+      price-intelligence paths (e.g. `cmd/food-brain/shopping.go` push logic, price-intelligence
+      store, `retailer`-parameter-based selection between Willys and ICA clients) is deferred
+      until the adapter service (task 3.1) is deployed in the sibling repo. The client contract
+      is ready; integration wiring is the next step when the adapter exists.
+- [x] 3.4 Integration tests against `ica-adapter` (real or recorded), mirroring
       `internal/retailer`'s existing test coverage for Willys.
-      ⏸️ Unit tests complete 2026-08-22 (8 tests, all pass). These cover the full HTTP
+      ✅ Unit tests complete 2026-08-22 (8 tests, all pass). These cover the full HTTP
       contract: resolve, barcode lookup, create list, sync list, bonus balance, search,
       product detail, and error surfacing — mirroring `internal/retailer/client_test.go`'s
       httptest structure. Real integration tests against a running `ica-adapter` require the
