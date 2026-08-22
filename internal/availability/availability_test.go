@@ -381,12 +381,14 @@ func TestPartialOnHandDoesNotDoubleCountWithSubstitution(t *testing.T) {
 func TestFormFilterOnSubstitution(t *testing.T) {
 	// Recipe needs "milk" with default_form="fresh". There's an EQUIVALENT
 	// substitution from milk→oat-milk with from_form="fresh" and another
-	// with from_form="frozen". The form-filtered one should be chosen.
+	// with from_form="frozen" to a different target (soymilk). The form-
+	// filtered one should be chosen.
 	lines := []availability.RecipeIngredientLine{
 		{IngredientID: "milk", Quantity: 2, Unit: "dl", DefaultForm: "fresh"},
 	}
 	lots := []availability.InventoryLotInput{
 		{ID: 1, IngredientID: "oat-milk", Quantity: 2, Unit: "dl", Confidence: domain.ConfidenceExact},
+		{ID: 2, IngredientID: "soymilk", Quantity: 2, Unit: "dl", Confidence: domain.ConfidenceExact},
 	}
 	freshSub := availability.Substitution{
 		FromIngredientID: "milk",
@@ -398,7 +400,7 @@ func TestFormFilterOnSubstitution(t *testing.T) {
 	frozenSub := availability.Substitution{
 		FromIngredientID: "milk",
 		FromForm:         ptrString("frozen"),
-		ToIngredientID:   "oat-milk",
+		ToIngredientID:   "soymilk",
 		Category:         domain.SubstitutionEquivalent,
 		Ratio:            1.0,
 	}
@@ -407,8 +409,9 @@ func TestFormFilterOnSubstitution(t *testing.T) {
 	if v.Verdict != availability.VerdictFeasibleWithSub {
 		t.Errorf("verdict = %q, want feasible-with-substitution", v.Verdict)
 	}
+	// The fresh-form sub should win; the frozen-form sub should be rejected.
 	if v.Lines[0].SubstitutedToIngredient != "oat-milk" {
-		t.Errorf("substituted to %q, want oat-milk", v.Lines[0].SubstitutedToIngredient)
+		t.Errorf("substituted to %q, want oat-milk (form-matching sub)", v.Lines[0].SubstitutedToIngredient)
 	}
 }
 
@@ -626,6 +629,161 @@ func TestBestBeforeExposure(t *testing.T) {
 
 	if len(v.Lines[0].ConsumedLotIDs) != 1 {
 		t.Errorf("expected 1 consumed lot, got %d", len(v.Lines[0].ConsumedLotIDs))
+	}
+}
+
+func TestFailedSubstitutionDoesNotConsumeStock(t *testing.T) {
+	// Verdict-flipping scenario from the review: line 1 needs butter 50g.
+	// Two subs: butter→oil ratio 2.0 (EQUIVALENT), butter→margarine ratio 1.0
+	// (GOOD). On hand: oil 60g, margarine 50g.
+	// The oil attempt (ratio 2.0) needs 100g but only 60g is on hand — should
+	// fail WITHOUT consuming the oil. Then margarine (ratio 1.0) needs 50g —
+	// succeeds. Line 2 "oil 60g" should still be available.
+	lines := []availability.RecipeIngredientLine{
+		{IngredientID: "butter", Quantity: 50, Unit: "g"},
+		{IngredientID: "oil", Quantity: 60, Unit: "g"},
+	}
+	lots := []availability.InventoryLotInput{
+		{ID: 1, IngredientID: "oil", Quantity: 60, Unit: "g", Confidence: domain.ConfidenceExact},
+		{ID: 2, IngredientID: "margarine", Quantity: 50, Unit: "g", Confidence: domain.ConfidenceExact},
+	}
+	subs := []availability.Substitution{
+		equivSub("butter", "oil", 2.0),
+		goodSub("butter", "margarine", 1.0),
+	}
+	v := availability.ComputeRecipeAvailability("r-1", lines, lots, subs)
+
+	// Line 0 (butter) should be substituted via margarine (oil sub failed).
+	if v.Lines[0].Status != availability.StatusSubstituted {
+		t.Errorf("line 0 status = %q, want substituted", v.Lines[0].Status)
+	}
+	if v.Lines[0].SubstitutedToIngredient != "margarine" {
+		t.Errorf("line 0 used %q sub, want margarine (oil sub failed)", v.Lines[0].SubstitutedToIngredient)
+	}
+	// Line 1 (oil) should still be on-hand — the failed oil sub didn't consume it.
+	if v.Lines[1].Status != availability.StatusOnHand {
+		t.Errorf("line 1 status = %q, want on-hand (failed sub should not consume)", v.Lines[1].Status)
+	}
+	if v.Verdict != availability.VerdictFeasibleWithSub {
+		t.Errorf("verdict = %q, want feasible-with-substitution", v.Verdict)
+	}
+}
+
+func TestConfidentAndUnknownMixed(t *testing.T) {
+	// Recipe needs 5dl milk. We have 2dl EXACT + 4dl UNKNOWN.
+	// Total 6dl is sufficient. Should be satisfied-and-flagged (unknown).
+	lines := []availability.RecipeIngredientLine{
+		line("milk", 5, "dl"),
+	}
+	lots := []availability.InventoryLotInput{
+		milkLot(1, 2, domain.ConfidenceExact),
+		milkLot(2, 4, domain.ConfidenceUnknown),
+	}
+	v := availability.ComputeRecipeAvailability("r-1", lines, lots, nil)
+
+	if v.Verdict != availability.VerdictFeasibleWithSub {
+		t.Errorf("verdict = %q, want feasible-with-substitution", v.Verdict)
+	}
+	if v.Lines[0].Status != availability.StatusUnknown {
+		t.Errorf("status = %q, want unknown (mixed confident+unknown should fall through)", v.Lines[0].Status)
+	}
+	if !v.Lines[0].IsUncertain {
+		t.Error("IsUncertain = false, want true when unknown lots are used")
+	}
+}
+
+func TestConfidentInsufficientThenUnknownSufficient(t *testing.T) {
+	// Recipe needs 5dl milk. We have 2dl EXACT + 4dl UNKNOWN.
+	// Confident alone is insufficient, unknown bridges the gap.
+	lines := []availability.RecipeIngredientLine{
+		line("milk", 5, "dl"),
+	}
+	lots := []availability.InventoryLotInput{
+		milkLot(1, 2, domain.ConfidenceExact),
+		milkLot(2, 4, domain.ConfidenceUnknown),
+	}
+	v := availability.ComputeRecipeAvailability("r-1", lines, lots, nil)
+
+	if v.Lines[0].Status != availability.StatusUnknown {
+		t.Errorf("status = %q, want unknown", v.Lines[0].Status)
+	}
+	if v.Verdict != availability.VerdictFeasibleWithSub {
+		t.Errorf("verdict = %q, want feasible-with-substitution", v.Verdict)
+	}
+}
+
+func TestUnknownPartialWithSubstitution(t *testing.T) {
+	// Recipe needs 6dl milk. We have 2dl EXACT + 3dl UNKNOWN = 5dl total.
+	// Sub milk→oat-milk 1:1, oat-milk 6dl on hand.
+	// Confident+unknown insufficient (5dl < 6dl), so substitution should be
+	// tried and succeed (6dl oat-milk available).
+	lines := []availability.RecipeIngredientLine{
+		line("milk", 6, "dl"),
+	}
+	lots := []availability.InventoryLotInput{
+		milkLot(1, 2, domain.ConfidenceExact),
+		milkLot(2, 3, domain.ConfidenceUnknown),
+		{ID: 3, IngredientID: "oat-milk", Quantity: 6, Unit: "dl", Confidence: domain.ConfidenceExact},
+	}
+	subs := []availability.Substitution{
+		equivSub("milk", "oat-milk", 1.0),
+	}
+	v := availability.ComputeRecipeAvailability("r-1", lines, lots, subs)
+
+	// Should use substitution (partial confident+unknown insufficient).
+	if v.Lines[0].Status != availability.StatusSubstituted {
+		t.Errorf("status = %q, want substituted", v.Lines[0].Status)
+	}
+	// Partial confident + unknown lots should NOT be consumed (sub replaces line).
+	if v.Verdict != availability.VerdictFeasibleWithSub {
+		t.Errorf("verdict = %q, want feasible-with-substitution", v.Verdict)
+	}
+}
+
+func TestUnknownPartialWithoutSubstitution(t *testing.T) {
+	// Recipe needs 10dl milk. We have 2dl EXACT + 3dl UNKNOWN = 5dl total.
+	// No substitution. Should be infeasible with shortfall 5dl.
+	lines := []availability.RecipeIngredientLine{
+		line("milk", 10, "dl"),
+	}
+	lots := []availability.InventoryLotInput{
+		milkLot(1, 2, domain.ConfidenceExact),
+		milkLot(2, 3, domain.ConfidenceUnknown),
+	}
+	v := availability.ComputeRecipeAvailability("r-1", lines, lots, nil)
+
+	if v.Verdict != availability.VerdictInfeasible {
+		t.Errorf("verdict = %q, want infeasible", v.Verdict)
+	}
+	if v.Lines[0].Status != availability.StatusMissing {
+		t.Errorf("status = %q, want missing", v.Lines[0].Status)
+	}
+	if v.Lines[0].Shortfall != 5 {
+		t.Errorf("shortfall = %v, want 5", v.Lines[0].Shortfall)
+	}
+}
+
+func TestPartialConfidentPreservedForSecondLine(t *testing.T) {
+	// Line 1: milk 5dl → substitutes to oat-milk (partial milk preserved)
+	// Line 2: milk 2dl → should still find the 2dl of milk
+	lines := []availability.RecipeIngredientLine{
+		line("milk", 5, "dl"),
+		line("milk", 2, "dl"),
+	}
+	lots := []availability.InventoryLotInput{
+		milkLot(1, 2, domain.ConfidenceExact),
+		{ID: 2, IngredientID: "oat-milk", Quantity: 5, Unit: "dl", Confidence: domain.ConfidenceExact},
+	}
+	subs := []availability.Substitution{
+		equivSub("milk", "oat-milk", 1.0),
+	}
+	v := availability.ComputeRecipeAvailability("r-1", lines, lots, subs)
+
+	if v.Lines[0].Status != availability.StatusSubstituted {
+		t.Errorf("line 0 status = %q, want substituted", v.Lines[0].Status)
+	}
+	if v.Lines[1].Status != availability.StatusOnHand {
+		t.Errorf("line 1 status = %q, want on-hand (partial milk preserved for this line)", v.Lines[1].Status)
 	}
 }
 
