@@ -10,15 +10,6 @@ import (
 	"github.com/androidand/spisordning/internal/domain"
 )
 
-// productFixture is a helper to create a product in the persistence layer
-// (which uses value types, not pointer types like domain.Product).
-func productFixture(t *testing.T, ctx context.Context, s *Store, id, name string) {
-	t.Helper()
-	if err := s.CreateProduct(ctx, Product{ID: id, Name: name}); err != nil {
-		t.Fatalf("CreateProduct: %v", err)
-	}
-}
-
 func TestPrice_RetailerAndStore(t *testing.T) {
 	s := skipWithoutDB(t)
 	ctx := context.Background()
@@ -140,11 +131,11 @@ func TestPrice_StoreProductOffer(t *testing.T) {
 	}
 
 	// Upsert offer (carried).
-	offer := domain.StoreProductOffer{ID: 1, StoreID: "s-lind", RetailerProductID: "rp-1", CurrentlyCarried: true}
-	if err := s.UpsertStoreProductOffer(ctx, offer); err != nil {
+	offerID, err := s.UpsertStoreProductOffer(ctx, domain.StoreProductOffer{StoreID: "s-lind", RetailerProductID: "rp-1", CurrentlyCarried: true})
+	if err != nil {
 		t.Fatalf("UpsertStoreProductOffer: %v", err)
 	}
-	got, err := s.GetStoreProductOffer(ctx, 1)
+	got, err := s.GetStoreProductOffer(ctx, offerID)
 	if err != nil {
 		t.Fatalf("GetStoreProductOffer: %v", err)
 	}
@@ -152,12 +143,11 @@ func TestPrice_StoreProductOffer(t *testing.T) {
 		t.Errorf("expected carried=true")
 	}
 
-	// Mark as not carried.
-	offer.CurrentlyCarried = false
-	if err := s.UpsertStoreProductOffer(ctx, offer); err != nil {
+	// Mark as not carried (upsert on same row).
+	if _, err := s.UpsertStoreProductOffer(ctx, domain.StoreProductOffer{StoreID: "s-lind", RetailerProductID: "rp-1", CurrentlyCarried: false}); err != nil {
 		t.Fatalf("UpsertStoreProductOffer (not carried): %v", err)
 	}
-	got, err = s.GetStoreProductOffer(ctx, 1)
+	got, err = s.GetStoreProductOffer(ctx, offerID)
 	if err != nil {
 		t.Fatalf("GetStoreProductOffer (not carried): %v", err)
 	}
@@ -172,6 +162,75 @@ func TestPrice_StoreProductOffer(t *testing.T) {
 	}
 	if len(offers) != 1 || !offers[0].CurrentlyCarried {
 		t.Errorf("ListStoreProductOffers = %v", offers)
+	}
+}
+
+func TestPrice_StoreProductOfferMultiple(t *testing.T) {
+	s := skipWithoutDB(t)
+	ctx := context.Background()
+	truncateTables(t, ctx, s, "price_observation", "store_product_offer", "retailer_product", "store", "retailer")
+
+	if err := s.CreateRetailer(ctx, domain.Retailer{ID: "r-willys", Name: "Willys"}); err != nil {
+		t.Fatalf("CreateRetailer: %v", err)
+	}
+	if err := s.CreateStore(ctx, domain.Store{ID: "s-lind", RetailerID: "r-willys", Name: "Lindhagen"}); err != nil {
+		t.Fatalf("CreateStore: %v", err)
+	}
+	if err := s.CreateProduct(ctx, Product{ID: "p-milk", Name: "Arla Standardmjölk 1L"}); err != nil {
+		t.Fatalf("CreateProduct: %v", err)
+	}
+	if err := s.CreateProduct(ctx, Product{ID: "p-bread", Name: "Rugbrød"}); err != nil {
+		t.Fatalf("CreateProduct: %v", err)
+	}
+	if err := s.UpsertRetailerProduct(ctx, domain.RetailerProduct{ID: "rp-milk", RetailerID: "r-willys", ProductID: "p-milk", RetailerSKU: "111"}); err != nil {
+		t.Fatalf("UpsertRetailerProduct milk: %v", err)
+	}
+	if err := s.UpsertRetailerProduct(ctx, domain.RetailerProduct{ID: "rp-bread", RetailerID: "r-willys", ProductID: "p-bread", RetailerSKU: "222"}); err != nil {
+		t.Fatalf("UpsertRetailerProduct bread: %v", err)
+	}
+
+	// Two different retailer products at the same store — each gets its own
+	// BIGSERIAL id; neither should collide.
+	offerID1, err := s.UpsertStoreProductOffer(ctx, domain.StoreProductOffer{StoreID: "s-lind", RetailerProductID: "rp-milk", CurrentlyCarried: true})
+	if err != nil {
+		t.Fatalf("UpsertStoreProductOffer milk: %v", err)
+	}
+	offerID2, err := s.UpsertStoreProductOffer(ctx, domain.StoreProductOffer{StoreID: "s-lind", RetailerProductID: "rp-bread", CurrentlyCarried: true})
+	if err != nil {
+		t.Fatalf("UpsertStoreProductOffer bread: %v", err)
+	}
+	if offerID1 == offerID2 {
+		t.Errorf("expected different ids for different offers, got %d", offerID1)
+	}
+	if offerID1 == 0 || offerID2 == 0 {
+		t.Errorf("expected non-zero ids, got %d and %d", offerID1, offerID2)
+	}
+
+	offers, err := s.ListStoreProductOffers(ctx, "s-lind")
+	if err != nil {
+		t.Fatalf("ListStoreProductOffers: %v", err)
+	}
+	if len(offers) != 2 {
+		t.Fatalf("expected 2 offers, got %d", len(offers))
+	}
+
+	// Each offer should still be independently updatable.
+	if _, err := s.UpsertStoreProductOffer(ctx, domain.StoreProductOffer{StoreID: "s-lind", RetailerProductID: "rp-milk", CurrentlyCarried: false}); err != nil {
+		t.Fatalf("UpsertStoreProductOffer milk not carried: %v", err)
+	}
+	got, err := s.GetStoreProductOffer(ctx, offerID1)
+	if err != nil {
+		t.Fatalf("GetStoreProductOffer: %v", err)
+	}
+	if got.CurrentlyCarried {
+		t.Errorf("expected milk not carried")
+	}
+	got2, err := s.GetStoreProductOffer(ctx, offerID2)
+	if err != nil {
+		t.Fatalf("GetStoreProductOffer bread: %v", err)
+	}
+	if !got2.CurrentlyCarried {
+		t.Errorf("expected bread still carried")
 	}
 }
 
@@ -192,26 +251,27 @@ func TestPrice_PriceObservationAppendOnly(t *testing.T) {
 	if err := s.UpsertRetailerProduct(ctx, domain.RetailerProduct{ID: "rp-1", RetailerID: "r-willys", RetailerSKU: "123456"}); err != nil {
 		t.Fatalf("UpsertRetailerProduct: %v", err)
 	}
-	if err := s.UpsertStoreProductOffer(ctx, domain.StoreProductOffer{ID: 1, StoreID: "s-lind", RetailerProductID: "rp-1", CurrentlyCarried: true}); err != nil {
+	offerID, err := s.UpsertStoreProductOffer(ctx, domain.StoreProductOffer{StoreID: "s-lind", RetailerProductID: "rp-1", CurrentlyCarried: true})
+	if err != nil {
 		t.Fatalf("UpsertStoreProductOffer: %v", err)
 	}
 
 	now := time.Now().Truncate(time.Second)
 
 	// Insert first observation (regular price).
-	obs1 := domain.PriceObservation{StoreProductOfferID: 1, ObservedAt: now, Price: 24.90, PriceKind: domain.PriceKindRegular, Source: "willys_adapter"}
+	obs1 := domain.PriceObservation{StoreProductOfferID: offerID, ObservedAt: now, Price: 24.90, PriceKind: domain.PriceKindRegular, Source: "willys_adapter"}
 	if err := s.InsertPriceObservation(ctx, obs1); err != nil {
 		t.Fatalf("InsertPriceObservation 1: %v", err)
 	}
 
 	// Insert second observation (price dropped).
-	obs2 := domain.PriceObservation{StoreProductOfferID: 1, ObservedAt: now.Add(time.Hour), Price: 19.90, PriceKind: domain.PriceKindRegular, Source: "willys_adapter"}
+	obs2 := domain.PriceObservation{StoreProductOfferID: offerID, ObservedAt: now.Add(time.Hour), Price: 19.90, PriceKind: domain.PriceKindRegular, Source: "willys_adapter"}
 	if err := s.InsertPriceObservation(ctx, obs2); err != nil {
 		t.Fatalf("InsertPriceObservation 2: %v", err)
 	}
 
 	// Insert member price at same time as obs2.
-	obs3 := domain.PriceObservation{StoreProductOfferID: 1, ObservedAt: now.Add(time.Hour), Price: 17.90, PriceKind: domain.PriceKindMember, Source: "willys_adapter"}
+	obs3 := domain.PriceObservation{StoreProductOfferID: offerID, ObservedAt: now.Add(time.Hour), Price: 17.90, PriceKind: domain.PriceKindMember, Source: "willys_adapter"}
 	if err := s.InsertPriceObservation(ctx, obs3); err != nil {
 		t.Fatalf("InsertPriceObservation 3: %v", err)
 	}
@@ -267,15 +327,16 @@ func TestPrice_CurrentPriceView(t *testing.T) {
 	if err := s.UpsertRetailerProduct(ctx, domain.RetailerProduct{ID: "rp-1", RetailerID: "r-willys", RetailerSKU: "123456"}); err != nil {
 		t.Fatalf("UpsertRetailerProduct: %v", err)
 	}
-	if err := s.UpsertStoreProductOffer(ctx, domain.StoreProductOffer{ID: 1, StoreID: "s-lind", RetailerProductID: "rp-1", CurrentlyCarried: true}); err != nil {
+	offerID, err := s.UpsertStoreProductOffer(ctx, domain.StoreProductOffer{StoreID: "s-lind", RetailerProductID: "rp-1", CurrentlyCarried: true})
+	if err != nil {
 		t.Fatalf("UpsertStoreProductOffer: %v", err)
 	}
 
 	now := time.Now().Truncate(time.Second)
-	if err := s.InsertPriceObservation(ctx, domain.PriceObservation{StoreProductOfferID: 1, ObservedAt: now, Price: 24.90, PriceKind: domain.PriceKindRegular, Source: "willys_adapter"}); err != nil {
+	if err := s.InsertPriceObservation(ctx, domain.PriceObservation{StoreProductOfferID: offerID, ObservedAt: now, Price: 24.90, PriceKind: domain.PriceKindRegular, Source: "willys_adapter"}); err != nil {
 		t.Fatalf("InsertPriceObservation: %v", err)
 	}
-	if err := s.InsertPriceObservation(ctx, domain.PriceObservation{StoreProductOfferID: 1, ObservedAt: now, Price: 19.90, PriceKind: domain.PriceKindMember, Source: "willys_adapter"}); err != nil {
+	if err := s.InsertPriceObservation(ctx, domain.PriceObservation{StoreProductOfferID: offerID, ObservedAt: now, Price: 19.90, PriceKind: domain.PriceKindMember, Source: "willys_adapter"}); err != nil {
 		t.Fatalf("InsertPriceObservation member: %v", err)
 	}
 
@@ -288,8 +349,8 @@ func TestPrice_CurrentPriceView(t *testing.T) {
 	}
 	// View returns one row per (offer, price_kind) with the latest observation.
 	for _, p := range prices {
-		if p.OfferID != 1 {
-			t.Errorf("expected offer_id=1, got %d", p.OfferID)
+		if p.OfferID != offerID {
+			t.Errorf("expected offer_id=%d, got %d", offerID, p.OfferID)
 		}
 	}
 }
@@ -311,19 +372,20 @@ func TestPrice_PriceObservationNeverUpdated(t *testing.T) {
 	if err := s.UpsertRetailerProduct(ctx, domain.RetailerProduct{ID: "rp-1", RetailerID: "r-willys", RetailerSKU: "123456"}); err != nil {
 		t.Fatalf("UpsertRetailerProduct: %v", err)
 	}
-	if err := s.UpsertStoreProductOffer(ctx, domain.StoreProductOffer{ID: 1, StoreID: "s-lind", RetailerProductID: "rp-1", CurrentlyCarried: true}); err != nil {
+	offerID, err := s.UpsertStoreProductOffer(ctx, domain.StoreProductOffer{StoreID: "s-lind", RetailerProductID: "rp-1", CurrentlyCarried: true})
+	if err != nil {
 		t.Fatalf("UpsertStoreProductOffer: %v", err)
 	}
 
 	now := time.Now().Truncate(time.Second)
 	// Insert observation.
-	if err := s.InsertPriceObservation(ctx, domain.PriceObservation{StoreProductOfferID: 1, ObservedAt: now, Price: 24.90, PriceKind: domain.PriceKindRegular, Source: "willys_adapter"}); err != nil {
+	if err := s.InsertPriceObservation(ctx, domain.PriceObservation{StoreProductOfferID: offerID, ObservedAt: now, Price: 24.90, PriceKind: domain.PriceKindRegular, Source: "willys_adapter"}); err != nil {
 		t.Fatalf("InsertPriceObservation: %v", err)
 	}
 
 	// Verify the price is still the original — if any persistence method had
 	// updated it, the price would have changed.
-	obs, err := s.GetLatestPriceObservation(ctx, 1, domain.PriceKindRegular)
+	obs, err := s.GetLatestPriceObservation(ctx, offerID, domain.PriceKindRegular)
 	if err != nil {
 		t.Fatalf("GetLatestPriceObservation: %v", err)
 	}
@@ -360,15 +422,16 @@ func TestPrice_PriceObservationsForProduct(t *testing.T) {
 	if err := s.UpsertRetailerProduct(ctx, domain.RetailerProduct{ID: "rp-1", RetailerID: "r-willys", RetailerSKU: "123456"}); err != nil {
 		t.Fatalf("UpsertRetailerProduct: %v", err)
 	}
-	if err := s.UpsertStoreProductOffer(ctx, domain.StoreProductOffer{ID: 1, StoreID: "s-lind", RetailerProductID: "rp-1", CurrentlyCarried: true}); err != nil {
+	offerID, err := s.UpsertStoreProductOffer(ctx, domain.StoreProductOffer{StoreID: "s-lind", RetailerProductID: "rp-1", CurrentlyCarried: true})
+	if err != nil {
 		t.Fatalf("UpsertStoreProductOffer: %v", err)
 	}
 
 	now := time.Now().Truncate(time.Second)
-	if err := s.InsertPriceObservation(ctx, domain.PriceObservation{StoreProductOfferID: 1, ObservedAt: now, Price: 24.90, PriceKind: domain.PriceKindRegular, Source: "willys_adapter"}); err != nil {
+	if err := s.InsertPriceObservation(ctx, domain.PriceObservation{StoreProductOfferID: offerID, ObservedAt: now, Price: 24.90, PriceKind: domain.PriceKindRegular, Source: "willys_adapter"}); err != nil {
 		t.Fatalf("InsertPriceObservation: %v", err)
 	}
-	if err := s.InsertPriceObservation(ctx, domain.PriceObservation{StoreProductOfferID: 1, ObservedAt: now.Add(time.Hour), Price: 19.90, PriceKind: domain.PriceKindRegular, Source: "willys_adapter"}); err != nil {
+	if err := s.InsertPriceObservation(ctx, domain.PriceObservation{StoreProductOfferID: offerID, ObservedAt: now.Add(time.Hour), Price: 19.90, PriceKind: domain.PriceKindRegular, Source: "willys_adapter"}); err != nil {
 		t.Fatalf("InsertPriceObservation 2: %v", err)
 	}
 
@@ -401,12 +464,13 @@ func TestPrice_PriceObservationsForStore(t *testing.T) {
 	if err := s.UpsertRetailerProduct(ctx, domain.RetailerProduct{ID: "rp-1", RetailerID: "r-willys", RetailerSKU: "123456"}); err != nil {
 		t.Fatalf("UpsertRetailerProduct: %v", err)
 	}
-	if err := s.UpsertStoreProductOffer(ctx, domain.StoreProductOffer{ID: 1, StoreID: "s-lind", RetailerProductID: "rp-1", CurrentlyCarried: true}); err != nil {
+	offerID, err := s.UpsertStoreProductOffer(ctx, domain.StoreProductOffer{StoreID: "s-lind", RetailerProductID: "rp-1", CurrentlyCarried: true})
+	if err != nil {
 		t.Fatalf("UpsertStoreProductOffer: %v", err)
 	}
 
 	now := time.Now().Truncate(time.Second)
-	if err := s.InsertPriceObservation(ctx, domain.PriceObservation{StoreProductOfferID: 1, ObservedAt: now, Price: 24.90, PriceKind: domain.PriceKindRegular, Source: "willys_adapter"}); err != nil {
+	if err := s.InsertPriceObservation(ctx, domain.PriceObservation{StoreProductOfferID: offerID, ObservedAt: now, Price: 24.90, PriceKind: domain.PriceKindRegular, Source: "willys_adapter"}); err != nil {
 		t.Fatalf("InsertPriceObservation: %v", err)
 	}
 

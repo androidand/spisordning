@@ -143,17 +143,20 @@ func (s *Store) ListRetailerProducts(ctx context.Context, retailerID string) ([]
 }
 
 // UpsertStoreProductOffer inserts or updates a store_product_offer. If the row
-// already exists, currently_carried and updated_at are refreshed.
-func (s *Store) UpsertStoreProductOffer(ctx context.Context, offer domain.StoreProductOffer) error {
-	const q = `INSERT INTO store_product_offer (id, store_id, retailer_product_id, currently_carried)
-		VALUES ($1, $2, $3, $4)
+// already exists, currently_carried and updated_at are refreshed. Returns the
+// assigned BIGSERIAL id.
+func (s *Store) UpsertStoreProductOffer(ctx context.Context, offer domain.StoreProductOffer) (int64, error) {
+	const q = `INSERT INTO store_product_offer (store_id, retailer_product_id, currently_carried)
+		VALUES ($1, $2, $3)
 		ON CONFLICT (store_id, retailer_product_id) DO UPDATE SET
 			currently_carried = EXCLUDED.currently_carried,
-			updated_at = now()`
-	if _, err := s.db.Exec(ctx, q, offer.ID, offer.StoreID, offer.RetailerProductID, offer.CurrentlyCarried); err != nil {
-		return fmt.Errorf("persistence: upsert store_product_offer: %w", err)
+			updated_at = now()
+		RETURNING id`
+	var id int64
+	if err := s.db.QueryRow(ctx, q, offer.StoreID, offer.RetailerProductID, offer.CurrentlyCarried).Scan(&id); err != nil {
+		return 0, fmt.Errorf("persistence: upsert store_product_offer: %w", err)
 	}
-	return nil
+	return id, nil
 }
 
 // GetStoreProductOffer fetches one store_product_offer by id.
