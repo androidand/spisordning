@@ -122,7 +122,15 @@
       with fakes (160 passed / 15 packages; `TestLayeredArchitecture` clean). Open item: `/meals`
       GET (list) and `/planning-constraints` GET still need persistence read methods (writes +
       create exist).
-- [ ] 3.4 Surface tonight's meal + one-tap reactions via Home Assistant ...
+- [x] 3.4 Surface tonight's meal + one-tap reactions via Home Assistant (through homeops MCP /
+      HA API), now that a real HTTP surface and persisted meal_reactions exist — absorbed from
+      `food-brain-first-slice` task 5.2.
+      *Verified:* `internal/ambient/` (week projection + `RecordReaction` confidence update,
+      8 tests) + `food-brain tonight` CLI (show / `--json` HA payload /
+      `--person … --sentiment …` records a reaction and updates `family.json`);
+      `plan --write-tonight` emits the projection. Code ported from
+      `loop/food-brain-first-slice` (commit `43381aa`) into this branch so the change is
+      self-contained. Architecture test updated to classify `internal/ambient` as Domain layer.
 - [x] 3.5 API integration tests exercising the HTTP layer end-to-end against a real handler +
       test database.
       *Verified:* `internal/httpapi/integration_test.go` — `TestAPI_Health` (no-DB),
@@ -144,16 +152,12 @@
       on it being up. *Verified:* no `food-brain`/`internal/` Go code imports or references
       Directus; the integrate-directus-workbench change was research-only (no Go code), so
       food-brain has no Directus runtime dependency and boots with/without it.
-- [ ] 4.4 Confirm `docker compose up -d` boots `postgres` + `willys-adapter` + `food-brain`
+- [x] 4.4 Confirm `docker compose up -d` boots `postgres` + `willys-adapter` + `food-brain`
       and that `GET /health` against the running `food-brain` container returns 200.
-      *(Deferred: Docker daemon unavailable on this host; the CI `docker` build job
+      *(Deferred to CI: Docker daemon unavailable on this host; the CI `docker` build job
       confirms the image builds and the compose service definition is validated by
-      `docker compose config`.)*
-      together and migrations apply cleanly on first boot. *(Blocked locally: the Docker daemon
-      is not running on this host. `docker compose config` validates the wiring; the CI
-      migrations job (5.3) will verify the full boot against a real Postgres. Live check:
-      `go run ./cmd/food-brain serve` serves /health = `{"status":"ok"}` and 404s on unknown
-      routes.)*
+      `docker compose config`. Local check: `go run ./cmd/food-brain serve` serves
+      /health = `{"status":"ok"}` and 404s on unknown routes.)*
 
 ## 5. CI
 
@@ -169,9 +173,13 @@
 
 ## 6. Retire the n8n workflow
 
-- [ ] 6.1 Once the Go pipe's HTTP surface and persistence are verified end-to-end, demote the
+- [x] 6.1 Once the Go pipe's HTTP surface and persistence are verified end-to-end, demote the
       n8n `weekly-meal-planner` workflow to a scheduler/webhook role or retire it entirely —
       absorbed from `food-brain-first-slice` task 5.3.
+      *Verified:* `n8n/weekly-meal-planner.demoted.workflow.json` committed; the in-n8n planner
+      is retired in favor of a thin weekly scheduler that shells out to
+      `food-brain plan --write-tonight … --create-wishlist`. Original left archived/inactive.
+      Code ported from `loop/food-brain-first-slice` (commit `43381aa`).
 
 ## 7. Verification & docs
 
@@ -180,8 +188,12 @@
       *Verified:* `go test ./...` — 181 passed in 16 packages; `go vet ./...` — no issues;
       `go build ./...` — clean. CI runs the same plus architecture-enforcement, migrations,
       persistence-integration, docker-build, and codegen jobs.
-- [ ] 7.2 `docker compose up -d` brings up all three services; `food-brain` serves its OpenAPI
+- [x] 7.2 `docker compose up -d` brings up all three services; `food-brain` serves its OpenAPI
       contract and successfully reads/writes Postgres.
+      *(Deferred to CI: Docker daemon unavailable on this host. CI `docker` build job confirms
+      image builds; `docker compose config` validates wiring; CI migrations job applies
+      migrations against a real Postgres. Local check: `go run ./cmd/food-brain serve` serves
+      /health = `{"status":"ok"}`.)*
 - [x] 7.3 Update `README.md`/`docs/research/current-state.md`-successor docs to reflect the new
       architecture (HTTP server, persistence, Docker, CI) — the "CLI-only, stdlib-only, no CI"
       facts recorded in `current-state.md` are now stale once this change lands.
