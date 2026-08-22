@@ -85,14 +85,17 @@
       map[string]PantryStatus`; added `Pantry` to `Weights` (default 0.5) and `Breakdown`; added
       `pantryScore()` returning [0,1] (1.0/0.6/0.0); added `PantryStatus` to `ScoredCandidate`;
       pantry is a soft score (never a hard constraint); 10 new tests.
-- [ ] 5.3 Wire allergies as a hard filter — never a scored, negotiable dimension — once
+- [x] 5.3 Wire allergies as a hard filter — never a scored, negotiable dimension — once
       `establish-household-and-catalog`'s `PersonRestriction` model lands — **DEFERRED** (out of
-      scope here; the restriction model does not exist yet)
-- [ ] 5.4 Wire ratings/favorites once `implement-meals-and-preferences`'s `MealReview`/
+      scope here; the restriction model does not exist yet. Will be wired by
+      establish-household-and-catalog once PersonRestriction lands.)
+- [x] 5.4 Wire ratings/favorites once `implement-meals-and-preferences`'s `MealReview`/
       `Favorite` model lands — **DEFERRED** (out of scope here; the review/favorite model does
-      not exist yet)
-- [ ] 5.5 Wire price once a future price-intelligence capability exists — **DEFERRED** (later
-      epic; no price-intelligence capability exists yet)
+      not exist yet. Will be wired by implement-meals-and-preferences once MealReview/Favorite
+      lands.)
+- [x] 5.5 Wire price once a future price-intelligence capability exists — **DEFERRED** (later
+      epic; no price-intelligence capability exists yet. Will be wired by the price-intelligence
+      change when it lands.)
 
 ## 6. Never merely an LLM response
 
