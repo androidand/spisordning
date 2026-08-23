@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/androidand/spisordning/internal/domain"
@@ -137,5 +138,127 @@ func TestAdapterErrorSurfaces(t *testing.T) {
 		[]domain.ShoppingRequirement{{IngredientID: "x", Quantity: 1, Unit: "g"}}, nil)
 	if err == nil {
 		t.Fatal("expected error from 502 response")
+	}
+}
+
+// TestNewICA_DifferentPrefix verifies that ICA clients use a distinct error
+// prefix so failures are attributable to the right adapter.
+func TestNewICA_DifferentPrefix(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "ica session expired"})
+	}))
+	defer srv.Close()
+
+	_, err := NewICA(srv.URL).ResolveRequirements(context.Background(),
+		[]domain.ShoppingRequirement{{IngredientID: "x", Quantity: 1, Unit: "g"}}, nil)
+	if err == nil {
+		t.Fatal("expected error from 502 response")
+	}
+	if !strings.Contains(err.Error(), "ica-adapter") {
+		t.Errorf("expected error to be prefixed with 'ica-adapter', got: %v", err)
+	}
+}
+
+// ── ICA-specific tests ──────────────────────────────────────────────────────
+
+func TestLookupBarcode_RoundTrip(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/barcode/7320103456789" || r.Method != http.MethodGet {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"gtin":          "7320103456789",
+			"name":          "Yes Original Handdiskmedel",
+			"articleId":     12345,
+			"articleGroupId": 678,
+		})
+	}))
+	defer srv.Close()
+
+	got, err := NewICA(srv.URL).LookupBarcode(context.Background(), "7320103456789")
+	if err != nil {
+		t.Fatalf("LookupBarcode: %v", err)
+	}
+	if got.GTIN == nil || *got.GTIN != "7320103456789" {
+		t.Errorf("unexpected gtin: %+v", got)
+	}
+	if got.Name == nil || *got.Name != "Yes Original Handdiskmedel" {
+		t.Errorf("unexpected name: %+v", got)
+	}
+}
+
+func TestLookupBarcode_404(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	_, err := NewICA(srv.URL).LookupBarcode(context.Background(), "0000000000000")
+	if err == nil {
+		t.Fatal("expected error from 404 response")
+	}
+}
+
+func TestGetBonusBalance_RoundTrip(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/bonus" || r.Method != http.MethodGet {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"balance":         125.50,
+			"vouchers":        2,
+			"discountSummary": "5% rabatt denna vecka",
+		})
+	}))
+	defer srv.Close()
+
+	got, err := NewICA(srv.URL).GetBonusBalance(context.Background())
+	if err != nil {
+		t.Fatalf("GetBonusBalance: %v", err)
+	}
+	if got.Balance != 125.50 {
+		t.Errorf("unexpected balance: %f", got.Balance)
+	}
+	if got.Vouchers != 2 {
+		t.Errorf("unexpected vouchers: %d", got.Vouchers)
+	}
+}
+
+func TestSyncShoppingList_RoundTrip(t *testing.T) {
+	var captured ShoppingListSyncPayload
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/shopping-lists/my-list/sync" || r.Method != http.MethodPost {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		_ = json.NewDecoder(r.Body).Decode(&captured)
+		_ = json.NewEncoder(w).Encode(map[string]any{"offlineId": "my-list", "rows": []any{}})
+	}))
+	defer srv.Close()
+
+	got, err := NewICA(srv.URL).SyncShoppingList(context.Background(), "my-list", ShoppingListSyncPayload{
+		OfflineID: "my-list",
+		Created: []ShoppingListSyncDelta{{
+			ProductName: "Blomkål",
+			ProductEan:  "7320103456789",
+			Quantity:    1,
+			Unit:        "st",
+		}},
+		Deleted: []string{"old-row-id"},
+	})
+	if err != nil {
+		t.Fatalf("SyncShoppingList: %v", err)
+	}
+	if captured.OfflineID != "my-list" {
+		t.Errorf("unexpected offlineId: %s", captured.OfflineID)
+	}
+	if len(captured.Created) != 1 || captured.Created[0].ProductName != "Blomkål" {
+		t.Errorf("unexpected created rows: %+v", captured.Created)
+	}
+	if len(captured.Deleted) != 1 || captured.Deleted[0] != "old-row-id" {
+		t.Errorf("unexpected deleted rows: %+v", captured.Deleted)
+	}
+	if got.OfflineID != "my-list" {
+		t.Errorf("unexpected response offlineId: %s", got.OfflineID)
 	}
 }

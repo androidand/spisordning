@@ -14,6 +14,7 @@ import (
 	"github.com/androidand/spisordning/internal/llm"
 	"github.com/androidand/spisordning/internal/mealie"
 	"github.com/androidand/spisordning/internal/planning"
+	"github.com/androidand/spisordning/internal/persistence"
 	"github.com/androidand/spisordning/internal/retailer"
 	"github.com/androidand/spisordning/internal/scoring"
 	"github.com/androidand/spisordning/internal/skolmaten"
@@ -40,7 +41,8 @@ func runPlan(args []string) error {
 	school := fs.String("school", os.Getenv("SKOLMATEN_SCHOOL"), "skolmaten school slug (empty = skip school dedup)")
 	days := fs.Int("days", 7, "number of dinners to plan, starting Monday")
 	weekStr := fs.String("week", "", "ISO week to plan, e.g. 2026-W31 (default: next week)")
-	createWishlist := fs.Bool("create-wishlist", false, "resolve products and create the Willys wishlist (default: dry-run print)")
+	createWishlist := fs.Bool("create-wishlist", false, "resolve products and create the wishlist (default: dry-run print)")
+	re := fs.String("retailer", "willys", "retailer backend: willys (default) or ica")
 	writeTonight := fs.Bool("write-tonight", false, "write the ambient projection for HA display")
 	tonightOutput := fs.String("tonight-output", "tonight.json", "path to write the ambient projection (default: tonight.json in CWD)")
 	if err := fs.Parse(args); err != nil {
@@ -59,6 +61,8 @@ func runPlan(args []string) error {
 		return fmt.Errorf("MEALIE_BASE_URL and MEALIE_API_TOKEN must be set")
 	}
 	adapterURL := envOr("ADAPTER_URL", "http://localhost:8402")
+	icaAdapterURL := envOr("ICA_ADAPTER_URL", "http://localhost:8403")
+	kind := retailer.RetailerKind(*re)
 
 	year, week := nextISOWeek(time.Now())
 	if *weekStr != "" {
@@ -161,15 +165,23 @@ func runPlan(args []string) error {
 
 	// ── Persist the plan to Postgres (task 2.3) ─────────────────────────────────
 	// No-op when no database is configured (openStore returns nil); the CLI
-	// behavior is otherwise unchanged.
-	if store, perr := openStore(ctx); perr != nil {
-		fmt.Fprintf(os.Stderr, "⚠ persistence unavailable; plan not persisted: %v\n", perr)
-	} else if store != nil {
-		if err := persistPlan(ctx, store, monday, planned, reqs); err != nil {
-			fmt.Fprintf(os.Stderr, "⚠ could not persist plan to Postgres: %v\n", err)
-		} else {
-			fmt.Printf("✅ persisted plan for week %d-W%02d to Postgres (meal_plan + candidates + decisions + shopping_requirements)\n", year, week)
+	// behavior is otherwise unchanged. Captured here so the catalog path
+	// (task 3.3) can reuse the same connection.
+	var store *persistence.Store
+	if perr := func() error {
+		s, err := openStore(ctx)
+		if err != nil {
+			return err
 		}
+		store = s
+		if s == nil {
+			return nil // no database configured -> stay in-memory
+		}
+		return persistPlan(ctx, s, monday, planned, reqs)
+	}(); perr != nil {
+		fmt.Fprintf(os.Stderr, "⚠ could not persist plan to Postgres: %v\n", perr)
+	} else if store != nil {
+		fmt.Printf("✅ persisted plan for week %d-W%02d to Postgres (meal_plan + candidates + decisions + shopping_requirements)\n", year, week)
 	}
 
 	// ── Write ambient projection for HA (task 3.4) ─────────────────────────────
@@ -217,14 +229,17 @@ func runPlan(args []string) error {
 	}
 
 	// ── Resolve + wishlist via the adapter ────────────────────────────────────
-	rc := retailer.New(adapterURL)
+	rc, err := retailer.NewFromKind(kind, adapterURL, icaAdapterURL)
+	if err != nil {
+		return fmt.Errorf("retailer: %w", err)
+	}
 	terms := retailer.SearchTerms{}
 	for _, meal := range meals {
 		for _, line := range meal.Ingredients {
 			terms[line.IngredientID] = line.IngredientID // canonical id doubles as Swedish term
 		}
 	}
-	fmt.Println("\nResolving products via willys-adapter...")
+	fmt.Printf("\nResolving products via %s-adapter...\n", kind)
 	resolutions, err := rc.ResolveRequirements(ctx, reqs, terms)
 	if err != nil {
 		return fmt.Errorf("resolve: %w", err)
@@ -244,6 +259,39 @@ func runPlan(args []string) error {
 		fmt.Printf("  ⚠ %-24s needs review (conf %.2f)\n", res.IngredientID, res.Confidence)
 	}
 
+	// ── Wire resolved EANs into the catalog (task 3.3) ─────────────────────────
+	if store != nil {
+		for _, ean := range retailer.ExtractRetailerEANs(resolutions) {
+			// Normalize to GTIN-14 and upsert the product_identifier link.
+			gtin, nerr := domain.NormalizeGTIN(ean)
+			if nerr != nil {
+				fmt.Fprintf(os.Stderr, "  ⚠ bad EAN %q: %v (skipped)\n", ean, nerr)
+				continue
+			}
+			if err := store.UpsertProductIdentifier(ctx, ean, gtin); err != nil {
+				fmt.Fprintf(os.Stderr, "  ⚠ upsert product_identifier for %s: %v\n", gtin, err)
+				continue
+			}
+			fmt.Printf("  📦 catalog: %s → %s\n", ean, gtin)
+		}
+		// ICA-specific: try barcode lookup for resolutions that got no product.
+		if kind == retailer.RetailerICA {
+			for _, res := range resolutions {
+				if res.RetailerProductID != nil {
+					continue // already resolved
+				}
+				// ICA adapter may return the product name as the "retailerProductId"
+				// when no barcode is available; skip those.
+				if res.ProductName == "" {
+					continue
+				}
+				// For ICA, the /resolve endpoint may not return a barcode.
+				// Skip barcode lookup here — it requires user-initiated scanning.
+				_ = res
+			}
+		}
+	}
+
 	if len(items) == 0 {
 		return fmt.Errorf("nothing confidently resolved — review the mappings first")
 	}
@@ -252,7 +300,7 @@ func runPlan(args []string) error {
 	if err != nil {
 		return fmt.Errorf("create wishlist: %w", err)
 	}
-	fmt.Printf("\n✅ Wishlist %q created (id %s) with %d items — review it in the Willys app.\n", created.Name, created.WishlistID, len(items))
+	fmt.Printf("\n✅ Wishlist %q created (id %s) with %d items — review it in the %s app.\n", created.Name, created.WishlistID, len(items), kind)
 	if len(review) > 0 {
 		fmt.Printf("   %d item(s) need manual review and were NOT added.\n", len(review))
 	}
