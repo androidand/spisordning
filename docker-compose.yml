@@ -14,7 +14,7 @@ services:
     environment:
       POSTGRES_DB: spisordning
       POSTGRES_USER: spisordning
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data
       # Apply the schema on first boot.
@@ -32,8 +32,8 @@ services:
     restart: unless-stopped
     environment:
       ADAPTER_PORT: '8402'
-      WILLYS_USERNAME: ${WILLYS_USERNAME:?set in .env}
-      WILLYS_PASSWORD: ${WILLYS_PASSWORD:?set in .env}
+      WILLYS_USERNAME: ${WILLYS_USERNAME}
+      WILLYS_PASSWORD: ${WILLYS_PASSWORD}
     ports:
       - '8402:8402'
 
