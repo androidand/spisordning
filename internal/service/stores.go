@@ -5,13 +5,14 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/androidand/spisordning/internal/httpapi"
 	"github.com/androidand/spisordning/internal/ingredients"
 )
 
 // StoresService is the surface the /stores and /products handlers need.
 type StoresService interface {
-	SearchProducts(ctx context.Context, query string) ([]ingredients.MPKProduct, error)
-	SearchProductsByGTIN(ctx context.Context, gtin string) ([]ingredients.MPKProduct, error)
+	SearchProducts(ctx context.Context, query string) ([]httpapi.IngredientProduct, error)
+	SearchProductsByGTIN(ctx context.Context, gtin string) ([]httpapi.IngredientProduct, error)
 }
 
 // Stores implements StoresService.
@@ -24,7 +25,7 @@ func NewStores(mpk *ingredients.MPKClient) *Stores {
 	return &Stores{mpk: mpk}
 }
 
-func (s *Stores) SearchProducts(ctx context.Context, query string) ([]ingredients.MPKProduct, error) {
+func (s *Stores) SearchProducts(ctx context.Context, query string) ([]httpapi.IngredientProduct, error) {
 	if s.mpk == nil {
 		return nil, fmt.Errorf("service: search products: Matpriskollen client not configured")
 	}
@@ -32,10 +33,19 @@ func (s *Stores) SearchProducts(ctx context.Context, query string) ([]ingredient
 	if err != nil {
 		return nil, fmt.Errorf("service: search products: %w", err)
 	}
-	return products, nil
+	out := make([]httpapi.IngredientProduct, 0, len(products))
+	for _, p := range products {
+		out = append(out, httpapi.IngredientProduct{
+			Key:  p.Key,
+			GTIN: p.GTIN,
+			Name: p.Name,
+			Brand: p.Brand,
+		})
+	}
+	return out, nil
 }
 
-func (s *Stores) SearchProductsByGTIN(ctx context.Context, gtin string) ([]ingredients.MPKProduct, error) {
+func (s *Stores) SearchProductsByGTIN(ctx context.Context, gtin string) ([]httpapi.IngredientProduct, error) {
 	if s.mpk == nil {
 		return nil, fmt.Errorf("service: search by gtin: Matpriskollen client not configured")
 	}
@@ -43,5 +53,14 @@ func (s *Stores) SearchProductsByGTIN(ctx context.Context, gtin string) ([]ingre
 	if err != nil {
 		return nil, fmt.Errorf("service: search by gtin: %w", err)
 	}
-	return products, nil
+	out := make([]httpapi.IngredientProduct, 0, len(products))
+	for _, p := range products {
+		out = append(out, httpapi.IngredientProduct{
+			Key:  p.Key,
+			GTIN: p.GTIN,
+			Name: p.Name,
+			Brand: p.Brand,
+		})
+	}
+	return out, nil
 }
