@@ -41,6 +41,7 @@ type Store interface {
 	ListDecisions(ctx context.Context, planID int64) ([]persistence.MealPlanDecision, error)
 	InsertShoppingRequirement(ctx context.Context, r persistence.ShoppingRequirement) error
 	ListShoppingRequirements(ctx context.Context, planID int64) ([]persistence.ShoppingRequirement, error)
+	UpsertIngredientMapping(ctx context.Context, m persistence.IngredientMapping) error
 	BeginTx(ctx context.Context) (pgx.Tx, error)
 	CreateInventoryLocation(ctx context.Context, l persistence.InventoryLocation) error
 	GetInventoryLocation(ctx context.Context, id string) (persistence.InventoryLocation, error)
