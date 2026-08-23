@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // MealEvent mirrors migrations/0001_init.sql meal_event plus the plan link
@@ -268,6 +270,67 @@ func (s *Store) ListFavoritesForRecipe(ctx context.Context, mealieRecipeID strin
 			return nil, err
 		}
 		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+// GetMealEvent fetches a meal event by id.
+func (s *Store) GetMealEvent(ctx context.Context, id int64) (MealEvent, error) {
+	const q = `SELECT id, mealie_recipe_id, served_on, meal_plan_id, meal_plan_slot_date, created_at
+		FROM meal_event WHERE id = $1`
+	var m MealEvent
+	if err := s.db.QueryRow(ctx, q, id).Scan(&m.ID, &m.MealieRecipeID, &m.ServedOn, nil, nil, &m.CreatedAt); err != nil {
+		return MealEvent{}, fmt.Errorf("persistence: get meal_event: %w", err)
+	}
+	return m, nil
+}
+
+// ListMealEvents returns meal events optionally filtered by mealieRecipeID
+// and/or servedOn (date-only), ordered by served_on descending.
+func (s *Store) ListMealEvents(ctx context.Context, mealieRecipeID, servedOn string) ([]MealEvent, error) {
+	var q string
+	var args []interface{}
+	if mealieRecipeID != "" && servedOn != "" {
+		q = `SELECT id, mealie_recipe_id, served_on, meal_plan_id, meal_plan_slot_date, created_at
+			 FROM meal_event WHERE mealie_recipe_id = $1 AND served_on = $2 ORDER BY served_on DESC`
+		args = []interface{}{mealieRecipeID, servedOn}
+	} else if mealieRecipeID != "" {
+		q = `SELECT id, mealie_recipe_id, served_on, meal_plan_id, meal_plan_slot_date, created_at
+			 FROM meal_event WHERE mealie_recipe_id = $1 ORDER BY served_on DESC`
+		args = []interface{}{mealieRecipeID}
+	} else if servedOn != "" {
+		q = `SELECT id, mealie_recipe_id, served_on, meal_plan_id, meal_plan_slot_date, created_at
+			 FROM meal_event WHERE served_on = $1 ORDER BY served_on DESC`
+		args = []interface{}{servedOn}
+	} else {
+		q = `SELECT id, mealie_recipe_id, served_on, meal_plan_id, meal_plan_slot_date, created_at
+			 FROM meal_event ORDER BY served_on DESC`
+	}
+	rows, err := s.db.Query(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("persistence: list meal_events: %w", err)
+	}
+	defer rows.Close()
+	return scanMealEvents(rows)
+}
+
+func scanMealEvents(rows pgx.Rows) ([]MealEvent, error) {
+	defer rows.Close()
+	var out []MealEvent
+	for rows.Next() {
+		var m MealEvent
+		var planID *int64
+		var planSlot *time.Time
+		if err := rows.Scan(&m.ID, &m.MealieRecipeID, &m.ServedOn, &planID, &planSlot, &m.CreatedAt); err != nil {
+			return nil, err
+		}
+		if planID != nil {
+			m.MealPlanID = planID
+		}
+		if planSlot != nil {
+			m.MealPlanSlotDate = planSlot
+		}
+		out = append(out, m)
 	}
 	return out, rows.Err()
 }

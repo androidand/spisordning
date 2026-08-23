@@ -84,6 +84,15 @@ func doPost(t *testing.T, mux *http.ServeMux, path, body string) *httptest.Respo
 	return rec
 }
 
+func doPatch(t *testing.T, mux *http.ServeMux, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(rec, req)
+	return rec
+}
+
 func mustJSON(t *testing.T, data []byte, out any) {
 	t.Helper()
 	if err := json.Unmarshal(data, out); err != nil {

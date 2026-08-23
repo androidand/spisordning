@@ -27,9 +27,18 @@ type Planning struct{ db Store }
 func NewPlanning(db Store) *Planning { return &Planning{db: db} }
 
 func (s *Planning) ListPlans(ctx context.Context) ([]httpapi.MealPlan, error) {
-	// List all plans — persistence doesn't have a ListMealPlans method yet;
-	// this is a gap to fill when the endpoint is needed.
-	return nil, fmt.Errorf("service: list plans: not yet implemented (needs ListMealPlans in persistence)")
+	plans, err := s.db.ListMealPlans(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("service: list plans: %w", err)
+	}
+	out := make([]httpapi.MealPlan, 0, len(plans))
+	for _, p := range plans {
+		out = append(out, httpapi.MealPlan{
+			ID: p.ID, WeekStart: p.WeekStart.Format("2006-01-02"),
+			Status: p.Status, CreatedAt: p.CreatedAt,
+		})
+	}
+	return out, nil
 }
 
 func (s *Planning) CreatePlan(ctx context.Context, weekStart string) (httpapi.MealPlan, error) {

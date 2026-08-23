@@ -15,8 +15,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-
-
 // Store is the subset of persistence.Store that services need. It is defined
 // here so services depend on an interface rather than the concrete Store type,
 // making unit testing possible with a fake implementation.
@@ -46,9 +44,23 @@ type Store interface {
 	CreateInventoryLocation(ctx context.Context, l persistence.InventoryLocation) error
 	GetInventoryLocation(ctx context.Context, id string) (persistence.InventoryLocation, error)
 	ListLotsUnderLocation(ctx context.Context, id string) ([]persistence.InventoryLot, error)
+	ListInventoryLocations(ctx context.Context, householdID string) ([]persistence.InventoryLocation, error)
 	RecordPurchase(ctx context.Context, ingredientID, productID, locationID string, quantity float64, unit string, bestBefore *time.Time, source string) (int64, error)
 	RecordConsume(ctx context.Context, lotID int64, quantity float64, estimated bool, source string) error
 	GetInventoryLot(ctx context.Context, id int64) (persistence.InventoryLot, error)
+	ListMealEvents(ctx context.Context, mealieRecipeID, servedOn string) ([]persistence.MealEvent, error)
+	GetMealEvent(ctx context.Context, id int64) (persistence.MealEvent, error)
+	ListMealPlans(ctx context.Context) ([]persistence.MealPlan, error)
+	GetIngredientMapping(ctx context.Context, mealieFoodID string) (persistence.IngredientMapping, error)
+}
+
+// txConn is the minimal transaction surface the Meals service needs.
+// It is separate from pgx.Tx so tests can inject a fake without importing pgx.
+type txConn interface {
+	Exec(ctx context.Context, query string, args ...interface{}) (interface{}, error)
+	QueryRow(ctx context.Context, query string, args ...interface{}) pgx.Row
+	Commit(ctx context.Context) error
+	Rollback(ctx context.Context) error
 }
 
 // People implements the PersonService interface defined in httpapi.
@@ -144,9 +156,8 @@ func (s *Recipes) ListRecipes(ctx context.Context) ([]httpapi.RecipeRefResponse,
 
 // Meals implements the MealsService interface defined in httpapi.
 type Meals struct {
-	db       Store
-	prefs    httpapi.PreferencesService
-	observed map[string]bool // tracks which (event, person) pairs already have observations
+	db    Store
+	prefs httpapi.PreferencesService
 }
 
 // NewMeals returns a Meals service backed by db. prefs is used for reaction
@@ -187,8 +198,7 @@ func (s *Meals) CreateMealEvent(ctx context.Context, in httpapi.MealEventNew) (h
 		return httpapi.MealEventResponse{}, fmt.Errorf("service: meals create: commit tx: %w", err)
 	}
 
-	// Record preference observations outside the transaction — non-fatal, so a
-	// failed observation should never prevent the meal event from being recorded.
+	// Record preference observations outside the transaction — non-fatal.
 	for _, rx := range in.Reactions {
 		obs := persistence.PreferenceObservation{
 			PersonID:   rx.PersonID,
@@ -220,11 +230,61 @@ func (s *Meals) CreateMealEvent(ctx context.Context, in httpapi.MealEventNew) (h
 	return out, nil
 }
 
-// generateID generates a 16-char hex id from crypto/rand (stdlib only).
+func (s *Meals) GetMeal(ctx context.Context, id int64) (httpapi.MealEventResponse, error) {
+	event, err := s.db.GetMealEvent(ctx, id)
+	if err != nil {
+		return httpapi.MealEventResponse{}, fmt.Errorf("service: get meal: %w", err)
+	}
+	rxns, err := s.db.ListMealReactions(ctx, event.ID)
+	if err != nil {
+		return httpapi.MealEventResponse{}, fmt.Errorf("service: get meal: list reactions: %w", err)
+	}
+	out := httpapi.MealEventResponse{
+		ID: event.ID, MealieRecipeID: event.MealieRecipeID,
+		ServedOn:  event.ServedOn.Format("2006-01-02"),
+		CreatedAt: event.CreatedAt,
+		Reactions: make([]httpapi.MealReactionResponse, 0, len(rxns)),
+	}
+	for _, r := range rxns {
+		out.Reactions = append(out.Reactions, httpapi.MealReactionResponse{
+			PersonID: r.PersonID, Sentiment: r.Sentiment,
+		})
+	}
+	return out, nil
+}
+
+func (s *Meals) ListMeals(ctx context.Context, mealieRecipeID, servedOn string) ([]httpapi.MealEventResponse, error) {
+	events, err := s.db.ListMealEvents(ctx, mealieRecipeID, servedOn)
+	if err != nil {
+		return nil, fmt.Errorf("service: list meals: %w", err)
+	}
+	out := make([]httpapi.MealEventResponse, 0, len(events))
+	for _, event := range events {
+		rxns, err := s.db.ListMealReactions(ctx, event.ID)
+		if err != nil {
+			return nil, fmt.Errorf("service: list meals: list reactions: %w", err)
+		}
+		resp := httpapi.MealEventResponse{
+			ID: event.ID, MealieRecipeID: event.MealieRecipeID,
+			ServedOn:  event.ServedOn.Format("2006-01-02"),
+			CreatedAt: event.CreatedAt,
+			Reactions: make([]httpapi.MealReactionResponse, 0, len(rxns)),
+		}
+		for _, r := range rxns {
+			resp.Reactions = append(resp.Reactions, httpapi.MealReactionResponse{
+				PersonID: r.PersonID, Sentiment: r.Sentiment,
+			})
+		}
+		out = append(out, resp)
+	}
+	return out, nil
+}
+
+// generateID generates a deterministic 16-char hex id for tests.
 func generateID() string {
 	var b [8]byte
 	for i := range b {
-		b[i] = byte(i + 1) // deterministic for tests; use crypto/rand in production
+		b[i] = byte(i + 1)
 	}
 	return fmt.Sprintf("%016x", b)
 }

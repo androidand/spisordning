@@ -19,6 +19,7 @@ servers:
 x-layer-policy:
   domain:        internal/domain
   application:   internal/planning
+  service:       internal/service
   persistence:   internal/persistence
   httpapi:       internal/httpapi
   composition:   cmd/food-brain

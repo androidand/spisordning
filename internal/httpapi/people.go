@@ -48,6 +48,10 @@ type Dependencies struct {
 	Preferences PreferencesService
 	Recipes     RecipesService
 	Meals       MealsService
+	Planning    PlanningService
+	Pantry      PantryService
+	Ingredients IngredientsService
+	Stores      StoresService
 }
 
 type peopleHandler struct {
@@ -76,7 +80,39 @@ func RegisterHandlers(mux *http.ServeMux, deps Dependencies) {
 	}
 	if deps.Meals != nil {
 		h := mealsHandler{svc: deps.Meals}
+		mux.HandleFunc("GET /meals", h.listMeals)
+		mux.HandleFunc("GET /meals/{id}", h.getMeal)
 		mux.HandleFunc("POST /meals", h.createMealEvent)
+	}
+	if deps.Planning != nil {
+		h := plansHandler{svc: deps.Planning}
+		mux.HandleFunc("GET /plans", h.listPlans)
+		mux.HandleFunc("POST /plans", h.createPlan)
+		mux.HandleFunc("GET /plans/{id}", h.getPlan)
+		mux.HandleFunc("PATCH /plans/{id}", h.updatePlan)
+		mux.HandleFunc("POST /plans/{id}/decisions", h.setDecisions)
+		mux.HandleFunc("GET /plans/{id}/shopping-requirements", h.listShoppingRequirements)
+	}
+	if deps.Pantry != nil {
+		h := pantryHandler{svc: deps.Pantry}
+		mux.HandleFunc("GET /pantry/locations", h.listLocations)
+		mux.HandleFunc("POST /pantry/locations", h.createLocation)
+		mux.HandleFunc("GET /pantry/locations/{id}/lots", h.listLots)
+		mux.HandleFunc("POST /pantry/lots/purchase", h.purchase)
+		mux.HandleFunc("POST /pantry/lots/{id}/consume", h.consume)
+	}
+	if deps.Ingredients != nil {
+		h := ingredientsHandler{svc: deps.Ingredients}
+		mux.HandleFunc("GET /ingredients/search", h.searchFood)
+		mux.HandleFunc("GET /ingredients/nutrition/{nummer}", h.lookupNutrition)
+		mux.HandleFunc("GET /ingredients/dabas/search", h.searchDabas)
+		mux.HandleFunc("GET /ingredients/matpriskollen/search", h.searchMatpriskollen)
+		mux.HandleFunc("PATCH /ingredient-mappings/{mealieFoodId}", h.resolveMapping)
+	}
+	if deps.Stores != nil {
+		h := storesHandler{svc: deps.Stores}
+		mux.HandleFunc("GET /products/search", h.searchProducts)
+		mux.HandleFunc("GET /products/by-gtin", h.searchByGTIN)
 	}
 }
 

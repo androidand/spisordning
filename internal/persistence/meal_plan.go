@@ -253,6 +253,25 @@ func (s *Store) ListShoppingRequirements(ctx context.Context, planID int64) ([]S
 	return out, rows.Err()
 }
 
+// ListMealPlans returns all plans ordered by week_start descending.
+func (s *Store) ListMealPlans(ctx context.Context) ([]MealPlan, error) {
+	rows, err := s.db.Query(ctx,
+		`SELECT id, week_start, status, created_at FROM meal_plan ORDER BY week_start DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("persistence: list meal_plans: %w", err)
+	}
+	defer rows.Close()
+	var out []MealPlan
+	for rows.Next() {
+		var m MealPlan
+		if err := rows.Scan(&m.ID, &m.WeekStart, &m.Status, &m.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
 func notFound(table string, id int64) error {
 	return fmt.Errorf("persistence: %s not found (id %s)", table, strconv.FormatInt(id, 10))
 }

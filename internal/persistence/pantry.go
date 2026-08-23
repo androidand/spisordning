@@ -520,6 +520,42 @@ func (s *Store) RecordTransfer(ctx context.Context, lotID int64, toLocationID st
 	return newLotID, nil
 }
 
+// ListInventoryLocations returns every location matching householdID (empty = all).
+// Used by the pantry service to list available locations for a household.
+func (s *Store) ListInventoryLocations(ctx context.Context, householdID string) ([]InventoryLocation, error) {
+	var rows pgx.Rows
+	var err error
+	if householdID == "" {
+		rows, err = s.db.Query(ctx,
+			`SELECT id, household_id, name, location_type, parent_location_id, archived_at
+			 FROM inventory_location ORDER BY id`)
+	} else {
+		rows, err = s.db.Query(ctx,
+			`SELECT id, household_id, name, location_type, parent_location_id, archived_at
+			 FROM inventory_location WHERE household_id = $1 ORDER BY id`, householdID)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("persistence: list inventory_locations: %w", err)
+	}
+	defer rows.Close()
+	var out []InventoryLocation
+	for rows.Next() {
+		var l InventoryLocation
+		var locType, parent *string
+		if err := rows.Scan(&l.ID, &l.HouseholdID, &l.Name, &locType, &parent, &l.ArchivedAt); err != nil {
+			return nil, err
+		}
+		if locType != nil {
+			l.LocationType = *locType
+		}
+		if parent != nil {
+			l.ParentLocationID = *parent
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
 // LookupBarcode normalizes gtin and resolves it against ProductIdentifier —
 // the first step of design.md D6's fallback chain. Open Food Facts and
 // retailer-lookup fallback (D6's remaining steps) are intentionally not

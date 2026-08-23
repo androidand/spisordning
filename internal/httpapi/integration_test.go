@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -116,6 +117,52 @@ func (a dbAdapter) ListRecipes(ctx context.Context) ([]RecipeRefResponse, error)
 			MealieRecipeID: r.MealieRecipeID, Title: r.Title, Tags: r.Tags,
 			Effort: r.Effort, LastSyncedAt: r.LastSyncedAt,
 		})
+	}
+	return out, nil
+}
+
+func (a dbAdapter) GetMeal(ctx context.Context, id int64) (MealEventResponse, error) {
+	event, err := a.store.GetMealEvent(ctx, id)
+	if err != nil {
+		return MealEventResponse{}, err
+	}
+	rxns, err := a.store.ListMealReactions(ctx, event.ID)
+	if err != nil {
+		return MealEventResponse{}, err
+	}
+	out := MealEventResponse{
+		ID: event.ID, MealieRecipeID: event.MealieRecipeID,
+		ServedOn:  event.ServedOn.Format("2006-01-02"),
+		CreatedAt: event.CreatedAt,
+		Reactions: make([]MealReactionResponse, 0, len(rxns)),
+	}
+	for _, r := range rxns {
+		out.Reactions = append(out.Reactions, MealReactionResponse{PersonID: r.PersonID, Sentiment: r.Sentiment})
+	}
+	return out, nil
+}
+
+func (a dbAdapter) ListMeals(ctx context.Context, mealieRecipeID, servedOn string) ([]MealEventResponse, error) {
+	events, err := a.store.ListMealEvents(ctx, mealieRecipeID, servedOn)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]MealEventResponse, 0, len(events))
+	for _, event := range events {
+		rxns, err := a.store.ListMealReactions(ctx, event.ID)
+		if err != nil {
+			return nil, err
+		}
+		resp := MealEventResponse{
+			ID: event.ID, MealieRecipeID: event.MealieRecipeID,
+			ServedOn:  event.ServedOn.Format("2006-01-02"),
+			CreatedAt: event.CreatedAt,
+			Reactions: make([]MealReactionResponse, 0, len(rxns)),
+		}
+		for _, r := range rxns {
+			resp.Reactions = append(resp.Reactions, MealReactionResponse{PersonID: r.PersonID, Sentiment: r.Sentiment})
+		}
+		out = append(out, resp)
 	}
 	return out, nil
 }
@@ -309,4 +356,100 @@ func serverDoPost(server *httptest.Server, path, body string) *httptest.Response
 	rec := httptest.NewRecorder()
 	server.Config.Handler.ServeHTTP(rec, req)
 	return rec
+}
+
+func serverDoPatch(server *httptest.Server, path, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPatch, server.URL+path, bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.Config.Handler.ServeHTTP(rec, req)
+	return rec
+}
+
+// TestAPI_PlanRoundTrip exercises the /plans lifecycle against a real Postgres store.
+func TestAPI_PlanRoundTrip(t *testing.T) {
+	store := skipWithoutDB(t)
+	server := newTestServer(t, store)
+	defer server.Close()
+
+	// Create a plan.
+	rec := serverDoPost(server, "/plans", `{"week_start":"2026-01-13"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST /plans: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var plan MealPlan
+	if err := json.Unmarshal(rec.Body.Bytes(), &plan); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if plan.Status != "draft" {
+		t.Errorf("expected draft, got %s", plan.Status)
+	}
+
+	// List plans.
+	rec = serverDoGet(server, "/plans")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /plans: status = %d", rec.Code)
+	}
+	var plans []MealPlan
+	if err := json.Unmarshal(rec.Body.Bytes(), &plans); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("expected 1 plan, got %d", len(plans))
+	}
+
+	// Get plan.
+	rec = serverDoGet(server, "/plans/"+strconv.FormatInt(plan.ID, 10))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /plans/{id}: status = %d", rec.Code)
+	}
+}
+
+// TestAPI_PantryRoundTrip exercises the /pantry/locations lifecycle against a real Postgres store.
+func TestAPI_PantryRoundTrip(t *testing.T) {
+	store := skipWithoutDB(t)
+	server := newTestServer(t, store)
+	defer server.Close()
+
+	// Create a location.
+	rec := serverDoPost(server, "/pantry/locations", `{"name":"Kitchen","household_id":"h1"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST /pantry/locations: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var loc PantryLocation
+	if err := json.Unmarshal(rec.Body.Bytes(), &loc); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if loc.Name != "Kitchen" {
+		t.Errorf("expected Kitchen, got %s", loc.Name)
+	}
+
+	// List locations.
+	rec = serverDoGet(server, "/pantry/locations")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /pantry/locations: status = %d", rec.Code)
+	}
+	var locs []PantryLocation
+	if err := json.Unmarshal(rec.Body.Bytes(), &locs); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if len(locs) != 1 || locs[0].Name != "Kitchen" {
+		t.Errorf("unexpected locations: %+v", locs)
+	}
+}
+
+// TestAPI_MealsList verifies GET /meals returns an array against a real Postgres store.
+func TestAPI_MealsList(t *testing.T) {
+	store := skipWithoutDB(t)
+	server := newTestServer(t, store)
+	defer server.Close()
+
+	rec := serverDoGet(server, "/meals")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /meals: status = %d", rec.Code)
+	}
+	var events []MealEventResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &events); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
 }

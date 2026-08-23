@@ -51,11 +51,11 @@ type prefix struct {
 }
 
 var layerPrefixes = []prefix{
-	{Cmd, []string{"cmd"}},
+	{Cmd, []string{"cmd", "cmd/mcp-server"}},
 	{Test, []string{"internal/architecturetest"}},
 	{Domain, []string{"internal/domain", "internal/recipefamily", "internal/scoring", "internal/openapi", "internal/ambient", "internal/availability"}},
 	{Application, []string{"internal/planning"}},
-	{Service, []string{"internal/service"}},
+	{Service, []string{"internal/service", "internal/mcp"}},
 	{Client, []string{
 		"internal/mealie",
 		"internal/skolmaten",
