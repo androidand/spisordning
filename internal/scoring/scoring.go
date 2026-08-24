@@ -9,6 +9,7 @@ import (
 	"math"
 	"sort"
 
+	"github.com/androidand/spisordning/internal/availability"
 	"github.com/androidand/spisordning/internal/domain"
 )
 
@@ -271,12 +272,19 @@ func score(c domain.Candidate, ctx domain.PlanContext, w Weights) ScoredCandidat
 	}
 }
 
-// feasibility applies hard constraints. Today the only hard rule is that a meal
-// may not cost more active effort than the cook has budgeted. Feasibility is
-// separate from score so the LLM layer can be asserted never to override it.
+// feasibility applies hard constraints. A meal is infeasible when:
+//   - it costs more active effort than the cook has budgeted, or
+//   - the pantry availability capability reports it as infeasible (no
+//     on-hand ingredients and no viable substitutes).
+//
+// Feasibility is separate from score so the LLM layer can be asserted never
+// to override it.
 func feasibility(c domain.Candidate, ctx domain.PlanContext) (bool, string) {
 	if ctx.KitchenEnergy > 0 && c.Effort > ctx.KitchenEnergy {
 		return false, "needs more effort than the cook has today"
+	}
+	if v, ok := ctx.AvailabilityVerdicts[c.MealieRecipeID]; ok && v == string(availability.VerdictInfeasible) {
+		return false, "ingredients not available in pantry"
 	}
 	return true, "ok"
 }

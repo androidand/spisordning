@@ -66,19 +66,24 @@
       end-to-end test against fake Mealie/Skolmaten/Olla/adapter services
       (cmd/food-brain/plan_test.go)
 - [x] 5.2 Surface tonight's meal + one-tap reactions via Home Assistant (through homeops MCP /
-      HA API) — `internal/ambient` (week projection + `RecordReaction` confidence update, 8
-      tests) + `food-brain tonight` CLI (show / `--json` HA payload / `--person … --sentiment …`
-      records a reaction and updates `family.json`); `plan --write-tonight` emits the projection.
-      Home Assistant drives `tonight --json` + `tonight --person … --sentiment …` via the homeops
-      MCP. Verified: `go build`/`go vet`/`go test` green; smoke-tested show/json/react against a
-      temp projection (family.json format preserved). Reconciled 2026-08-25 into the same
-      `plan.go` this branch and `establish-enforced-go-architecture` both extended in parallel —
-      see that change's own task notes for its additions (retailer selection, service/dto layer).
+      HA API) — two complementary paths, reconciled 2026-08-25: (1) `internal/ambient` (week
+      projection + `RecordReaction` confidence update, 8 tests) + `food-brain tonight` CLI
+      (show / `--json` HA payload / `--person … --sentiment …` records a reaction and updates
+      `family.json`); `plan --write-tonight` emits the projection; (2) `GET /tonight` /
+      `POST /reactions` on the Go HTTP API, backed by persistence (`GetTonightMeal`,
+      `CreateReaction`, `GetOrCreateMealEventForToday`) and httpapi handlers (`tonight.go`,
+      `reactions.go`), with 10 handler tests. Home Assistant / homeops MCP can drive either the
+      CLI (`tonight --json`, `tonight --person … --sentiment …`) or the HTTP endpoints,
+      depending on integration style. Verified: `go build`/`go vet`/`go test` green; CLI path
+      smoke-tested against a temp projection (family.json format preserved).
 - [x] 5.3 Demote the n8n `weekly-meal-planner` workflow to scheduler/webhook (or retire) once
       the Go pipe is verified — Go pipe verified (6.2); the in-n8n planner is retired in favor of
       a thin weekly scheduler that shells out to `food-brain plan --write-tonight … --create-wishlist`
       (`n8n/weekly-meal-planner.demoted.workflow.json`). Original left archived/inactive; owner
-      imports the demoted workflow into n8n to retire the original (no deploy done here)
+      imports the demoted workflow into n8n to retire the original (no deploy done here). A
+      webhook→`POST /plans/run` HTTP-forward variant is also available for HTTP-triggered
+      scheduling instead of the CLI shell-out — see `internal/httpapi/plans.go` +
+      `cmd/food-brain/plan.go`'s `RunPlan`.
 
 ## 6. Verification & docs
 

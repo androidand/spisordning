@@ -18,7 +18,7 @@ func pantryFixture(t *testing.T, ctx context.Context, s *Store, suffix string) (
 	if err := s.CreateHousehold(ctx, Household{ID: householdID, Name: "Pantry Test Household"}); err != nil {
 		t.Fatalf("CreateHousehold: %v", err)
 	}
-	if err := s.UpsertIngredient(ctx, Ingredient{ID: ingredientID, Display: "Milk"}); err != nil {
+	if err := s.UpsertIngredient(ctx, Ingredient{ID: ingredientID, Display: "mjölk"}); err != nil {
 		t.Fatalf("UpsertIngredient: %v", err)
 	}
 	if err := s.CreateProduct(ctx, Product{ID: productID, Name: "Arla Milk 1L"}); err != nil {

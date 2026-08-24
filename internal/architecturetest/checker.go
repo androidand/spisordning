@@ -12,8 +12,8 @@
 //	service      internal/service, internal/mcp                   — app services
 //	contract     internal/dto                                     — shared DTOs + service interfaces
 //	client       internal/mealie, internal/skolmaten, internal/retailer,
-//	             internal/llm, internal/httpclient, internal/recipeimport,
-//	             internal/matpriskollen, internal/ingredients
+//	             internal/icaretailer, internal/llm, internal/httpclient,
+//	             internal/recipeimport, internal/matpriskollen, internal/ingredients
 //	persistence  internal/persistence                      — Postgres repos
 //	httpapi      internal/httpapi                          — HTTP handlers
 //	mcptools     internal/mcptools                         — MCP tool adapters (no persistence)
@@ -64,6 +64,7 @@ var layerPrefixes = []prefix{
 		"internal/mealie",
 		"internal/skolmaten",
 		"internal/retailer",
+		"internal/icaretailer",
 		"internal/llm",
 		"internal/httpclient",
 		"internal/recipeimport",

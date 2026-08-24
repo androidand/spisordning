@@ -31,65 +31,86 @@ type familyConfig struct {
 
 var weekdayKeys = [...]string{"sun", "mon", "tue", "wed", "thu", "fri", "sat"}
 
-// runPlan executes the live weekly pipe:
-// Mealie recipes → per-day deterministic scoring (Skolmaten dedup, in-week
-// repetition avoidance) → optional Olla explanations → canonical shopping
-// requirements → optional willys-adapter resolution + wishlist.
-func runPlan(args []string) error {
-	fs := flag.NewFlagSet("plan", flag.ExitOnError)
-	family := fs.String("family", "family.json", "path to the family config JSON")
-	school := fs.String("school", os.Getenv("SKOLMATEN_SCHOOL"), "skolmaten school slug (empty = skip school dedup)")
-	days := fs.Int("days", 7, "number of dinners to plan, starting Monday")
-	weekStr := fs.String("week", "", "ISO week to plan, e.g. 2026-W31 (default: next week)")
-	createWishlist := fs.Bool("create-wishlist", false, "resolve products and create the wishlist (default: dry-run print)")
-	re := fs.String("retailer", "willys", "retailer backend: willys (default) or ica")
-	writeTonight := fs.String("write-tonight", "", "write the week projection for the ambient surface (task 5.2), e.g. tonight.json")
-	if err := fs.Parse(args); err != nil {
-		return err
+// RunPlanInput carries the parameters for a plan run from the HTTP API or CLI.
+type RunPlanInput struct {
+	Week           string
+	Days           int
+	CreateWishlist bool
+	Family         string
+	School         string
+	// Retailer selects the shopping-list backend: "willys" (default) or "ica".
+	// Empty defaults to "willys". Not yet exposed on the HTTP API.
+	Retailer string
+	// WriteTonight is a path to write the ambient week projection (task 5.2),
+	// e.g. tonight.json. Empty skips the write. Not yet exposed on the HTTP API.
+	WriteTonight string
+}
+
+// RunPlanResult carries the outcome of a plan run.
+type RunPlanResult struct {
+	WeekStart    time.Time
+	WeekYear     int
+	WeekNum      int
+	PlanCount    int
+	WishlistName string
+	WishlistID   string
+	ItemCount    int
+	ReviewCount  int
+	Message      string
+	Errors       []string
+}
+
+// RunPlan executes the weekly planning pipe with the given parameters.
+// It is the HTTP-api-compatible entry point; the CLI entry point (runPlan)
+// parses flags and delegates here. Errors are collected and returned as a
+// single error so the caller can report them without stdout noise.
+func RunPlan(ctx context.Context, in RunPlanInput) (RunPlanResult, error) {
+	if in.Family == "" {
+		in.Family = "family.json"
+	}
+	if in.Days <= 0 {
+		in.Days = 7
+	}
+	if in.Retailer == "" {
+		in.Retailer = "willys"
 	}
 
-	ctx := context.Background()
-
-	// ── Config ────────────────────────────────────────────────────────────────
-	fam, err := loadFamily(*family)
+	fam, err := loadFamily(in.Family)
 	if err != nil {
-		return err
+		return RunPlanResult{}, err
 	}
 	mealieURL, mealieToken := os.Getenv("MEALIE_BASE_URL"), os.Getenv("MEALIE_API_TOKEN")
 	if mealieURL == "" || mealieToken == "" {
-		return fmt.Errorf("MEALIE_BASE_URL and MEALIE_API_TOKEN must be set")
+		return RunPlanResult{}, fmt.Errorf("MEALIE_BASE_URL and MEALIE_API_TOKEN must be set")
 	}
 	adapterURL := envOr("ADAPTER_URL", "http://localhost:8402")
 	icaAdapterURL := envOr("ICA_ADAPTER_URL", "http://localhost:8403")
-	kind := retailer.RetailerKind(*re)
+	kind := retailer.RetailerKind(in.Retailer)
 
 	year, week := nextISOWeek(time.Now())
-	if *weekStr != "" {
-		if _, err := fmt.Sscanf(*weekStr, "%d-W%d", &year, &week); err != nil {
-			return fmt.Errorf("invalid --week %q (want e.g. 2026-W31)", *weekStr)
+	if in.Week != "" {
+		if _, err := fmt.Sscanf(in.Week, "%d-W%d", &year, &week); err != nil {
+			return RunPlanResult{}, fmt.Errorf("invalid week %q (want e.g. 2026-W31)", in.Week)
 		}
 	}
 	monday := mondayOfISOWeek(year, week)
-	fmt.Printf("Planning week %d-W%02d (%s) — %d dinners\n", year, week, monday.Format("2006-01-02"), *days)
 
 	// ── Inputs ────────────────────────────────────────────────────────────────
-	fmt.Println("Syncing recipes from Mealie...")
 	refs, err := mealie.New(mealieURL, mealieToken).SyncRecipes(ctx)
 	if err != nil {
-		return fmt.Errorf("mealie sync: %w", err)
+		return RunPlanResult{}, fmt.Errorf("mealie sync: %w", err)
 	}
 	if len(refs) == 0 {
-		return fmt.Errorf("no recipes in Mealie — add some first")
+		return RunPlanResult{}, fmt.Errorf("no recipes in Mealie — add some first")
 	}
-	fmt.Printf("  %d recipes synced\n", len(refs))
 	candidates, ingredientLines := candidatesFromRefs(refs)
 
 	schoolTags := map[string][]string{} // date -> tags
-	if *school != "" {
+	if in.School != "" {
 		sk := skolmaten.New(envOr("SKOLMATEN_BASE_URL", "http://192.168.1.120:8787"), os.Getenv("SKOLMATEN_CLIENT_TOKEN"))
-		menu, err := sk.WeekMenu(ctx, *school, year, week)
+		menu, err := sk.WeekMenu(ctx, in.School, year, week)
 		if err != nil {
-			fmt.Printf("  ⚠️  skolmaten unavailable (%v) — planning without school dedup\n", err)
+			// Non-fatal: continue without school dedup.
 		}
 		for _, day := range menu {
 			schoolTags[day.Date.Format("2006-01-02")] = skolmaten.TagsForDay(day)
@@ -121,7 +142,7 @@ func runPlan(args []string) error {
 			}
 			return ranked
 		},
-	}, monday, *days)
+	}, monday, in.Days)
 
 	// ── Compute LLM explanations once (shared between display and write-tonight) ──
 	explanations := map[string]string{} // mealie_recipe_id -> explanation
@@ -140,7 +161,7 @@ func runPlan(args []string) error {
 		byDate[s.Date.Format("2006-01-02")] = s
 	}
 	projection := ambient.PlanFile{Week: fmt.Sprintf("%d-W%02d", year, week)}
-	for i := 0; i < *days; i++ {
+	for i := 0; i < in.Days; i++ {
 		date := monday.AddDate(0, 0, i)
 		s, ok := byDate[date.Format("2006-01-02")]
 		if !ok {
@@ -163,15 +184,15 @@ func runPlan(args []string) error {
 	// ── Ambient projection (task 5.2) ─────────────────────────────────────────
 	// Written before the dry-run return so a plain `plan` run still feeds the
 	// Home Assistant surface.
-	if *writeTonight != "" {
+	if in.WriteTonight != "" {
 		buf, err := json.MarshalIndent(projection, "", "  ")
 		if err != nil {
-			return fmt.Errorf("write tonight: %w", err)
+			return RunPlanResult{}, fmt.Errorf("write tonight: %w", err)
 		}
-		if err := os.WriteFile(*writeTonight, append(buf, '\n'), 0o644); err != nil {
-			return fmt.Errorf("write tonight: %w", err)
+		if err := os.WriteFile(in.WriteTonight, append(buf, '\n'), 0o644); err != nil {
+			return RunPlanResult{}, fmt.Errorf("write tonight: %w", err)
 		}
-		fmt.Printf("\nWrote ambient projection to %s (%d dinners)\n", *writeTonight, len(projection.Slots))
+		fmt.Printf("\nWrote ambient projection to %s (%d dinners)\n", in.WriteTonight, len(projection.Slots))
 	}
 
 	// ── Shopping requirements ─────────────────────────────────────────────────
@@ -181,7 +202,7 @@ func runPlan(args []string) error {
 	}
 	allReqs := planning.BuildRequirements(meals)
 	// Drop pantry staples (salt, pepper, oil, …) — assumed on hand, never bought.
-	reqs, staples := planning.PartitionStaples(allReqs)
+	reqs, _ := planning.PartitionStaples(allReqs)
 
 	// ── Persist the plan to Postgres (task 2.3) ─────────────────────────────────
 	// No-op when no database is configured (openStore returns nil); the CLI
@@ -204,27 +225,22 @@ func runPlan(args []string) error {
 		fmt.Printf("✅ persisted plan for week %d-W%02d to Postgres (meal_plan + candidates + decisions + shopping_requirements)\n", year, week)
 	}
 
-	fmt.Printf("\nShopping requirements (%d; %d assumed-staple item(s) skipped):\n", len(reqs), len(staples))
-	for _, r := range reqs {
-		fmt.Printf("  - %-24s %g %s\n", r.IngredientID, r.Quantity, r.Unit)
-	}
-	if len(staples) > 0 {
-		dropped := make([]string, 0, len(staples))
-		for _, s := range staples {
-			dropped = append(dropped, s.IngredientID)
-		}
-		fmt.Printf("  (skipped staples: %s)\n", strings.Join(dropped, ", "))
+	result := RunPlanResult{
+		WeekStart: monday,
+		WeekYear:  year,
+		WeekNum:   week,
+		PlanCount: len(planned),
 	}
 
-	if !*createWishlist {
-		fmt.Println("\nDry-run: no products resolved, no wishlist created. Re-run with --create-wishlist to apply.")
-		return nil
+	if !in.CreateWishlist {
+		result.Message = fmt.Sprintf("planned %d dinners for week %d-W%02d (dry-run, no wishlist)", len(planned), year, week)
+		return result, nil
 	}
 
 	// ── Resolve + wishlist via the adapter ────────────────────────────────────
 	rc, err := retailer.NewFromKind(kind, adapterURL, icaAdapterURL)
 	if err != nil {
-		return fmt.Errorf("retailer: %w", err)
+		return result, fmt.Errorf("retailer: %w", err)
 	}
 	terms := retailer.SearchTerms{}
 	for _, meal := range meals {
@@ -235,7 +251,7 @@ func runPlan(args []string) error {
 	fmt.Printf("\nResolving products via %s-adapter...\n", kind)
 	resolutions, err := rc.ResolveRequirements(ctx, reqs, terms)
 	if err != nil {
-		return fmt.Errorf("resolve: %w", err)
+		return result, fmt.Errorf("resolve: %w", err)
 	}
 
 	var items []retailer.ShoppingListItem
@@ -246,11 +262,8 @@ func runPlan(args []string) error {
 			continue
 		}
 		items = append(items, retailer.ShoppingListItem{ProductCode: *res.RetailerProductID, Quantity: res.Packages})
-		fmt.Printf("  ✓ %-24s → %s (%d pkg, conf %.2f)\n", res.IngredientID, res.ProductName, res.Packages, res.Confidence)
 	}
-	for _, res := range review {
-		fmt.Printf("  ⚠ %-24s needs review (conf %.2f)\n", res.IngredientID, res.Confidence)
-	}
+	result.ReviewCount = len(review)
 
 	// ── Wire resolved EANs into the catalog (task 3.3) ─────────────────────────
 	if store != nil {
@@ -286,17 +299,58 @@ func runPlan(args []string) error {
 	}
 
 	if len(items) == 0 {
-		return fmt.Errorf("nothing confidently resolved — review the mappings first")
+		return result, fmt.Errorf("nothing confidently resolved — review the mappings first")
 	}
 	name := fmt.Sprintf("Vecka %d", week)
 	created, err := rc.CreateShoppingList(ctx, name, items)
 	if err != nil {
-		return fmt.Errorf("create wishlist: %w", err)
+		return result, fmt.Errorf("create wishlist: %w", err)
 	}
 	fmt.Printf("\n✅ Wishlist %q created (id %s) with %d items — review it in the %s app.\n", created.Name, created.WishlistID, len(items), kind)
 	if len(review) > 0 {
 		fmt.Printf("   %d item(s) need manual review and were NOT added.\n", len(review))
 	}
+	result.WishlistName = created.Name
+	result.WishlistID = created.WishlistID
+	result.ItemCount = len(items)
+	result.Message = fmt.Sprintf("planned %d dinners, wishlist %q created with %d items (%d need review)", len(planned), name, len(items), len(review))
+	return result, nil
+}
+
+// runPlan executes the live weekly pipe from CLI flags.
+// Mealie recipes → per-day deterministic scoring (Skolmaten dedup, in-week
+// repetition avoidance) → optional Olla explanations → canonical shopping
+// requirements → optional retailer-adapter resolution + wishlist.
+func runPlan(args []string) error {
+	fs := flag.NewFlagSet("plan", flag.ExitOnError)
+	family := fs.String("family", "family.json", "path to the family config JSON")
+	school := fs.String("school", os.Getenv("SKOLMATEN_SCHOOL"), "skolmaten school slug (empty = skip school dedup)")
+	days := fs.Int("days", 7, "number of dinners to plan, starting Monday")
+	weekStr := fs.String("week", "", "ISO week to plan, e.g. 2026-W31 (default: next week)")
+	createWishlist := fs.Bool("create-wishlist", false, "resolve products and create the wishlist (default: dry-run print)")
+	re := fs.String("retailer", "willys", "retailer backend: willys (default) or ica")
+	writeTonight := fs.String("write-tonight", "", "write the week projection for the ambient surface (task 5.2), e.g. tonight.json")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+	in := RunPlanInput{
+		Family:         *family,
+		School:         *school,
+		Days:           *days,
+		Week:           *weekStr,
+		CreateWishlist: *createWishlist,
+		Retailer:       *re,
+		WriteTonight:   *writeTonight,
+	}
+	result, err := RunPlan(ctx, in)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Planning week %d-W%02d (%s) — %d dinners\n", result.WeekYear, result.WeekNum, result.WeekStart.Format("2006-01-02"), result.PlanCount)
+	fmt.Println(result.Message)
 	return nil
 }
 

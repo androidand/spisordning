@@ -122,6 +122,28 @@ paths:
       responses:
         '201': { description: meal event created, content: { application/json: { schema: { $ref: '#/components/schemas/MealEvent' } } } }
 
+  /tonight:
+    get:
+      summary: Surface tonight's meal from the approved plan
+      operationId: getTonight
+      tags: [tonight]
+      responses:
+        '200': { description: tonight's meal, content: { application/json: { schema: { $ref: '#/components/schemas/TonightView' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /reactions:
+    post:
+      summary: One-tap reaction to tonight's meal (or any meal event)
+      operationId: createReaction
+      tags: [reactions]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReactionNew' }
+      responses:
+        '201': { description: reaction recorded, content: { application/json: { schema: { $ref: '#/components/schemas/MealReaction' } } } }
+
   /plans:
     get:
       summary: List meal plans
@@ -145,6 +167,20 @@ paths:
             schema: { $ref: '#/components/schemas/MealPlanNew' }
       responses:
         '201': { description: plan created, content: { application/json: { schema: { $ref: '#/components/schemas/MealPlan' } } } }
+
+  /plans/run:
+    post:
+      summary: Run the weekly planner (async; returns job id)
+      operationId: runPlan
+      tags: [plans]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlanRunInput' }
+      responses:
+        '202': { description: plan run accepted, content: { application/json: { schema: { $ref: '#/components/schemas/PlanRunResult' } } } }
+        '500': { $ref: '#/components/responses/NotFound' }
 
   /plans/{planId}:
     parameters:
@@ -185,6 +221,21 @@ paths:
         '200': { description: decisions persisted, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/MealPlanDecision' } } } } }
         '409': { $ref: '#/components/responses/Conflict' }
 
+  /plans/{planId}/candidates:
+    parameters:
+      - $ref: '#/components/parameters/PlanId'
+    get:
+      summary: Fetch ranked candidates for all slots in a plan
+      operationId: listCandidates
+      tags: [plans]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/MealPlanCandidate' }
+
   /plans/{planId}/shopping-requirements:
     parameters:
       - $ref: '#/components/parameters/PlanId'
@@ -199,6 +250,54 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/ShoppingRequirement' }
+
+  /effort-profiles:
+    get:
+      summary: List effort profiles (kitchen energy per weekday)
+      operationId: listEffortProfiles
+      tags: [planning]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/EffortProfile' }
+    post:
+      summary: Upsert an effort profile for a weekday
+      operationId: upsertEffortProfile
+      tags: [planning]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EffortProfile' }
+      responses:
+        '201': { description: effort profile upserted }
+
+  /constraints:
+    get:
+      summary: List planning constraints
+      operationId: listPlanningConstraints
+      tags: [planning]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PlanningConstraint' }
+    post:
+      summary: Create a planning constraint
+      operationId: createPlanningConstraint
+      tags: [planning]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlanningConstraintNew' }
+      responses:
+        '201': { description: constraint created, content: { application/json: { schema: { $ref: '#/components/schemas/PlanningConstraint' } } } }
 
   /ingredient-mappings/{ingredient}:
     parameters:
@@ -227,8 +326,228 @@ paths:
         '200': { description: updated, content: { application/json: { schema: { $ref: '#/components/schemas/IngredientMapping' } } } }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /shopping-lists:
+    get:
+      summary: List shopping lists
+      operationId: listShoppingLists
+      tags: [shopping]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ShoppingList' }
+    post:
+      summary: Create a shopping list
+      operationId: createShoppingList
+      tags: [shopping]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ShoppingListNew' }
+      responses:
+        '201':
+          description: created
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/ShoppingList' } }
+
+  /shopping-lists/{listId}:
+    parameters:
+      - $ref: '#/components/parameters/ShoppingListId'
+    get:
+      summary: Fetch one shopping list
+      operationId: getShoppingList
+      tags: [shopping]
+      responses:
+        '200': { description: a shopping list, content: { application/json: { schema: { $ref: '#/components/schemas/ShoppingList' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      summary: Archive a shopping list
+      operationId: archiveShoppingList
+      tags: [shopping]
+      responses:
+        '200': { description: archived }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /shopping-lists/{listId}/items:
+    parameters:
+      - $ref: '#/components/parameters/ShoppingListId'
+    get:
+      summary: List items on a shopping list
+      operationId: listShoppingListItems
+      tags: [shopping]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ShoppingListItem' }
+    post:
+      summary: Add an item to a shopping list
+      operationId: addShoppingListItem
+      tags: [shopping]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ShoppingListItemNew' }
+      responses:
+        '201':
+          description: created
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/ShoppingListItem' } }
+
+  /shopping-lists/{listId}/items/{itemId}:
+    parameters:
+      - $ref: '#/components/parameters/ShoppingListId'
+      - $ref: '#/components/parameters/ShoppingListItemId'
+    patch:
+      summary: Toggle check-off on a shopping list item
+      operationId: toggleShoppingListItem
+      tags: [shopping]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [checked]
+              properties:
+                checked: { type: boolean }
+      responses:
+        '200': { description: toggled, content: { application/json: { schema: { $ref: '#/components/schemas/ShoppingListItem' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      summary: Remove a shopping list item
+      operationId: deleteShoppingListItem
+      tags: [shopping]
+      responses:
+        '204': { description: removed }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /shopping-lists/{listId}/push:
+    parameters:
+      - $ref: '#/components/parameters/ShoppingListId'
+    post:
+      summary: Push a shopping list to its retailer (resolve + create wishlist + bind)
+      operationId: pushShoppingList
+      tags: [shopping]
+      parameters:
+        - name: retailer
+          in: query
+          schema: { type: string, default: willys }
+          description: which retailer to push to
+      responses:
+        '200':
+          description: pushed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RetailerListBinding' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /shopping-lists/{listId}/carts:
+    parameters:
+      - $ref: '#/components/parameters/ShoppingListId'
+    get:
+      summary: List carts for a shopping list (via its retailer bindings)
+      operationId: listShoppingCarts
+      tags: [shopping]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ShoppingCart' }
+
+  /shopping-lists/{listId}/push/to-cart:
+    parameters:
+      - $ref: '#/components/parameters/ShoppingListId'
+    post:
+      summary: Create a cart checkpoint from a pushed shopping list
+      operationId: toCart
+      tags: [shopping]
+      parameters:
+        - name: retailer
+          in: query
+          schema: { type: string, default: willys }
+      responses:
+        '201':
+          description: cart checkpoint created
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/ShoppingCart' } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /orders:
+    get:
+      summary: List orders (optionally filtered by retailer or cart)
+      operationId: listOrders
+      tags: [orders]
+      parameters:
+        - name: retailer
+          in: query
+          schema: { type: string, nullable: true }
+        - name: cartId
+          in: query
+          schema: { type: integer, nullable: true }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Order' }
+
+  /orders/{orderId}:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    get:
+      summary: Fetch one order with its items
+      operationId: getOrder
+      tags: [orders]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrderView' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /orders/{orderId}/items:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    get:
+      summary: List items on an order
+      operationId: listOrderItems
+      tags: [orders]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/OrderItem' }
+
 components:
   parameters:
+    ShoppingListId:
+      name: listId
+      in: path
+      required: true
+      schema: { type: integer }
+    ShoppingListItemId:
+      name: itemId
+      in: path
+      required: true
+      schema: { type: integer }
+    OrderId:
+      name: orderId
+      in: path
+      required: true
+      schema: { type: integer }
+
     PersonId:
       name: personId
       in: path
@@ -362,7 +681,6 @@ components:
 
     MealPlanNew:
       type: object
-      required: [week_start]
       properties:
         week_start: { type: string, format: date }
 
@@ -424,3 +742,161 @@ components:
       properties:
         weekday: { type: integer, minimum: 0, maximum: 6, description: 0=Sunday .. 6=Saturday }
         kitchen_energy: { type: integer, minimum: 1, maximum: 3 }
+
+    TonightView:
+      type: object
+      description: "Tonight's meal: the recipe + any reactions recorded so far"
+      required: [served_on, recipe, reactions]
+      properties:
+        served_on: { type: string, format: date, description: today's date }
+        recipe:
+          $ref: '#/components/schemas/RecipeRef'
+        reactions:
+          type: array
+          items: { $ref: '#/components/schemas/MealReaction' }
+          description: reactions already recorded for today's meal event
+
+    PlanningConstraint:
+      type: object
+      required: [id, kind, value, active]
+      properties:
+        id: { type: integer }
+        kind: { type: string, description: constraint kind (e.g. avoid_tag, max_effort) }
+        value: { type: string, description: constraint value }
+        active: { type: boolean, description: whether the constraint is active }
+
+    PlanningConstraintNew:
+      type: object
+      required: [kind, value, active]
+      properties:
+        kind: { type: string }
+        value: { type: string }
+        active: { type: boolean }
+
+    ReactionNew:
+      type: object
+      required: [person_id, sentiment]
+      properties:
+        person_id: { type: string, description: who is reacting }
+        sentiment: { type: integer, minimum: -2, maximum: 2, description: "-2 (hate) .. 2 (love)" }
+        note: { type: string, nullable: true, description: optional free-text note }
+
+    PlanRunInput:
+      type: object
+      properties:
+        week: { type: string, description: "ISO week, e.g. 2026-W31 (default: next week)" }
+        days: { type: integer, minimum: 1, maximum: 10, description: "number of dinners (default: 7)" }
+        create_wishlist: { type: boolean, description: "resolve products and create Willys wishlist" }
+
+    PlanRunResult:
+      type: object
+      required: [status, message]
+      properties:
+        status: { type: string, enum: [accepted, failed], description: "accepted = queued, failed = error" }
+        message: { type: string, description: human-readable result summary }
+        week_start: { type: string, format: date, nullable: true, description: "Monday of the planned week" }
+    ShoppingList:
+      type: object
+      required: [id, name, status, created_at]
+      properties:
+        id: { type: integer }
+        owner_person_id: { type: string, nullable: true, description: "person who owns the list; null = shared" }
+        name: { type: string }
+        status: { type: string, enum: [active, archived] }
+        created_at: { type: string, format: date-time }
+
+    ShoppingListNew:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        owner_person_id: { type: string, nullable: true }
+
+    ShoppingListItem:
+      type: object
+      required: [id, shopping_list_id, quantity, unit, checked, added_at]
+      properties:
+        id: { type: integer }
+        shopping_list_id: { type: integer }
+        shopping_requirement_id: { type: integer, nullable: true }
+        ingredient_id: { type: string, nullable: true }
+        label: { type: string, nullable: true }
+        quantity: { type: number }
+        unit: { type: string }
+        checked: { type: boolean }
+        added_at: { type: string, format: date-time }
+
+    ShoppingListItemNew:
+      type: object
+      required: [quantity, unit]
+      properties:
+        shopping_requirement_id: { type: integer, nullable: true }
+        ingredient_id: { type: string, nullable: true }
+        label: { type: string, nullable: true }
+        quantity: { type: number }
+        unit: { type: string }
+
+    RetailerListBinding:
+      type: object
+      required: [id, shopping_list_id, retailer, external_list_id, sync_direction]
+      properties:
+        id: { type: integer }
+        shopping_list_id: { type: integer }
+        retailer: { type: string }
+        external_list_id: { type: string }
+        sync_direction: { type: string, enum: [outbound] }
+        last_pushed_at: { type: string, format: date-time, nullable: true }
+        last_push_status: { type: string, enum: [success, error], nullable: true }
+
+    ShoppingCart:
+      type: object
+      required: [id, retailer_list_binding_id, created_at, status]
+      properties:
+        id: { type: integer }
+        retailer_list_binding_id: { type: integer }
+        created_at: { type: string, format: date-time }
+        status: { type: string, enum: [created, confirmed, abandoned] }
+
+    ShoppingCartItem:
+      type: object
+      required: [id, shopping_cart_id, retailer_product_id, quantity, unit]
+      properties:
+        id: { type: integer }
+        shopping_cart_id: { type: integer }
+        retailer_product_id: { type: string }
+        quantity: { type: number }
+        unit: { type: string }
+        resolved_price: { type: number, nullable: true }
+
+    Order:
+      type: object
+      required: [id, retailer, source, ordered_at]
+      properties:
+        id: { type: integer }
+        shopping_cart_id: { type: integer, nullable: true }
+        retailer: { type: string }
+        source: { type: string, enum: [manual, retailer_api, receipt_import] }
+        ordered_at: { type: string, format: date-time }
+        total_price: { type: number, nullable: true }
+
+    OrderView:
+      type: object
+      required: [order, items]
+      properties:
+        order: { $ref: '#/components/schemas/Order' }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/OrderItem' }
+
+    OrderItem:
+      type: object
+      required: [id, order_id, retailer_product_id, quantity]
+      properties:
+        id: { type: integer }
+        order_id: { type: integer }
+        retailer_product_id: { type: string }
+        quantity: { type: number }
+        unit_price: { type: number, nullable: true }
+        total_price: { type: number, nullable: true }
+        substituted_for_item_id: { type: integer, nullable: true }
+

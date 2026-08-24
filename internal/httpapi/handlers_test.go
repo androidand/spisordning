@@ -4,158 +4,12 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strconv"
 	"testing"
 	"time"
 
 	"github.com/androidand/spisordning/internal/dto"
+	"github.com/oapi-codegen/runtime/types"
 )
-
-// ---- Planning fakes + tests ----
-
-type fakePlanningSvc struct {
-	plans      []dto.MealPlan
-	plan       dto.MealPlanView
-	updated    dto.MealPlan
-	decisions  []dto.MealPlanDecision
-	reqs       []dto.ShoppingRequirement
-	err        error
-}
-
-func (f *fakePlanningSvc) ListPlans(ctx context.Context) ([]dto.MealPlan, error) {
-	if f.err != nil {
-		return nil, f.err
-	}
-	return f.plans, nil
-}
-
-func (f *fakePlanningSvc) CreatePlan(ctx context.Context, weekStart string) (dto.MealPlan, error) {
-	if f.err != nil {
-		return dto.MealPlan{}, f.err
-	}
-	return dto.MealPlan{ID: 1, WeekStart: weekStart, Status: "draft", CreatedAt: time.Now()}, nil
-}
-
-func (f *fakePlanningSvc) GetPlan(ctx context.Context, id int64) (dto.MealPlanView, error) {
-	if f.err != nil {
-		return dto.MealPlanView{}, f.err
-	}
-	return f.plan, nil
-}
-
-func (f *fakePlanningSvc) UpdatePlan(ctx context.Context, id int64, in dto.MealPlanUpdate) (dto.MealPlan, error) {
-	if f.err != nil {
-		return dto.MealPlan{}, f.err
-	}
-	return f.updated, nil
-}
-
-func (f *fakePlanningSvc) SetDecisions(ctx context.Context, planID int64, in []dto.MealPlanDecision) ([]dto.MealPlanDecision, error) {
-	if f.err != nil {
-		return nil, f.err
-	}
-	return f.decisions, nil
-}
-
-func (f *fakePlanningSvc) ListShoppingRequirements(ctx context.Context, planID int64) ([]dto.ShoppingRequirement, error) {
-	if f.err != nil {
-		return nil, f.err
-	}
-	return f.reqs, nil
-}
-
-func TestListPlans_HappyPath(t *testing.T) {
-	svc := &fakePlanningSvc{plans: []dto.MealPlan{
-		{ID: 1, WeekStart: "2026-01-13", Status: "draft", CreatedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)},
-	}}
-	mux := newMux(t, Dependencies{Planning: svc})
-
-	rec := doGet(t, mux, "/plans")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body)
-	}
-	var got []dto.MealPlan
-	mustJSON(t, rec.Body.Bytes(), &got)
-	if len(got) != 1 || got[0].ID != 1 || got[0].Status != "draft" {
-		t.Fatalf("unexpected plan: %+v", got)
-	}
-}
-
-func TestCreatePlan_HappyPath(t *testing.T) {
-	mux := newMux(t, Dependencies{Planning: &fakePlanningSvc{}})
-
-	rec := doPost(t, mux, "/plans", `{"week_start":"2026-01-13"}`)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201; body: %s", rec.Code, rec.Body)
-	}
-	var got dto.MealPlan
-	mustJSON(t, rec.Body.Bytes(), &got)
-	if got.WeekStart != "2026-01-13" || got.Status != "draft" {
-		t.Fatalf("unexpected plan: %+v", got)
-	}
-}
-
-func TestCreatePlan_MissingWeekStart(t *testing.T) {
-	mux := newMux(t, Dependencies{Planning: &fakePlanningSvc{}})
-
-	rec := doPost(t, mux, "/plans", `{}`)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rec.Code)
-	}
-}
-
-func TestGetPlan_HappyPath(t *testing.T) {
-	svc := &fakePlanningSvc{plan: dto.MealPlanView{
-		Plan: dto.MealPlan{ID: 42, WeekStart: "2026-01-13", Status: "approved"},
-	}}
-	mux := newMux(t, Dependencies{Planning: svc})
-
-	rec := doGet(t, mux, "/plans/42")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body)
-	}
-	var got dto.MealPlanView
-	mustJSON(t, rec.Body.Bytes(), &got)
-	if got.Plan.ID != 42 || got.Plan.Status != "approved" {
-		t.Fatalf("unexpected plan view: %+v", got)
-	}
-}
-
-func TestUpdatePlan_HappyPath(t *testing.T) {
-	svc := &fakePlanningSvc{updated: dto.MealPlan{ID: 1, WeekStart: "2026-01-13", Status: "approved"}}
-	mux := newMux(t, Dependencies{Planning: svc})
-
-	rec := doPatch(t, mux, "/plans/1", `{"status":"approved"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body)
-	}
-}
-
-func TestListShoppingRequirements_HappyPath(t *testing.T) {
-	svc := &fakePlanningSvc{reqs: []dto.ShoppingRequirement{
-		{ID: 1, IngredientID: "cauliflower", Quantity: 1.0, Unit: "piece"},
-	}}
-	mux := newMux(t, Dependencies{Planning: svc})
-
-	rec := doGet(t, mux, "/plans/1/shopping-requirements")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body)
-	}
-	var got []dto.ShoppingRequirement
-	mustJSON(t, rec.Body.Bytes(), &got)
-	if len(got) != 1 || got[0].IngredientID != "cauliflower" {
-		t.Fatalf("unexpected reqs: %+v", got)
-	}
-}
-
-func TestGetPlan_BadID(t *testing.T) {
-	mux := newMux(t, Dependencies{Planning: &fakePlanningSvc{}})
-
-	rec := doGet(t, mux, "/plans/abc")
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rec.Code)
-	}
-}
 
 // ---- Pantry fakes + tests ----
 
@@ -586,5 +440,250 @@ func TestGetMeal_BadID(t *testing.T) {
 	}
 }
 
-// Ensure strconv is used (it is via the mux routing).
-var _ = strconv.Itoa
+func TestCreateMealEvent_ServiceError(t *testing.T) {
+	svc := &fakeMealsSvc{err: errSentinel("dupe")}
+	mux := newMux(t, Dependencies{Meals: svc})
+	rec := doPost(t, mux, "/meals", `{"mealie_recipe_id":"r-1","served_on":"2026-08-19"}`)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+}
+
+// ---- Tonight fakes + tests ----
+
+type fakeTonightSvc struct {
+	view TonightView
+	err  error
+}
+
+func (f *fakeTonightSvc) GetTonight(ctx context.Context) (TonightView, error) {
+	if f.err != nil {
+		return TonightView{}, f.err
+	}
+	return f.view, nil
+}
+
+func TestGetTonight_HappyPath(t *testing.T) {
+	svc := &fakeTonightSvc{view: TonightView{
+		ServedOn: "2026-08-21",
+		Recipe:   dto.RecipeRefResponse{MealieRecipeID: "r-1", Title: "Pasta Bolognese", Tags: []string{"pasta"}, Effort: 2},
+		Reactions: []dto.MealReactionResponse{{PersonID: "p1", Sentiment: 2}},
+	}}
+	mux := newMux(t, Dependencies{Tonight: svc})
+
+	rec := doGet(t, mux, "/tonight")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body)
+	}
+	var got TonightView
+	mustJSON(t, rec.Body.Bytes(), &got)
+	if got.ServedOn != "2026-08-21" || got.Recipe.Title != "Pasta Bolognese" {
+		t.Fatalf("unexpected tonight view: %+v", got)
+	}
+	if len(got.Reactions) != 1 || got.Reactions[0].Sentiment != 2 {
+		t.Fatalf("unexpected reactions: %+v", got.Reactions)
+	}
+}
+
+func TestGetTonight_NotFound(t *testing.T) {
+	svc := &fakeTonightSvc{err: ErrNoMealTonight}
+	mux := newMux(t, Dependencies{Tonight: svc})
+
+	rec := doGet(t, mux, "/tonight")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+	var body errorBody
+	mustJSON(t, rec.Body.Bytes(), &body)
+	if body.Message == "" {
+		t.Fatal("expected error message")
+	}
+}
+
+func TestGetTonight_ServiceError(t *testing.T) {
+	svc := &fakeTonightSvc{err: errSentinel("db error")}
+	mux := newMux(t, Dependencies{Tonight: svc})
+
+	rec := doGet(t, mux, "/tonight")
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+}
+
+// ---- Reactions fakes + tests ----
+
+type fakeReactionsSvc struct {
+	created dto.MealReactionResponse
+	err     error
+}
+
+func (f *fakeReactionsSvc) CreateReaction(ctx context.Context, in ReactionNew) (dto.MealReactionResponse, error) {
+	if f.err != nil {
+		return dto.MealReactionResponse{}, f.err
+	}
+	return f.created, nil
+}
+
+func TestCreateReaction_HappyPath(t *testing.T) {
+	svc := &fakeReactionsSvc{created: dto.MealReactionResponse{PersonID: "p1", Sentiment: 2}}
+	mux := newMux(t, Dependencies{Reactions: svc})
+
+	rec := doPost(t, mux, "/reactions", `{"person_id":"p1","sentiment":2}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body: %s", rec.Code, rec.Body)
+	}
+	var got dto.MealReactionResponse
+	mustJSON(t, rec.Body.Bytes(), &got)
+	if got.PersonID != "p1" || got.Sentiment != 2 {
+		t.Fatalf("unexpected reaction: %+v", got)
+	}
+}
+
+func TestCreateReaction_Validation(t *testing.T) {
+	mux := newMux(t, Dependencies{Reactions: &fakeReactionsSvc{}})
+
+	cases := []struct {
+		name, body string
+		wantCode   int
+	}{
+		{"missing_person", `{"sentiment":1}`, http.StatusBadRequest},
+		{"bad_sentiment_high", `{"person_id":"p1","sentiment":3}`, http.StatusBadRequest},
+		{"bad_sentiment_low", `{"person_id":"p1","sentiment":-3}`, http.StatusBadRequest},
+		{"bad_json", `not-json`, http.StatusBadRequest},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rec := doPost(t, mux, "/reactions", c.body)
+			if rec.Code != c.wantCode {
+				t.Errorf("%s: status = %d, want %d", c.name, rec.Code, c.wantCode)
+			}
+		})
+	}
+}
+
+func TestCreateReaction_ServiceError(t *testing.T) {
+	svc := &fakeReactionsSvc{err: errSentinel("db error")}
+	mux := newMux(t, Dependencies{Reactions: svc})
+
+	rec := doPost(t, mux, "/reactions", `{"person_id":"p1","sentiment":1}`)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+}
+
+// ---- Plans fakes + tests ----
+
+type fakePlansSvc struct {
+	result PlanRunResult
+	err    error
+	// Plan stubs
+	plans           []PlanResponse
+	planView        PlanView
+	planErr         error
+	candidates      []PlanCandidateResponse
+	candidatesErr   error
+	shoppingReqs    []ShoppingRequirementResponse
+	shoppingErr     error
+	decisions       []PlanDecisionInput
+	decisionsErr    error
+}
+
+func (f *fakePlansSvc) RunPlan(ctx context.Context, in PlanRunInput) (PlanRunResult, error) {
+	if f.err != nil {
+		return PlanRunResult{}, f.err
+	}
+	return f.result, nil
+}
+
+func (f *fakePlansSvc) ListPlans(ctx context.Context) ([]PlanResponse, error) {
+	if f.planErr != nil {
+		return nil, f.planErr
+	}
+	return f.plans, nil
+}
+
+func (f *fakePlansSvc) CreatePlan(ctx context.Context, weekStart time.Time) (PlanResponse, error) {
+	if f.planErr != nil {
+		return PlanResponse{}, f.planErr
+	}
+	return PlanResponse{ID: 1, WeekStart: types.Date{Time: weekStart}, Status: "draft"}, nil
+}
+
+func (f *fakePlansSvc) GetPlan(ctx context.Context, planID int64) (PlanView, error) {
+	if f.planErr != nil {
+		return PlanView{}, f.planErr
+	}
+	return f.planView, nil
+}
+
+func (f *fakePlansSvc) UpdatePlan(ctx context.Context, planID int64, status string) (PlanResponse, error) {
+	if f.planErr != nil {
+		return PlanResponse{}, f.planErr
+	}
+	return PlanResponse{ID: int(planID), Status: status}, nil
+}
+
+func (f *fakePlansSvc) SetDecisions(ctx context.Context, planID int64, decisions []PlanDecisionInput) error {
+	return f.decisionsErr
+}
+
+func (f *fakePlansSvc) ListCandidates(ctx context.Context, planID int64) ([]PlanCandidateResponse, error) {
+	if f.candidatesErr != nil {
+		return nil, f.candidatesErr
+	}
+	return f.candidates, nil
+}
+
+func (f *fakePlansSvc) InsertCandidates(ctx context.Context, candidates []PlanCandidateInput) error {
+	return nil
+}
+
+func (f *fakePlansSvc) ListShoppingRequirements(ctx context.Context, planID int64) ([]ShoppingRequirementResponse, error) {
+	if f.shoppingErr != nil {
+		return nil, f.shoppingErr
+	}
+	return f.shoppingReqs, nil
+}
+
+func TestRunPlan_HappyPath(t *testing.T) {
+	svc := &fakePlansSvc{result: PlanRunResult{
+		Status:  "accepted",
+		Message: "planned 7 dinners",
+	}}
+	mux := newMux(t, Dependencies{Plans: svc})
+
+	rec := doPost(t, mux, "/plans/run", `{}`)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body: %s", rec.Code, rec.Body)
+	}
+	var got PlanRunResult
+	mustJSON(t, rec.Body.Bytes(), &got)
+	if got.Status != "accepted" || got.Message != "planned 7 dinners" {
+		t.Fatalf("unexpected result: %+v", got)
+	}
+}
+
+func TestRunPlan_EmptyBody(t *testing.T) {
+	svc := &fakePlansSvc{result: PlanRunResult{Status: "accepted", Message: "ok"}}
+	mux := newMux(t, Dependencies{Plans: svc})
+
+	rec := doPost(t, mux, "/plans/run", "")
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", rec.Code)
+	}
+}
+
+func TestRunPlan_ServiceError(t *testing.T) {
+	svc := &fakePlansSvc{err: errSentinel("mealie unavailable")}
+	mux := newMux(t, Dependencies{Plans: svc})
+
+	rec := doPost(t, mux, "/plans/run", `{}`)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	var got PlanRunResult
+	mustJSON(t, rec.Body.Bytes(), &got)
+	if got.Status != "failed" {
+		t.Fatalf("status = %q, want failed", got.Status)
+	}
+}

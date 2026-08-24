@@ -111,6 +111,18 @@ type PlanContext struct {
 	// recipe-availability capability. Empty map = no pantry data available
 	// (the pantry dimension scores 0).
 	PantryAvailability map[string]PantryStatus
+	// AvailabilityVerdicts maps a recipe's mealie_recipe_id to the
+	// availability verdict string ("feasible", "feasible-with-substitution",
+	// or "infeasible"). Populated by the caller once the availability
+	// capability has been evaluated; empty means no availability data is
+	// available and the scorer falls back to effort-only feasibility.
+	// Distinct from PantryAvailability (domain.PantryStatus-keyed): this is
+	// the internal/availability package's own string-verdict shape, used by
+	// scoring's hard-constraint feasibility() check. Reconciled 2026-08-25 -
+	// both are kept since they're populated and consumed by different call
+	// sites (see scoring.go: pantryScore reads PantryAvailability, feasibility
+	// reads AvailabilityVerdicts).
+	AvailabilityVerdicts map[string]string
 }
 
 // PantryStatus classifies whether a recipe can be made from the household's
@@ -145,15 +157,13 @@ type ShoppingRequirement struct {
 	PreferredForm   string
 }
 
-// Note: IngredientForm and IngredientSubstitution are NOT defined here.
-// Both were originally stubbed in this file (a simple string-enum
-// IngredientForm, a SubstitutionTier taxonomy) by a branch written before
-// establish-household-and-catalog's real versions existed - the stub's own
-// comments said as much ("owned by establish-household-and-catalog...
-// consumed read-only"). That owner has since landed in catalog.go with a
-// richer shape (IngredientForm as a struct with IngredientID/Form/Notes,
-// SubstitutionCategory with a Valid() method) - reconciled 2026-08-25 by
-// removing the stub in favor of catalog.go's real types rather than keeping
-// two incompatible definitions of the same concept. Anything consuming the
-// old stub shape (e.g. recipe-availability) needs updating to catalog.go's
-// types when merged.
+// Note: Household, Account, PersonRestriction, RestrictionKind, IngredientForm,
+// IngredientSubstitution(Category), Unit(Dimension/Conversion), Product(Kind),
+// and ProductIngredientMapping are NOT defined here. A branch written before
+// establish-household-and-catalog landed re-declared all of these locally in
+// this file; that owner has since landed richer, real versions in catalog.go
+// (IngredientForm/IngredientSubstitution/Unit*/Product*) and household.go
+// (Household/Account/PersonRestriction/RestrictionKind, both *string-typed
+// for optional actor fields) - reconciled 2026-08-25 by dropping the
+// duplicate block in favor of those real types rather than keeping two
+// incompatible definitions of the same concepts.

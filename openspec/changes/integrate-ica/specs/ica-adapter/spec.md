@@ -5,9 +5,9 @@
 ### Requirement: Adapter design and implementation are gated on ica-client stability
 
 The system SHALL NOT begin `ica-adapter` design or implementation work while
-`~/dev/willys/ica-client` is unstable (failing build, no passing tests, or unverified live
-auth), per the snapshot in `docs/research/ica-current-api.md` §5. Gate status SHALL be
-re-verified live before proceeding, not assumed from a prior snapshot.
+`/Users/andreas/dev/store-clients/ica-client` is unstable (failing build, no passing tests,
+or unverified live auth), per the snapshot in `docs/research/ica-current-api.md` §5. Gate
+status SHALL be re-verified live before proceeding, not assumed from a prior snapshot.
 
 #### Scenario: Stale readiness assumption is rejected
 

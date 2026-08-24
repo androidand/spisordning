@@ -46,6 +46,7 @@ services:
     environment:
       # food-brain reads postgres + homelab services from .env; see .env.example.
       DATABASE_URL: postgres://spisordning:${POSTGRES_PASSWORD}@postgres:5432/spisordning?sslmode=disable
+      TZ: Europe/Stockholm
       MEALIE_BASE_URL: ${MEALIE_BASE_URL:-http://hlab-mealie:9000}
       MEALIE_API_TOKEN: ${MEALIE_API_TOKEN:-}
       OLLA_OPENAI_BASE_URL: ${OLLA_OPENAI_BASE_URL:-}

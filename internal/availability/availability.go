@@ -1,503 +1,351 @@
-// Package availability determines whether a recipe can be made from a
-// household's current inventory, accounting for substitutions and ingredient
-// forms. It is a read-only consumer of pantry-inventory and ingredient-catalog
-// data — it never mutates inventory or substitutions.
-//
-// The core computation is pure: EvaluateRecipe takes pre-fetched domain data
-// and returns explainable per-line verdicts plus a recipe-level verdict. No
-// database access lives in this package (task 7.1).
 package availability
 
 import (
-	"slices"
+	"fmt"
 	"sort"
-	"time"
 
 	"github.com/androidand/spisordning/internal/domain"
 )
 
-// IngredientForm, SubstitutionTier, and IngredientSubstitution are
-// intentionally package-local rather than living in internal/domain: this
-// package predates and is not yet wired to any caller (reconciled 2026-08-25
-// alongside establish-household-and-catalog, which owns the real, differently
-// -shaped domain.IngredientForm/IngredientSubstitution - a persistence-row
-// struct and a string-keyed substitution, respectively, vs. the simple
-// comparable enum + ordered-tier walk this package's matching logic needs).
-// When this package gets a real caller, that caller is responsible for
-// converting catalog.go's persisted rows into these shapes - do not assume
-// the two are drop-in compatible.
-
-// IngredientForm is the simple preservation/preparation state used for
-// availability matching (fresh/dried/canned/frozen).
-type IngredientForm string
-
-const (
-	FormFresh  IngredientForm = "fresh"
-	FormDried  IngredientForm = "dried"
-	FormCanned IngredientForm = "canned"
-	FormFrozen IngredientForm = "frozen"
-)
-
-// SubstitutionTier is the preference category of an IngredientSubstitution,
-// walked in decreasing order: EQUIVALENT first, EMERGENCY last.
-type SubstitutionTier string
-
-const (
-	TierEquivalent SubstitutionTier = "EQUIVALENT"
-	TierGood       SubstitutionTier = "GOOD"
-	TierAcceptable SubstitutionTier = "ACCEPTABLE"
-	TierForm       SubstitutionTier = "FORM"
-	TierDietary    SubstitutionTier = "DIETARY"
-	TierEmergency  SubstitutionTier = "EMERGENCY"
-)
-
-// SubstitutionTierOrder returns the tiers in decreasing preference order,
-// for walking substitutions from best to worst.
-func SubstitutionTierOrder() []SubstitutionTier {
-	return []SubstitutionTier{
-		TierEquivalent, TierGood, TierAcceptable, TierForm, TierDietary, TierEmergency,
-	}
+// subTierOrder defines the preference ordering for substitution tiers.
+// EQUIVALENT is best (0); EMERGENCY is worst (5).
+var subTierOrder = map[domain.SubstitutionCategory]int{
+	domain.SubstitutionEquivalent: 0,
+	domain.SubstitutionGood:       1,
+	domain.SubstitutionAcceptable: 2,
+	domain.SubstitutionForm:       3,
+	domain.SubstitutionDietary:    4,
+	domain.SubstitutionEmergency:  5,
 }
 
-// IngredientSubstitution is a directional substitution from one ingredient to
-// another, with an explicit quantity ratio (to's quantity per from's
-// quantity). A nil FromForm/ToForm means "applies to any form." Retired rows
-// are kept so past recommendations remain explainable.
-type IngredientSubstitution struct {
-	ID               string
-	FromIngredientID string
-	FromForm         *IngredientForm
-	ToIngredientID   string
-	ToForm           *IngredientForm
-	Category         SubstitutionTier
-	Ratio            float64 // to_qty per from_qty
-	Retired          bool
-}
-
-// RecipeLine is one ingredient line from a recipe, enriched with form
-// preferences. IngredientID is the canonical ingredient id; PreferredForm and
-// AcceptableForms are the recipe's form hints (may be empty if the recipe
-// does not specify form preferences).
-type RecipeLine struct {
-	IngredientID    string
-	Quantity        float64
-	Unit            string
-	PreferredForm   *IngredientForm
-	AcceptableForms []IngredientForm
-}
-
-// LotInfo is the domain view of an inventory lot needed for availability
-// computation. Form is nil when unknown (no ingredient_mapping.default_form
-// or product-level form data was available). Confidence controls whether a
-// lot can silently satisfy a requirement (task 3.6).
-type LotInfo struct {
-	ID           int64
-	IngredientID string
-	ProductID    string
-	Quantity     float64
-	Unit         string
-	Confidence   domain.Confidence
-	BestBefore   *time.Time // nil = no date
-	Form         *IngredientForm
-}
-
-// LotAgg is the result of aggregating all matching lots for a single
-// ingredient line.
-type LotAgg struct {
-	TotalQuantity float64
-	LotIDs        []int64
-	WorstConf     domain.Confidence
-	NearExpiryIDs []int64
-}
-
-// IngredientVerdict is the result for a single recipe ingredient line.
-type IngredientVerdict struct {
-	IngredientID       string
-	Status             IngredientStatus
-	OnHandQuantity     float64 // quantity available (0 if missing)
-	RequiredQuantity   float64
-	Shortfall          float64 // required - available, 0 if satisfied
-	SubstitutionTier   *SubstitutionTier
-	SubstitutedFromID  string // original ingredient id (empty if on-hand)
-	Confidence         domain.Confidence
-	Reason             string // machine-readable explanation
-	ConsumedLotIDs     []int64
-	NearExpiryLotIDs   []int64
-}
-
-// IngredientStatus classifies one line's outcome.
-type IngredientStatus string
-
-const (
-	StatusOnHand            IngredientStatus = "on-hand"
-	StatusOnHandUncertain   IngredientStatus = "on-hand-uncertain"
-	StatusSubstituted       IngredientStatus = "substituted"
-	StatusMissing           IngredientStatus = "missing"
-)
-
-// RecipeVerdict is the aggregate result for a recipe.
-type RecipeVerdict struct {
-	RecipeID         string
-	Status           RecipeStatus
-	Lines            []IngredientVerdict
-	// ConsumedLotIDs are the unique lot ids the verdict would consume,
-	// ordered by first appearance. NearExpiryLotIDs is a deduplicated
-	// subset of those lots whose best-before date is within 7 days of now
-	// (set by the caller; zero Now means "do not surface expiry").
-	ConsumedLotIDs   []int64
-	NearExpiryLotIDs []int64
-}
-
-// RecipeStatus is the recipe-level tri-state verdict.
-type RecipeStatus string
-
-const (
-	RecipeFeasible          RecipeStatus = "feasible"
-	RecipeFeasibleWithSub   RecipeStatus = "feasible-with-substitution"
-	RecipeInfeasible        RecipeStatus = "infeasible"
-)
-
-// EvaluateInputs bundles the data EvaluateRecipe needs. The caller is
-// responsible for fetching lots and substitutions scoped to the household
-// and for enriching lots with form data (if available).
-type EvaluateInputs struct {
-	RecipeID      string
-	Lines         []RecipeLine
-	Lots          []LotInfo
-	Substitutions []IngredientSubstitution
-	Now           time.Time // for expiry checks; zero means "do not surface expiry"
-}
-
-// EvaluateRecipe computes per-ingredient and recipe-level feasibility. It is
-// pure: no I/O, no side effects.
-func EvaluateRecipe(inputs EvaluateInputs) RecipeVerdict {
-	var lines []IngredientVerdict
-	hasSubstitution := false
-	hasUncertain := false
-	hasMissing := false
-
-	for _, line := range inputs.Lines {
-		v := evaluateLine(line, inputs.Lots, inputs.Substitutions, inputs.Now)
-		lines = append(lines, v)
-		switch v.Status {
-		case StatusSubstituted:
-			hasSubstitution = true
-		case StatusOnHandUncertain:
-			hasUncertain = true
-		case StatusMissing:
-			hasMissing = true
-		}
+// ComputeRecipeAvailability determines feasibility for every ingredient line
+// of a recipe against the provided on-hand lots and substitution rules.
+//
+// It never mutates any input. Lots are consumed greedily in ID order (lowest
+// id first) so the same inputs always produce the same result.
+//
+// Partial-quantity policy: an on-hand quantity smaller than required counts as
+// unmet — the shortfall is recorded but the line is not partially satisfied.
+// This feeds implement-shopping-and-commerce' gap computation rather than
+// this capability's own verdict. When a substitution is found after partial
+// confident lots were considered, the partial lots are NOT consumed (the
+// substitution replaces the line); when no substitution is found, the partial
+// lots ARE consumed so they don't double-count for other lines.
+//
+// UNKNOWN-confidence lots are treated as satisfied but flagged (IsUncertain).
+// The recipe-level verdict elevates to feasible-with-substitution when any
+// line is uncertain, so the user sees that not everything is confidently on
+// hand. The same flagging applies when a substitution is backed by an
+// UNKNOWN-confidence lot.
+//
+// Confident and unknown lots are tried independently: if confident lots are
+// insufficient, the algorithm falls through to unknown lots (not straight to
+// missing), and substitution is attempted between both phases.
+func ComputeRecipeAvailability(recipeID string, lines []RecipeIngredientLine, lots []InventoryLotInput, subs []Substitution) RecipeVerdict {
+	v := RecipeVerdict{
+		RecipeID: recipeID,
+		Lines:    make([]LineVerdict, len(lines)),
 	}
 
-	status := computeRecipeStatus(hasMissing, hasSubstitution, hasUncertain)
+	subByIngredient := groupSubstitutions(subs)
 
-	// Deduplicate consumed and near-expiry lot ids at recipe level.
-	consumed := dedupInt64s(flattenInt64s(lines, func(v IngredientVerdict) []int64 { return v.ConsumedLotIDs }))
-	nearExpiry := dedupInt64s(flattenInt64s(lines, func(v IngredientVerdict) []int64 { return v.NearExpiryLotIDs }))
-
-	return RecipeVerdict{
-		RecipeID:         inputs.RecipeID,
-		Status:           status,
-		Lines:            lines,
-		ConsumedLotIDs:   consumed,
-		NearExpiryLotIDs: nearExpiry,
-	}
-}
-
-func computeRecipeStatus(hasMissing, hasSubstitution, hasUncertain bool) RecipeStatus {
-	if hasMissing {
-		return RecipeInfeasible
-	}
-	if hasSubstitution || hasUncertain {
-		return RecipeFeasibleWithSub
-	}
-	return RecipeFeasible
-}
-
-// evaluateLine computes the verdict for a single recipe ingredient line.
-// It first aggregates all on-hand lots (task 3.1 + multi-lot aggregation),
-// then falls through to the substitution walk for any residual shortfall
-// (task 3.3).
-func evaluateLine(line RecipeLine, lots []LotInfo, subs []IngredientSubstitution, now time.Time) IngredientVerdict {
-	v := IngredientVerdict{
-		IngredientID:     line.IngredientID,
-		RequiredQuantity: line.Quantity,
+	remaining := make(map[int64]float64)
+	for i := range lots {
+		remaining[lots[i].ID] = lots[i].Quantity
 	}
 
-	// Step 1: aggregate all on-hand lots matching this ingredient.
-	agg := aggregateDirectLots(line, lots, now)
-	if agg.TotalQuantity > 0 {
-		if agg.WorstConf == domain.ConfidenceUnknown {
-			v.Status = StatusOnHandUncertain
-			v.Confidence = domain.ConfidenceUnknown
-			v.Reason = "on-hand-uncertain"
-		} else {
-			v.Status = StatusOnHand
-			v.Confidence = agg.WorstConf
-			v.Reason = "on-hand"
-		}
-		v.OnHandQuantity = agg.TotalQuantity
-		v.ConsumedLotIDs = agg.LotIDs
-		v.NearExpiryLotIDs = agg.NearExpiryIDs
-		if agg.TotalQuantity < line.Quantity {
-			// Direct lots exist but are insufficient. Walk substitutions
-			// for the residual before declaring missing (minor fix from
-			// reviewer round 3).
-			residual := line.Quantity - agg.TotalQuantity
-			subResult, _, _ := walkSubstitutions(line, subs, lots, now, residual)
-			if subResult != nil {
-				// Substitution covers the residual.
-				v.Status = StatusSubstituted
-				v.SubstitutionTier = subResult.tier
-				v.SubstitutedFromID = line.IngredientID
-				v.OnHandQuantity = agg.TotalQuantity + subResult.available
-				v.Shortfall = 0
-				v.Reason = "on-hand-plus-substituted-" + string(*subResult.tier)
-				v.ConsumedLotIDs = append(v.ConsumedLotIDs, subResult.lotIDs...)
-				v.NearExpiryLotIDs = append(v.NearExpiryLotIDs, subResult.nearExpiry...)
-				if subResult.confidence == domain.ConfidenceUnknown {
-					v.Confidence = domain.ConfidenceUnknown
-					v.Reason += "-uncertain"
-				} else if v.Confidence != domain.ConfidenceUnknown {
-					v.Confidence = subResult.confidence
-				}
-				return v
-			}
-			// No substitution covers the residual.
-			v.Shortfall = line.Quantity - agg.TotalQuantity
-			v.Status = StatusMissing
-			v.Reason = "missing-shortfall"
-			return v
-		}
-		return v
+	lotConf := make(map[int64]domain.Confidence, len(lots))
+	for i := range lots {
+		lotConf[lots[i].ID] = lots[i].Confidence
 	}
 
-	// Step 2: no on-hand lots at all. Walk substitutions.
-	subResult, bestSubAvailable, bestSubNeeded := walkSubstitutions(line, subs, lots, now, line.Quantity)
-	if subResult != nil {
-		v.Status = StatusSubstituted
-		v.SubstitutionTier = subResult.tier
-		v.SubstitutedFromID = line.IngredientID
-		v.OnHandQuantity = subResult.available
-		v.Reason = "substituted-" + string(*subResult.tier)
-		v.ConsumedLotIDs = subResult.lotIDs
-		v.NearExpiryLotIDs = subResult.nearExpiry
-		v.Confidence = subResult.confidence
-		if subResult.confidence == domain.ConfidenceUnknown {
-			v.Reason += "-uncertain"
-		}
-		return v
+	for i := range lines {
+		v.Lines[i] = computeLine(lines[i], lots, subByIngredient, lotConf, remaining)
 	}
 
-	// Step 3: no match, no substitution.
-	v.Status = StatusMissing
-	v.Reason = "missing"
-		if bestSubAvailable > 0 {
-			v.Shortfall = bestSubNeeded - bestSubAvailable
-			v.OnHandQuantity = bestSubAvailable
-			v.Reason = "missing-shortfall"
-		}
+	v.Verdict = aggregateVerdict(v.Lines)
 	return v
 }
 
-// subResult holds the outcome of a substitution attempt.
-type subResult struct {
-	tier       *SubstitutionTier
-	available  float64
-	lotIDs     []int64
-	nearExpiry []int64
-	confidence domain.Confidence
+func computeLine(line RecipeIngredientLine, lots []InventoryLotInput, subByIngredient map[string][]Substitution, lotConf map[int64]domain.Confidence, remaining map[int64]float64) LineVerdict {
+	v := LineVerdict{
+		IngredientID: line.IngredientID,
+		Quantity:     line.Quantity,
+		Unit:         line.Unit,
+	}
+
+	cands := matchingLots(lots, remaining, line.IngredientID, line.Unit)
+
+	if len(cands) == 0 {
+		v.Shortfall = line.Quantity
+		v.Reason = fmt.Sprintf("no on-hand match for ingredient %q (unit=%q)", line.IngredientID, line.Unit)
+		v.Status = StatusMissing
+		return trySubstitutionCommit(v, line, subByIngredient, lots, lotConf, remaining)
+	}
+
+	// Separate confident from unknown-confidence candidates.
+	var confident, unknown []lotCandidate
+	for i := range cands {
+		c := &cands[i]
+		if c.l.Confidence == domain.ConfidenceUnknown {
+			unknown = append(unknown, *c)
+		} else {
+			confident = append(confident, *c)
+		}
+	}
+
+	confidentAvail := sumRemaining(confident, remaining)
+	unknownAvail := sumRemaining(unknown, remaining)
+	totalAvail := confidentAvail + unknownAvail
+
+	// Phase 1: Confident sufficient → on-hand.
+	if confidentAvail >= line.Quantity {
+		_, _, consumed := consumeFromLots(confident, line.Quantity, remaining)
+		v.Status = StatusOnHand
+		v.Reason = fmt.Sprintf("on-hand: %s %.2f %s", line.IngredientID, line.Quantity, line.Unit)
+		v.ConsumedLotIDs = consumed
+		return v
+	}
+
+	// Phase 2: Confident insufficient — try combining with unknown lots.
+	// Unknown lots are flagged (IsUncertain) so the user sees they're not
+	// confidently on hand. Prefer consuming from unknown lots first to
+	// preserve confident lots for other lines.
+	if totalAvail >= line.Quantity {
+		_, _, consumed := consumeFromCombined(confident, unknown, line.Quantity, remaining)
+		v.Status = StatusUnknown
+		v.Reason = fmt.Sprintf("on-hand (uncertain confidence): %s %.2f %s", line.IngredientID, line.Quantity, line.Unit)
+		v.IsUncertain = true
+		v.ConsumedLotIDs = consumed
+		return v
+	}
+
+	// Phase 3: Confident + unknown insufficient. Try substitution without
+	// consuming partial lots (substitution replaces the line).
+	if result := trySubstitutionSnapshot(v, line, subByIngredient, lots, lotConf, remaining); result.succeeded {
+		// Re-apply the consumption on the real remaining (snapshot was read-only).
+		subCands := matchingLots(lots, remaining, result.toIngredient, line.Unit)
+		_, _, consumed := consumeFromLots(subCands, result.needed, remaining)
+		result.verdict.ConsumedLotIDs = consumed
+		return result.verdict
+	}
+
+	// Phase 4: Nothing works. Consume partial lots so they don't double-count
+	// for subsequent lines.
+	consumeFromLots(confident, line.Quantity, remaining)
+	consumeFromLots(unknown, line.Quantity, remaining)
+	v.Shortfall = line.Quantity - totalAvail
+	v.Reason = fmt.Sprintf("insufficient on-hand: have %.2f %s, need %.2f %s (short %.2f) — no viable substitute",
+		totalAvail, line.Unit, line.Quantity, line.Unit, v.Shortfall)
+	v.Status = StatusMissing
+	return v
 }
 
-// walkSubstitutions walks all substitutions for the given line and returns
-// the first one that fully covers `needed`, or (nil, bestAvailable) if
-// none do. bestAvailable holds the max quantity found across all failed
-// attempts so the caller can surface a shortfall.
-func walkSubstitutions(line RecipeLine, subs []IngredientSubstitution, lots []LotInfo, now time.Time, needed float64) (*subResult, float64, float64) {
-	var bestAvailable float64
-	var bestNeeded float64
-	for _, tier := range SubstitutionTierOrder() {
-		for _, sub := range subs {
-			if sub.Retired {
-				continue
-			}
-			if sub.FromIngredientID != line.IngredientID {
-				continue
-			}
-			if sub.Category != tier {
-				continue
-			}
-			// Check form constraints on the source side.
-			if sub.FromForm != nil && line.PreferredForm != nil && *sub.FromForm != *line.PreferredForm {
-				continue
-			}
-			// Find and aggregate lots of the target ingredient, enforcing
-			// the target form if the substitution specifies one.
-			// Convert needed to target units using the substitution ratio.
-			neededInTarget := needed * sub.Ratio
-			subLine := RecipeLine{
-				IngredientID:  sub.ToIngredientID,
-				Quantity:      neededInTarget,
-				Unit:          line.Unit,
-				PreferredForm: sub.ToForm,
-			}
-			subAgg := aggregateDirectLots(subLine, lots, now)
-			if subAgg.TotalQuantity == 0 {
-				continue
-			}
-			if subAgg.TotalQuantity >= neededInTarget {
-				// Full coverage at this tier — take it.
-				r := &subResult{
-					tier:       &tier,
-					available:  subAgg.TotalQuantity,
-					lotIDs:     subAgg.LotIDs,
-					nearExpiry: subAgg.NearExpiryIDs,
-					confidence: subAgg.WorstConf,
-				}
-				return r, bestAvailable, bestNeeded
-			}
-			// Insufficient at this tier — track the best available and
-			// keep walking.
-			if subAgg.TotalQuantity > bestAvailable {
-				bestAvailable = subAgg.TotalQuantity
-				bestNeeded = neededInTarget
-			}
-		}
+// consumeFromCombined greedily consumes from unknown lots first, then confident
+// lots, to satisfy needed. Unknown lots are consumed first because they're
+// uncertain anyway; preserving confident lots maximises options for other lines.
+func consumeFromCombined(confident, unknown []lotCandidate, needed float64, remaining map[int64]float64) (bool, float64, []int64) {
+	if needed <= 0 {
+		return true, 0, nil
 	}
-	return nil, bestAvailable, bestNeeded
+	// Try unknown first (preserve confident lots for other lines).
+	ok, shortfall, consumed := consumeFromLots(unknown, needed, remaining)
+	if ok {
+		return true, 0, consumed
+	}
+	// Unknown insufficient — try confident for the remainder.
+	_, _, confidentConsumed := consumeFromLots(confident, shortfall, remaining)
+	return false, shortfall, append(consumed, confidentConsumed...)
 }
 
-// aggregateDirectLots returns all lots matching the given line's ingredient
-// and form constraints, summed into a LotAgg. Matching is by ingredient_id
-// (task 3.1); form constraints from PreferredForm and AcceptableForms are
-// applied (task 3.2); lots with quantity <= 0 are excluded.
-func aggregateDirectLots(line RecipeLine, lots []LotInfo, now time.Time) LotAgg {
-	var total float64
-	var ids []int64
-	var nearExpiry []int64
-	// Start at highest confidence so any real lot will update it.
-	var worstConf domain.Confidence = domain.ConfidenceExact
-
-	for _, lot := range lots {
-		if lot.IngredientID != line.IngredientID {
-			continue
-		}
-		if lot.Quantity <= 0 {
-			continue
-		}
-		// Form check: if the recipe has a preferred form and the lot has a
-		// different known form, this lot is not a direct match (task 3.2).
-		if line.PreferredForm != nil && lot.Form != nil && *lot.Form != *line.PreferredForm {
-			if !slices.Contains(line.AcceptableForms, *lot.Form) {
-				continue
-			}
-		}
-		total += lot.Quantity
-		ids = append(ids, lot.ID)
-		if confidenceRank(lot.Confidence) < confidenceRank(worstConf) {
-			worstConf = lot.Confidence
-		}
-		if !now.IsZero() && lot.BestBefore != nil {
-			days := lot.BestBefore.Sub(now).Hours() / 24
-			if days >= 0 && days <= 7 {
-				nearExpiry = append(nearExpiry, lot.ID)
-			}
-		}
-	}
-
-	return LotAgg{
-		TotalQuantity: total,
-		LotIDs:        ids,
-		WorstConf:     worstConf,
-		NearExpiryIDs: nearExpiry,
-	}
+// subAttempt holds the result of a read-only substitution attempt.
+type subAttempt struct {
+	verdict      LineVerdict
+	succeeded    bool
+	toIngredient string
+	ratio        float64
+	needed       float64
+	shortfall    float64
 }
 
-// findBestDirectLot returns the single best matching lot for a recipe line.
-// "Best" means: matching ingredient, preferred form first, then highest
-// confidence, then earliest best-before. Quantity sufficiency is checked
-// by the caller (task 3.5). Kept for potential future single-lot use cases.
-func findBestDirectLot(line RecipeLine, lots []LotInfo) *LotInfo {
-	var candidates []int
-	for i, lot := range lots {
-		if lot.IngredientID != line.IngredientID {
-			continue
-		}
-		if lot.Quantity <= 0 {
-			continue
-		}
-		if line.PreferredForm != nil && lot.Form != nil && *lot.Form != *line.PreferredForm {
-			if !slices.Contains(line.AcceptableForms, *lot.Form) {
-				continue
-			}
-		}
-		candidates = append(candidates, i)
+// trySubstitutionSnapshot tries all substitutions without mutating the
+// remaining map. Returns a subAttempt indicating whether any substitution
+// succeeded. The caller must re-apply consumption on the real remaining on
+// success (since the snapshot was read-only).
+func trySubstitutionSnapshot(v LineVerdict, line RecipeIngredientLine, subByIngredient map[string][]Substitution, lots []InventoryLotInput, lotConf map[int64]domain.Confidence, remaining map[int64]float64) subAttempt {
+	subs := subByIngredient[line.IngredientID]
+	if len(subs) == 0 {
+		v.Reason = fmt.Sprintf("no substitute for ingredient %q (unit=%q)", line.IngredientID, line.Unit)
+		return subAttempt{verdict: v}
 	}
-	if len(candidates) == 0 {
-		return nil
-	}
-	sort.SliceStable(candidates, func(a, b int) bool {
-		la, lb := lots[candidates[a]], lots[candidates[b]]
-		laPref, lbPref := formMatchesPreferred(la.Form, line.PreferredForm), formMatchesPreferred(lb.Form, line.PreferredForm)
-		if laPref != lbPref {
-			return laPref
+
+	// Sort by tier preference: EQUIVALENT (0) first, EMERGENCY (5) last.
+	// Secondary sort by ToIngredientID for deterministic tie-breaking within
+	// the same tier.
+	sort.Slice(subs, func(i, j int) bool {
+		oi, oj := subTierOrder[subs[i].Category], subTierOrder[subs[j].Category]
+		if oi != oj {
+			return oi < oj
 		}
-		if la.Confidence != lb.Confidence {
-			return confidenceRank(la.Confidence) > confidenceRank(lb.Confidence)
-		}
-		if la.BestBefore != nil && lb.BestBefore != nil {
-			return la.BestBefore.Before(*lb.BestBefore)
-		}
-		if la.BestBefore != nil {
-			return true
-		}
-		if lb.BestBefore != nil {
-			return false
-		}
-		return false
+		return subs[i].ToIngredientID < subs[j].ToIngredientID
 	})
-	return &lots[candidates[0]]
-}
 
-func formMatchesPreferred(lotForm *IngredientForm, preferred *IngredientForm) bool {
-	if preferred == nil || lotForm == nil {
-		return true
+	// Work on a copy so the original remaining is never mutated.
+	snap := make(map[int64]float64, len(remaining))
+	for k, val := range remaining {
+		snap[k] = val
 	}
-	return *lotForm == *preferred
-}
 
-func confidenceRank(c domain.Confidence) int {
-	switch c {
-	case domain.ConfidenceExact:
-		return 4
-	case domain.ConfidenceLikely:
-		return 3
-	case domain.ConfidenceEstimated:
-		return 2
-	case domain.ConfidenceUnknown:
-		return 1
-	default:
-		return 0
-	}
-}
-
-func dedupInt64s(ids []int64) []int64 {
-	seen := make(map[int64]struct{})
-	var out []int64
-	for _, id := range ids {
-		if _, ok := seen[id]; ok {
+	for _, sub := range subs {
+		// Form filter: if the recipe line specifies a default_form, only
+		// consider substitutions whose from_form matches (or is nil = any form).
+		if line.DefaultForm != "" && sub.FromForm != nil && *sub.FromForm != line.DefaultForm {
 			continue
 		}
-		seen[id] = struct{}{}
-		out = append(out, id)
+
+		needed := line.Quantity * sub.Ratio
+		if needed <= 0 {
+			continue
+		}
+
+		cands := matchingLots(lots, snap, sub.ToIngredientID, line.Unit)
+		ok, shortfall, consumed := consumeFromLots(cands, needed, snap)
+		if !ok {
+			v.Shortfall = shortfall
+			continue
+		}
+
+		v.Status = StatusSubstituted
+		v.Reason = fmt.Sprintf("substituted %s→%s via %s (ratio %.2f): %s %.2f %s",
+			line.IngredientID, sub.ToIngredientID, sub.Category, sub.Ratio,
+			sub.ToIngredientID, line.Quantity, line.Unit)
+		v.SubstitutedFromIngredient = line.IngredientID
+		v.SubstitutedToIngredient = sub.ToIngredientID
+		v.SubstitutionTier = string(sub.Category)
+		v.Shortfall = 0
+		v.ConsumedLotIDs = consumed
+
+		// Flag uncertainty when the substitute is backed by an UNKNOWN-confidence
+		// lot. The spec requires that UNKNOWN confidence is never silently trusted.
+		for _, lid := range consumed {
+			if lotConf[lid] == domain.ConfidenceUnknown {
+				v.IsUncertain = true
+				break
+			}
+		}
+
+		return subAttempt{
+			verdict:      v,
+			succeeded:    true,
+			toIngredient: sub.ToIngredientID,
+			ratio:        sub.Ratio,
+			needed:       needed,
+		}
+	}
+
+	v.Reason = fmt.Sprintf("no viable substitute for ingredient %q (unit=%q)", line.IngredientID, line.Unit)
+	return subAttempt{verdict: v}
+}
+
+// trySubstitutionCommit applies trySubstitutionSnapshot and, on success,
+// commits the consumed substitute lots to the real remaining map.
+func trySubstitutionCommit(v LineVerdict, line RecipeIngredientLine, subByIngredient map[string][]Substitution, lots []InventoryLotInput, lotConf map[int64]domain.Confidence, remaining map[int64]float64) LineVerdict {
+	result := trySubstitutionSnapshot(v, line, subByIngredient, lots, lotConf, remaining)
+	if !result.succeeded {
+		return result.verdict
+	}
+	subCands := matchingLots(lots, remaining, result.toIngredient, line.Unit)
+	_, _, consumed := consumeFromLots(subCands, result.needed, remaining)
+	result.verdict.ConsumedLotIDs = consumed
+	return result.verdict
+}
+
+func matchingLots(lots []InventoryLotInput, remaining map[int64]float64, ingredientID, unit string) []lotCandidate {
+	var out []lotCandidate
+	for i := range lots {
+		l := &lots[i]
+		if l.IngredientID != ingredientID || l.Unit != unit {
+			continue
+		}
+		r := remaining[l.ID]
+		if r <= 0 {
+			continue
+		}
+		out = append(out, lotCandidate{l: *l, remaining: r})
+	}
+	// Deterministic order: lowest lot ID first.
+	sort.Slice(out, func(i, j int) bool { return out[i].l.ID < out[j].l.ID })
+	return out
+}
+
+func sumRemaining(cands []lotCandidate, remaining map[int64]float64) float64 {
+	total := 0.0
+	for i := range cands {
+		total += remaining[cands[i].l.ID]
+	}
+	return total
+}
+
+// consumeFromLots greedily consumes from the (already sorted by ID) candidates.
+// It mutates remaining to reflect the consumption. Returns (fullyConsumed,
+// shortfall, consumedLotIDs). shortfall > 0 means the requested amount could
+// not be fully met.
+func consumeFromLots(cands []lotCandidate, needed float64, remaining map[int64]float64) (bool, float64, []int64) {
+	if needed <= 0 {
+		return true, 0, nil
+	}
+	var consumed []int64
+	remainingNeeded := needed
+	for i := range cands {
+		c := &cands[i]
+		if remainingNeeded <= 0 {
+			break
+		}
+		avail := remaining[c.l.ID]
+		if avail <= 0 {
+			continue
+		}
+		take := avail
+		if take > remainingNeeded {
+			take = remainingNeeded
+		}
+		remaining[c.l.ID] -= take
+		remainingNeeded -= take
+		consumed = append(consumed, c.l.ID)
+	}
+	if remainingNeeded <= 0 {
+		return true, 0, consumed
+	}
+	return false, remainingNeeded, consumed
+}
+
+func groupSubstitutions(subs []Substitution) map[string][]Substitution {
+	out := make(map[string][]Substitution)
+	for i := range subs {
+		s := &subs[i]
+		out[s.FromIngredientID] = append(out[s.FromIngredientID], *s)
 	}
 	return out
 }
 
-func flattenInt64s[T any](items []T, fn func(T) []int64) []int64 {
-	var out []int64
-	for _, item := range items {
-		out = append(out, fn(item)...)
+func aggregateVerdict(lines []LineVerdict) RecipeVerdictLevel {
+	hasSubOrUncertain := false
+	for i := range lines {
+		l := &lines[i]
+		switch l.Status {
+		case StatusMissing:
+			return VerdictInfeasible
+		case StatusSubstituted, StatusUnknown:
+			hasSubOrUncertain = true
+		}
 	}
-	return out
+	if hasSubOrUncertain {
+		return VerdictFeasibleWithSub
+	}
+	return VerdictFeasible
+}
+
+type lotCandidate struct {
+	l         InventoryLotInput
+	remaining float64
 }

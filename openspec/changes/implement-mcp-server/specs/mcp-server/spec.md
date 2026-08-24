@@ -26,13 +26,13 @@ SHALL additionally support the stdio transport for local/subprocess use.
 
 ### Requirement: MCP tools never execute raw SQL
 
-MCP tools SHALL only call application-layer functions to read or mutate Spisordning state. MCP
-tools SHALL NOT execute raw SQL or call persistence-layer code directly.
+MCP tools SHALL only call `internal/httpapi` service interfaces to read or mutate Spisordning
+state. MCP tools SHALL NOT execute raw SQL or call persistence-layer code directly.
 
 #### Scenario: A tool call is satisfied entirely through the application layer
 
 - **WHEN** an MCP tool (e.g. "record a meal reaction") is invoked
-- **THEN** the tool implementation calls an `internal/application` function
+- **THEN** the tool implementation calls an `internal/httpapi` service interface
 - **AND** no SQL statement is constructed or executed within the tool implementation itself
 
 #### Scenario: A hypothetical raw-SQL tool is rejected at review/lint time
@@ -50,7 +50,7 @@ as these are deprecated in the 2026-07-28 specification.
 
 #### Scenario: Core tool functionality works without deprecated capabilities
 
-- **WHEN** the initial tool set (list recipe candidates, record a meal reaction, get shopping
-  requirements for a plan) is exercised by a client that does not implement `roots`, `sampling`,
+- **WHEN** the initial tool set (list recipes, record a meal reaction, get tonight's meal,
+  list people) is exercised by a client that does not implement `roots`, `sampling`,
   or `logging`
-- **THEN** all three tools function correctly
+- **THEN** all four tools function correctly

@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/androidand/spisordning/internal/availability"
 	"github.com/androidand/spisordning/internal/domain"
 )
 
@@ -773,5 +774,111 @@ func TestSelectBatch_NoFeasibleFavoriteOrNovel(t *testing.T) {
 	// Top-ranked infeasible should be returned (1-slot batch, no alternative).
 	if !batch[0].Feasible {
 		t.Logf("batch contains infeasible candidate %s (expected — no feasible alternative)", batch[0].Candidate.MealieRecipeID)
+	}
+}
+
+// --- 5.2: Pantry availability wiring ---
+
+func TestFeasibility_AvailabilityInfeasible(t *testing.T) {
+	// A recipe that the availability capability reports as infeasible
+	// should be ruled out by the scorer regardless of effort.
+	c := domain.Candidate{MealieRecipeID: "r-missing", Effort: domain.EffortLow}
+	ctx := baseCtx()
+	ctx.AvailabilityVerdicts = map[string]string{
+		"r-missing": string(availability.VerdictInfeasible),
+	}
+	got := score(c, ctx, DefaultWeights())
+	if got.Feasible {
+		t.Errorf("candidate should be infeasible when pantry availability is infeasible")
+	}
+	if got.Reason == "" {
+		t.Error("reason should not be empty for infeasible candidate")
+	}
+}
+
+func TestFeasibility_AvailabilityFeasibleDoesNotBlock(t *testing.T) {
+	// An availability verdict of "feasible" or "feasible-with-substitution"
+	// should not prevent the candidate from being feasible.
+	c := domain.Candidate{MealieRecipeID: "r-ok", Effort: domain.EffortLow}
+	ctx := baseCtx()
+	ctx.AvailabilityVerdicts = map[string]string{
+		"r-ok": string(availability.VerdictFeasibleWithSub),
+	}
+	got := score(c, ctx, DefaultWeights())
+	if !got.Feasible {
+		t.Errorf("candidate should be feasible when pantry availability is feasible-with-substitution")
+	}
+}
+
+func TestFeasibility_MissingAvailabilityIsIgnored(t *testing.T) {
+	// When no availability data is provided, the scorer falls back to
+	// effort-only feasibility (backward compatibility).
+	c := domain.Candidate{MealieRecipeID: "r-no-data", Effort: domain.EffortLow}
+	ctx := baseCtx()
+	// AvailabilityVerdicts is nil — no data provided.
+	got := score(c, ctx, DefaultWeights())
+	if !got.Feasible {
+		t.Errorf("candidate should be feasible when no availability data is present")
+	}
+}
+
+func TestFeasibility_EffortAndAvailabilityBothBlock(t *testing.T) {
+	// When both effort and availability block, the reason should mention
+	// both constraints.
+	c := domain.Candidate{MealieRecipeID: "r-hard", Effort: domain.EffortHigh}
+	ctx := baseCtx()
+	ctx.KitchenEnergy = domain.EffortLow
+	ctx.AvailabilityVerdicts = map[string]string{
+		"r-hard": string(availability.VerdictInfeasible),
+	}
+	got := score(c, ctx, DefaultWeights())
+	if got.Feasible {
+		t.Errorf("candidate should be infeasible when both effort and availability block")
+	}
+	if got.Reason == "" {
+		t.Error("reason should mention both constraints")
+	}
+}
+
+func TestRank_AvailabilityInfeasibleRanksLast(t *testing.T) {
+	// An infeasible recipe should rank below feasible ones, even if it
+	// has a high preference score.
+	candidates := []domain.Candidate{
+		{MealieRecipeID: "r-fav", Tags: []string{"pasta"}, Effort: domain.EffortLow},
+		{MealieRecipeID: "r-missing", Tags: []string{"saffron"}, Effort: domain.EffortLow},
+	}
+	ctx := baseCtx()
+	ctx.Preferences = []domain.Preference{
+		{PersonID: "kid", Tag: "saffron", Sentiment: domain.Loves, Confidence: 1.0},
+	}
+	ctx.AvailabilityVerdicts = map[string]string{
+		"r-missing": string(availability.VerdictInfeasible),
+	}
+	ranked := Rank(candidates, ctx, DefaultWeights())
+	if len(ranked) != 2 {
+		t.Fatalf("expected 2 ranked candidates, got %d", len(ranked))
+	}
+	if ranked[0].Candidate.MealieRecipeID != "r-fav" {
+		t.Errorf("top candidate = %q, want r-fav (r-missing is infeasible)", ranked[0].Candidate.MealieRecipeID)
+	}
+	if ranked[1].Candidate.MealieRecipeID != "r-missing" {
+		t.Errorf("bottom candidate = %q, want r-missing", ranked[1].Candidate.MealieRecipeID)
+	}
+	if ranked[1].Feasible {
+		t.Errorf("r-missing should be infeasible")
+	}
+}
+
+func TestFeasibility_AvailabilityFeasibleWithSubStillFeasible(t *testing.T) {
+	// "feasible-with-substitution" is NOT a hard block — the recipe can
+	// still be made, just with a substitute.
+	c := domain.Candidate{MealieRecipeID: "r-sub", Effort: domain.EffortLow}
+	ctx := baseCtx()
+	ctx.AvailabilityVerdicts = map[string]string{
+		"r-sub": string(availability.VerdictFeasibleWithSub),
+	}
+	got := score(c, ctx, DefaultWeights())
+	if !got.Feasible {
+		t.Errorf("candidate should be feasible when availability is feasible-with-substitution")
 	}
 }

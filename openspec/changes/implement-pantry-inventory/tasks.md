@@ -79,7 +79,12 @@
       when `source == "shopping_order"` and `productID == ""`.
 - [x] 4.5 Implement `RefineLotProduct(lotId, productId, source)`: attaches a specific `Product`
       to an existing ingredient-only lot without changing quantity, location, or confidence
-      (`design.md` D8) — `Store.RefineLotProduct`.
+      (`design.md` D8) — `Store.RefineLotProduct`. Note: the `source` param from design Step 5's
+      signature was dropped at implementation; the method signature is `RefineLotProduct(lotID,
+      productID)` (no source). This is a minor design-gap — the `source` field on `inventory_event`
+      does not apply here since `RefineLotProduct` does not write an event. If auditing of
+      product-refinement events becomes necessary, a future migration can add a `refined_by` or
+      `source` column to `inventory_lot`, or a new event kind can be introduced.
 - [x] 4.6 Implement `ListCandidateProductsForIngredient(ingredientId, query?)`:
       `ProductIngredientMapping` matches first, name-match fallback against
       `Ingredient.display` — powers the `RefineLotProduct` picker, never an unscoped catalog

@@ -82,22 +82,36 @@
       shopping requirements (implement-shopping-and-commerce). No input is silently dropped — each
       deferred input has a named owning change)
 - [x] 5.2 Wire pantry availability, expiry, and substitutions once `implement-recipe-
-      availability` / `implement-pantry-inventory` land — wired: added `PantryStatus` (feasible /
-      feasible-with-substitution / infeasible) to `domain.PlanContext` as `PantryAvailability
-      map[string]PantryStatus`; added `Pantry` to `Weights` (default 0.5) and `Breakdown`; added
-      `pantryScore()` returning [0,1] (1.0/0.6/0.0); added `PantryStatus` to `ScoredCandidate`;
-      pantry is a soft score (never a hard constraint); 10 new tests.
+      availability` / `implement-pantry-inventory` land — wired via two complementary paths,
+      reconciled 2026-08-25: (1) `PantryStatus` (feasible / feasible-with-substitution /
+      infeasible) on `domain.PlanContext` as `PantryAvailability map[string]PantryStatus`, feeding
+      a soft `Pantry` scoring dimension (`Weights.Pantry` default 0.5, `pantryScore()` returning
+      1.0/0.6/0.0, surfaced on `ScoredCandidate.PantryStatus`); (2) `AvailabilityVerdicts
+      map[string]string` on `domain.PlanContext`, feeding `scoring.feasibility()`'s hard gate
+      (rejects a candidate with reason "ingredients not available in pantry" when the verdict is
+      `infeasible`; verdict strings match `availability.VerdictFeasible`/
+      `VerdictFeasibleWithSub`/`VerdictInfeasible`). Pantry is never a hard constraint on its own
+      (soft score only); infeasible availability is the hard gate. Expiry and substitutions are
+      surfaced through the availability verdict's per-line `Reason`/`ConsumedLotIDs` fields. 16
+      new tests across both paths.
 - [x] 5.3 Wire allergies as a hard filter — never a scored, negotiable dimension — once
-      `establish-household-and-catalog`'s `PersonRestriction` model lands — **DEFERRED** (out of
-      scope here; the restriction model does not exist yet. Will be wired by
-      establish-household-and-catalog once PersonRestriction lands.)
+      `establish-household-and-catalog`'s `PersonRestriction` model lands. **Deferred this
+      pass:** the `PersonRestriction` model does not exist yet; it will be defined by
+      `establish-household-and-catalog`. When it lands, the scorer's `feasibility()`
+      function should be extended to reject candidates whose tags match a person's hard
+      allergy restriction. No scoring change is needed — a hard filter, not a dimension.
 - [x] 5.4 Wire ratings/favorites once `implement-meals-and-preferences`'s `MealReview`/
-      `Favorite` model lands — **DEFERRED** (out of scope here; the review/favorite model does
-      not exist yet. Will be wired by implement-meals-and-preferences once MealReview/Favorite
-      lands.)
-- [x] 5.5 Wire price once a future price-intelligence capability exists — **DEFERRED** (later
-      epic; no price-intelligence capability exists yet. Will be wired by the price-intelligence
-      change when it lands.)
+      `Favorite` model lands. **Deferred this pass:** the `MealReview`/`Favorite` model does
+      not exist yet; it will be defined by `implement-meals-and-preferences`. When it lands,
+      the familiarity score can be augmented with explicit favorite signals (e.g. a favorite
+      recipe gets a small bonus beyond just cook frequency). The current `IsKnownFavorite`
+      rule (preference + cookCount >= 2) already captures the spirit; the future model just
+      makes the signal more explicit.
+- [x] 5.5 Wire price once a future price-intelligence capability exists. **Deferred this
+      pass:** no price-intelligence capability exists yet (the `implement-price-intelligence`
+      change lays the schema and persistence but does not wire price into the scorer). When
+      price data becomes available, the `Weights` struct can gain a `Price` field and the
+      scorer can add a `priceScore` dimension. This is a later-epic dependency.
 
 ## 6. Never merely an LLM response
 
