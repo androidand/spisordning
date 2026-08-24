@@ -1,19 +1,14 @@
 package httpapi
 
 import (
-	"context"
 	"net/http"
+
+	"github.com/androidand/spisordning/internal/dto"
 )
 
-// StoresService is the surface the /stores and /products handlers need.
-type StoresService interface {
-	SearchProducts(ctx context.Context, query string) ([]IngredientProduct, error)
-	SearchProductsByGTIN(ctx context.Context, gtin string) ([]IngredientProduct, error)
-}
-
-// storesHandler handles /stores and /products routes.
+// storesHandler handles /products routes.
 type storesHandler struct {
-	svc StoresService
+	svc dto.StoresService
 }
 
 func (h *storesHandler) searchProducts(w http.ResponseWriter, r *http.Request) {

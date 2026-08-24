@@ -8,14 +8,11 @@ package httpapi
 import (
 	"encoding/json"
 	"net/http"
-)
 
-// Health is the response body for GET /health (matches api/openapi.yaml).
-type Health struct {
-	Status string `json:"status"`
-}
+	"github.com/androidand/spisordning/internal/dto"
+)
 
 func healthHandler(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(Health{Status: "ok"})
+	_ = json.NewEncoder(w).Encode(dto.Health{Status: "ok"})
 }

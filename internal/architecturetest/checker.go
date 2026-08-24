@@ -7,13 +7,13 @@
 // Layers:
 //
 //	domain       internal/domain, internal/recipefamily, internal/scoring,
-//	             internal/ingredients, internal/openapi, internal/ambient,
-//	             internal/availability                — pure, no I/O
+//	             internal/openapi, internal/ambient, internal/availability
 //	application  internal/planning                                — use-case logic
-//	service      internal/service                                 — app services
+//	service      internal/service, internal/mcp                   — app services
+//	contract     internal/dto                                     — shared DTOs + service interfaces
 //	client       internal/mealie, internal/skolmaten, internal/retailer,
 //	             internal/llm, internal/httpclient, internal/recipeimport,
-//	             internal/matpriskollen
+//	             internal/matpriskollen, internal/ingredients
 //	persistence  internal/persistence                      — Postgres repos
 //	httpapi      internal/httpapi                          — HTTP handlers
 //	cmd          cmd/...                                   — composition root
@@ -42,6 +42,7 @@ const (
 	Test        Layer = "test"
 	External    Layer = "external"
 	Service     Layer = "service"
+	Contract    Layer = "contract"
 	Unknown     Layer = "unknown"
 )
 
@@ -56,6 +57,7 @@ var layerPrefixes = []prefix{
 	{Domain, []string{"internal/domain", "internal/recipefamily", "internal/scoring", "internal/openapi", "internal/ambient", "internal/availability"}},
 	{Application, []string{"internal/planning"}},
 	{Service, []string{"internal/service", "internal/mcp"}},
+	{Contract, []string{"internal/dto"}},
 	{Client, []string{
 		"internal/mealie",
 		"internal/skolmaten",
@@ -106,8 +108,11 @@ var rules = []rule{
 	{"application must not import clients, service, persistence, httpapi, or cmd", func(f, t Layer) bool {
 		return f == Application && (t == Client || t == Service || t == Persistence || t == HTTPAPI || t == Cmd || t == Unknown)
 	}},
-	{"service must not import cmd", func(f, t Layer) bool {
-		return f == Service && (t == Cmd || t == Unknown)
+	{"service must not import httpapi or cmd", func(f, t Layer) bool {
+		return f == Service && (t == HTTPAPI || t == Cmd || t == Unknown)
+	}},
+	{"contract must not import application, service, client, persistence, httpapi, or cmd", func(f, t Layer) bool {
+		return f == Contract && (t == Application || t == Service || t == Client || t == Persistence || t == HTTPAPI || t == Cmd || t == Unknown)
 	}},
 	{"clients must not import application, service, persistence, httpapi, or cmd", func(f, t Layer) bool {
 		return f == Client && (t == Application || t == Service || t == Persistence || t == HTTPAPI || t == Cmd || t == Unknown)

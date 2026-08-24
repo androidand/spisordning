@@ -5,17 +5,11 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/androidand/spisordning/internal/httpapi"
+	"github.com/androidand/spisordning/internal/dto"
 	"github.com/androidand/spisordning/internal/ingredients"
 )
 
-// StoresService is the surface the /stores and /products handlers need.
-type StoresService interface {
-	SearchProducts(ctx context.Context, query string) ([]httpapi.IngredientProduct, error)
-	SearchProductsByGTIN(ctx context.Context, gtin string) ([]httpapi.IngredientProduct, error)
-}
-
-// Stores implements StoresService.
+// Stores implements dto.StoresService.
 type Stores struct {
 	mpk *ingredients.MPKClient
 }
@@ -25,7 +19,7 @@ func NewStores(mpk *ingredients.MPKClient) *Stores {
 	return &Stores{mpk: mpk}
 }
 
-func (s *Stores) SearchProducts(ctx context.Context, query string) ([]httpapi.IngredientProduct, error) {
+func (s *Stores) SearchProducts(ctx context.Context, query string) ([]dto.IngredientProduct, error) {
 	if s.mpk == nil {
 		return nil, fmt.Errorf("service: search products: Matpriskollen client not configured")
 	}
@@ -33,9 +27,9 @@ func (s *Stores) SearchProducts(ctx context.Context, query string) ([]httpapi.In
 	if err != nil {
 		return nil, fmt.Errorf("service: search products: %w", err)
 	}
-	out := make([]httpapi.IngredientProduct, 0, len(products))
+	out := make([]dto.IngredientProduct, 0, len(products))
 	for _, p := range products {
-		out = append(out, httpapi.IngredientProduct{
+		out = append(out, dto.IngredientProduct{
 			Key:  p.Key,
 			GTIN: p.GTIN,
 			Name: p.Name,
@@ -45,7 +39,7 @@ func (s *Stores) SearchProducts(ctx context.Context, query string) ([]httpapi.In
 	return out, nil
 }
 
-func (s *Stores) SearchProductsByGTIN(ctx context.Context, gtin string) ([]httpapi.IngredientProduct, error) {
+func (s *Stores) SearchProductsByGTIN(ctx context.Context, gtin string) ([]dto.IngredientProduct, error) {
 	if s.mpk == nil {
 		return nil, fmt.Errorf("service: search by gtin: Matpriskollen client not configured")
 	}
@@ -53,9 +47,9 @@ func (s *Stores) SearchProductsByGTIN(ctx context.Context, gtin string) ([]httpa
 	if err != nil {
 		return nil, fmt.Errorf("service: search by gtin: %w", err)
 	}
-	out := make([]httpapi.IngredientProduct, 0, len(products))
+	out := make([]dto.IngredientProduct, 0, len(products))
 	for _, p := range products {
-		out = append(out, httpapi.IngredientProduct{
+		out = append(out, dto.IngredientProduct{
 			Key:  p.Key,
 			GTIN: p.GTIN,
 			Name: p.Name,

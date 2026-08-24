@@ -6,22 +6,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/androidand/spisordning/internal/httpapi"
+	"github.com/androidand/spisordning/internal/dto"
 	"github.com/androidand/spisordning/internal/ingredients"
 	"github.com/androidand/spisordning/internal/persistence"
 )
 
-// IngredientsService is the surface the /ingredients handlers need.
-type IngredientsService interface {
-	SearchFood(ctx context.Context, query string, limit int) ([]httpapi.Ingredient, error)
-	LookupNutrition(ctx context.Context, nummer int) ([]httpapi.IngredientNutrient, error)
-	SearchDabas(ctx context.Context, query string) ([]httpapi.IngredientProduct, error)
-	SearchMatpriskollen(ctx context.Context, query string) ([]httpapi.IngredientProduct, error)
-	ResolveMapping(ctx context.Context, mealieFoodID string, in httpapi.IngredientMappingResolve) (httpapi.IngredientMapping, error)
-	GetMapping(ctx context.Context, ingredientID string) (httpapi.IngredientMapping, error)
-}
-
-// Ingredients implements IngredientsService.
+// Ingredients implements dto.IngredientsService.
 type Ingredients struct {
 	db           Store
 	slv          *ingredients.Client
@@ -35,7 +25,7 @@ func NewIngredients(db Store, slv *ingredients.Client, dabas *ingredients.DabasC
 	return &Ingredients{db: db, slv: slv, dabas: dabas, matpriskollen: mpk}
 }
 
-func (s *Ingredients) SearchFood(ctx context.Context, query string, limit int) ([]httpapi.Ingredient, error) {
+func (s *Ingredients) SearchFood(ctx context.Context, query string, limit int) ([]dto.Ingredient, error) {
 	if s.slv == nil {
 		return nil, fmt.Errorf("service: ingredients: SLV client not configured")
 	}
@@ -45,10 +35,10 @@ func (s *Ingredients) SearchFood(ctx context.Context, query string, limit int) (
 	}
 	// Client-side filter: SLV API does not support name-based filtering.
 	query = strings.ToLower(query)
-	var out []httpapi.Ingredient
+	var out []dto.Ingredient
 	for _, f := range page.Foods {
 		if strings.Contains(strings.ToLower(f.Namn), query) || strings.Contains(strings.ToLower(f.VetenskapligtNamn), query) {
-			out = append(out, httpapi.Ingredient{
+			out = append(out, dto.Ingredient{
 				ID:        fmt.Sprintf("slv-%d", f.Nummer),
 				Display:   f.Namn,
 				Source:    "slv",
@@ -59,7 +49,7 @@ func (s *Ingredients) SearchFood(ctx context.Context, query string, limit int) (
 	return out, nil
 }
 
-func (s *Ingredients) LookupNutrition(ctx context.Context, nummer int) ([]httpapi.IngredientNutrient, error) {
+func (s *Ingredients) LookupNutrition(ctx context.Context, nummer int) ([]dto.IngredientNutrient, error) {
 	if s.slv == nil {
 		return nil, fmt.Errorf("service: nutrition: SLV client not configured")
 	}
@@ -67,9 +57,9 @@ func (s *Ingredients) LookupNutrition(ctx context.Context, nummer int) ([]httpap
 	if err != nil {
 		return nil, fmt.Errorf("service: lookup nutrition: %w", err)
 	}
-	out := make([]httpapi.IngredientNutrient, 0, len(nutr))
+	out := make([]dto.IngredientNutrient, 0, len(nutr))
 	for _, n := range nutr {
-		out = append(out, httpapi.IngredientNutrient{
+		out = append(out, dto.IngredientNutrient{
 			Name:  n.Namn,
 			Value: n.Värde,
 			Unit:  n.Enhet,
@@ -78,7 +68,7 @@ func (s *Ingredients) LookupNutrition(ctx context.Context, nummer int) ([]httpap
 	return out, nil
 }
 
-func (s *Ingredients) SearchDabas(ctx context.Context, query string) ([]httpapi.IngredientProduct, error) {
+func (s *Ingredients) SearchDabas(ctx context.Context, query string) ([]dto.IngredientProduct, error) {
 	if s.dabas == nil {
 		return nil, fmt.Errorf("service: search dabas: Dabas client not configured")
 	}
@@ -86,9 +76,9 @@ func (s *Ingredients) SearchDabas(ctx context.Context, query string) ([]httpapi.
 	if err != nil {
 		return nil, fmt.Errorf("service: search dabas: %w", err)
 	}
-	out := make([]httpapi.IngredientProduct, 0, len(result.Results))
+	out := make([]dto.IngredientProduct, 0, len(result.Results))
 	for _, p := range result.Results {
-		out = append(out, httpapi.IngredientProduct{
+		out = append(out, dto.IngredientProduct{
 			Key:       p.ArticleID,
 			GTIN:      p.GTIN,
 			Name:      p.ArticleName,
@@ -100,7 +90,7 @@ func (s *Ingredients) SearchDabas(ctx context.Context, query string) ([]httpapi.
 	return out, nil
 }
 
-func (s *Ingredients) SearchMatpriskollen(ctx context.Context, query string) ([]httpapi.IngredientProduct, error) {
+func (s *Ingredients) SearchMatpriskollen(ctx context.Context, query string) ([]dto.IngredientProduct, error) {
 	if s.matpriskollen == nil {
 		return nil, fmt.Errorf("service: search matpriskollen: MPK client not configured")
 	}
@@ -108,9 +98,9 @@ func (s *Ingredients) SearchMatpriskollen(ctx context.Context, query string) ([]
 	if err != nil {
 		return nil, fmt.Errorf("service: search matpriskollen: %w", err)
 	}
-	out := make([]httpapi.IngredientProduct, 0, len(products))
+	out := make([]dto.IngredientProduct, 0, len(products))
 	for _, p := range products {
-		out = append(out, httpapi.IngredientProduct{
+		out = append(out, dto.IngredientProduct{
 			Key:         p.Key,
 			GTIN:        p.GTIN,
 			Name:        p.Name,
@@ -123,7 +113,7 @@ func (s *Ingredients) SearchMatpriskollen(ctx context.Context, query string) ([]
 	return out, nil
 }
 
-func (s *Ingredients) ResolveMapping(ctx context.Context, mealieFoodID string, in httpapi.IngredientMappingResolve) (httpapi.IngredientMapping, error) {
+func (s *Ingredients) ResolveMapping(ctx context.Context, mealieFoodID string, in dto.IngredientMappingResolve) (dto.IngredientMapping, error) {
 	m := persistence.IngredientMapping{
 		MealieFoodID: mealieFoodID,
 		IngredientID: in.IngredientID,
@@ -131,20 +121,20 @@ func (s *Ingredients) ResolveMapping(ctx context.Context, mealieFoodID string, i
 		NeedsReview:  false,
 	}
 	if err := s.db.UpsertIngredientMapping(ctx, m); err != nil {
-		return httpapi.IngredientMapping{}, fmt.Errorf("service: resolve mapping: %w", err)
+		return dto.IngredientMapping{}, fmt.Errorf("service: resolve mapping: %w", err)
 	}
-	return httpapi.IngredientMapping{
+	return dto.IngredientMapping{
 		MealieFoodID: m.MealieFoodID, IngredientID: m.IngredientID,
 		NeedsReview: m.NeedsReview, UpdatedAt: m.UpdatedAt,
 	}, nil
 }
 
-func (s *Ingredients) GetMapping(ctx context.Context, mealieFoodID string) (httpapi.IngredientMapping, error) {
+func (s *Ingredients) GetMapping(ctx context.Context, mealieFoodID string) (dto.IngredientMapping, error) {
 	m, err := s.db.GetIngredientMapping(ctx, mealieFoodID)
 	if err != nil {
-		return httpapi.IngredientMapping{}, fmt.Errorf("service: get mapping: %w", err)
+		return dto.IngredientMapping{}, fmt.Errorf("service: get mapping: %w", err)
 	}
-	return httpapi.IngredientMapping{
+	return dto.IngredientMapping{
 		MealieFoodID: m.MealieFoodID, IngredientID: m.IngredientID,
 		NeedsReview: m.NeedsReview, UpdatedAt: m.UpdatedAt,
 	}, nil

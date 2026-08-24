@@ -13,14 +13,14 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/androidand/spisordning/internal/httpapi"
+	"github.com/androidand/spisordning/internal/dto"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // NewServer returns an MCP server with the given service dependencies.
 // Pass nil for any service that is not available; that tool will return an
 // "unavailable" error instead.
-func NewServer(recipes httpapi.RecipesService, meals httpapi.MealsService, planning httpapi.PlanningService, pantry httpapi.PantryService) *mcp.Server {
+func NewServer(recipes dto.RecipesService, meals dto.MealsService, planning dto.PlanningService, pantry dto.PantryService) *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "spisordning", Version: "0.1.0"}, nil)
 
 	if recipes != nil {
@@ -56,7 +56,7 @@ func NewServer(recipes httpapi.RecipesService, meals httpapi.MealsService, plann
 					return errorResult("each reaction needs a non-empty person_id and sentiment in [-2,2]"), nil
 				}
 			}
-			resp, err := meals.CreateMealEvent(ctx, httpapi.MealEventNew{
+			resp, err := meals.CreateMealEvent(ctx, dto.MealEventNew{
 				MealieRecipeID: input.MealieRecipeID,
 				ServedOn:       input.ServedOn,
 				Reactions:      toReactionInputs(input.Reactions),
@@ -158,10 +158,10 @@ type listLocationsInput struct {
 	HouseholdID string `json:"household_id,omitempty"`
 }
 
-func toReactionInputs(items []reactionInputItem) []httpapi.MealReactionInput {
-	out := make([]httpapi.MealReactionInput, 0, len(items))
+func toReactionInputs(items []reactionInputItem) []dto.MealReactionInput {
+	out := make([]dto.MealReactionInput, 0, len(items))
 	for _, item := range items {
-		out = append(out, httpapi.MealReactionInput{PersonID: item.PersonID, Sentiment: item.Sentiment})
+		out = append(out, dto.MealReactionInput{PersonID: item.PersonID, Sentiment: item.Sentiment})
 	}
 	return out
 }

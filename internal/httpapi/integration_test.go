@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/androidand/spisordning/internal/dto"
 	"github.com/androidand/spisordning/internal/persistence"
 )
 
@@ -59,46 +60,46 @@ type dbAdapter struct {
 	store *persistence.Store
 }
 
-func (a dbAdapter) ListPeople(ctx context.Context) ([]PersonResponse, error) {
+func (a dbAdapter) ListPeople(ctx context.Context) ([]dto.PersonResponse, error) {
 	people, err := a.store.ListPeople(ctx)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]PersonResponse, 0, len(people))
+	out := make([]dto.PersonResponse, 0, len(people))
 	for _, p := range people {
-		out = append(out, PersonResponse{ID: p.ID, Name: p.Name, Weight: p.Weight, CreatedAt: p.CreatedAt})
+		out = append(out, dto.PersonResponse{ID: p.ID, Name: p.Name, Weight: p.Weight, CreatedAt: p.CreatedAt})
 	}
 	return out, nil
 }
 
-func (a dbAdapter) GetPerson(ctx context.Context, id string) (PersonResponse, error) {
+func (a dbAdapter) GetPerson(ctx context.Context, id string) (dto.PersonResponse, error) {
 	p, err := a.store.GetPerson(ctx, id)
 	if err != nil {
-		return PersonResponse{}, ErrNotFound
+		return dto.PersonResponse{}, ErrNotFound
 	}
-	return PersonResponse{ID: p.ID, Name: p.Name, Weight: p.Weight, CreatedAt: p.CreatedAt}, nil
+	return dto.PersonResponse{ID: p.ID, Name: p.Name, Weight: p.Weight, CreatedAt: p.CreatedAt}, nil
 }
 
-func (a dbAdapter) CreatePerson(ctx context.Context, in PersonInput) (PersonResponse, error) {
+func (a dbAdapter) CreatePerson(ctx context.Context, in dto.PersonInput) (dto.PersonResponse, error) {
 	if in.Weight <= 0 {
 		in.Weight = 1.0
 	}
 	id := "itest-" + strings.ReplaceAll(time.Now().Format("20060102150405.000"), ".", "")
 	p := persistence.Person{ID: id, Name: in.Name, Weight: in.Weight, CreatedAt: time.Now()}
 	if err := a.store.CreatePerson(ctx, p); err != nil {
-		return PersonResponse{}, err
+		return dto.PersonResponse{}, err
 	}
-	return PersonResponse{ID: p.ID, Name: p.Name, Weight: p.Weight, CreatedAt: p.CreatedAt}, nil
+	return dto.PersonResponse{ID: p.ID, Name: p.Name, Weight: p.Weight, CreatedAt: p.CreatedAt}, nil
 }
 
-func (a dbAdapter) ListPreferences(ctx context.Context, personID string) ([]PersonPreferenceResponse, error) {
+func (a dbAdapter) ListPreferences(ctx context.Context, personID string) ([]dto.PersonPreferenceResponse, error) {
 	prefs, err := a.store.ListPreferences(ctx, personID)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]PersonPreferenceResponse, 0, len(prefs))
+	out := make([]dto.PersonPreferenceResponse, 0, len(prefs))
 	for _, p := range prefs {
-		out = append(out, PersonPreferenceResponse{
+		out = append(out, dto.PersonPreferenceResponse{
 			PersonID: p.PersonID, Tag: p.Tag, Sentiment: int(p.Sentiment),
 			Confidence: p.Confidence, UpdatedAt: p.UpdatedAt,
 		})
@@ -106,14 +107,14 @@ func (a dbAdapter) ListPreferences(ctx context.Context, personID string) ([]Pers
 	return out, nil
 }
 
-func (a dbAdapter) ListRecipes(ctx context.Context) ([]RecipeRefResponse, error) {
+func (a dbAdapter) ListRecipes(ctx context.Context) ([]dto.RecipeRefResponse, error) {
 	refs, err := a.store.ListRecipeRefs(ctx)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]RecipeRefResponse, 0, len(refs))
+	out := make([]dto.RecipeRefResponse, 0, len(refs))
 	for _, r := range refs {
-		out = append(out, RecipeRefResponse{
+		out = append(out, dto.RecipeRefResponse{
 			MealieRecipeID: r.MealieRecipeID, Title: r.Title, Tags: r.Tags,
 			Effort: r.Effort, LastSyncedAt: r.LastSyncedAt,
 		})
@@ -121,78 +122,78 @@ func (a dbAdapter) ListRecipes(ctx context.Context) ([]RecipeRefResponse, error)
 	return out, nil
 }
 
-func (a dbAdapter) GetMeal(ctx context.Context, id int64) (MealEventResponse, error) {
+func (a dbAdapter) GetMeal(ctx context.Context, id int64) (dto.MealEventResponse, error) {
 	event, err := a.store.GetMealEvent(ctx, id)
 	if err != nil {
-		return MealEventResponse{}, err
+		return dto.MealEventResponse{}, err
 	}
 	rxns, err := a.store.ListMealReactions(ctx, event.ID)
 	if err != nil {
-		return MealEventResponse{}, err
+		return dto.MealEventResponse{}, err
 	}
-	out := MealEventResponse{
+	out := dto.MealEventResponse{
 		ID: event.ID, MealieRecipeID: event.MealieRecipeID,
 		ServedOn:  event.ServedOn.Format("2006-01-02"),
 		CreatedAt: event.CreatedAt,
-		Reactions: make([]MealReactionResponse, 0, len(rxns)),
+		Reactions: make([]dto.MealReactionResponse, 0, len(rxns)),
 	}
 	for _, r := range rxns {
-		out.Reactions = append(out.Reactions, MealReactionResponse{PersonID: r.PersonID, Sentiment: r.Sentiment})
+		out.Reactions = append(out.Reactions, dto.MealReactionResponse{PersonID: r.PersonID, Sentiment: r.Sentiment})
 	}
 	return out, nil
 }
 
-func (a dbAdapter) ListMeals(ctx context.Context, mealieRecipeID, servedOn string) ([]MealEventResponse, error) {
+func (a dbAdapter) ListMeals(ctx context.Context, mealieRecipeID, servedOn string) ([]dto.MealEventResponse, error) {
 	events, err := a.store.ListMealEvents(ctx, mealieRecipeID, servedOn)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]MealEventResponse, 0, len(events))
+	out := make([]dto.MealEventResponse, 0, len(events))
 	for _, event := range events {
 		rxns, err := a.store.ListMealReactions(ctx, event.ID)
 		if err != nil {
 			return nil, err
 		}
-		resp := MealEventResponse{
+		resp := dto.MealEventResponse{
 			ID: event.ID, MealieRecipeID: event.MealieRecipeID,
 			ServedOn:  event.ServedOn.Format("2006-01-02"),
 			CreatedAt: event.CreatedAt,
-			Reactions: make([]MealReactionResponse, 0, len(rxns)),
+			Reactions: make([]dto.MealReactionResponse, 0, len(rxns)),
 		}
 		for _, r := range rxns {
-			resp.Reactions = append(resp.Reactions, MealReactionResponse{PersonID: r.PersonID, Sentiment: r.Sentiment})
+			resp.Reactions = append(resp.Reactions, dto.MealReactionResponse{PersonID: r.PersonID, Sentiment: r.Sentiment})
 		}
 		out = append(out, resp)
 	}
 	return out, nil
 }
 
-func (a dbAdapter) CreateMealEvent(ctx context.Context, in MealEventNew) (MealEventResponse, error) {
+func (a dbAdapter) CreateMealEvent(ctx context.Context, in dto.MealEventNew) (dto.MealEventResponse, error) {
 	servedOn, err := time.Parse("2006-01-02", in.ServedOn)
 	if err != nil {
-		return MealEventResponse{}, err
+		return dto.MealEventResponse{}, err
 	}
 	eventID, err := a.store.CreateMealEvent(ctx, in.MealieRecipeID, servedOn, nil, nil)
 	if err != nil {
-		return MealEventResponse{}, err
+		return dto.MealEventResponse{}, err
 	}
 	for _, rx := range in.Reactions {
 		if err := a.store.AddMealReaction(ctx, persistence.MealReaction{
 			MealEventID: eventID, PersonID: rx.PersonID, Sentiment: rx.Sentiment,
 		}); err != nil {
-			return MealEventResponse{}, err
+			return dto.MealEventResponse{}, err
 		}
 	}
 	rxns, err := a.store.ListMealReactions(ctx, eventID)
 	if err != nil {
-		return MealEventResponse{}, err
+		return dto.MealEventResponse{}, err
 	}
-	out := MealEventResponse{
+	out := dto.MealEventResponse{
 		ID: eventID, MealieRecipeID: in.MealieRecipeID, ServedOn: in.ServedOn,
-		CreatedAt: time.Now(), Reactions: make([]MealReactionResponse, 0, len(rxns)),
+		CreatedAt: time.Now(), Reactions: make([]dto.MealReactionResponse, 0, len(rxns)),
 	}
 	for _, r := range rxns {
-		out.Reactions = append(out.Reactions, MealReactionResponse{
+		out.Reactions = append(out.Reactions, dto.MealReactionResponse{
 			PersonID: r.PersonID, Sentiment: r.Sentiment,
 		})
 	}
@@ -232,7 +233,7 @@ func TestAPI_PeopleRoundTrip(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /people: status = %d", rec.Code)
 	}
-	var people []PersonResponse
+	var people []dto.PersonResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &people); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
@@ -243,7 +244,7 @@ func TestAPI_PeopleRoundTrip(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("POST /people: status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	var created PersonResponse
+	var created dto.PersonResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
@@ -256,7 +257,7 @@ func TestAPI_PeopleRoundTrip(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /people/%s: status = %d", created.ID, rec.Code)
 	}
-	var got PersonResponse
+	var got dto.PersonResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
@@ -293,7 +294,7 @@ func TestAPI_MealsRoundTrip(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("POST /meals: status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	var event MealEventResponse
+	var event dto.MealEventResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &event); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
@@ -377,7 +378,7 @@ func TestAPI_PlanRoundTrip(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("POST /plans: status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	var plan MealPlan
+	var plan dto.MealPlan
 	if err := json.Unmarshal(rec.Body.Bytes(), &plan); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
@@ -390,7 +391,7 @@ func TestAPI_PlanRoundTrip(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /plans: status = %d", rec.Code)
 	}
-	var plans []MealPlan
+	var plans []dto.MealPlan
 	if err := json.Unmarshal(rec.Body.Bytes(), &plans); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
@@ -416,7 +417,7 @@ func TestAPI_PantryRoundTrip(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("POST /pantry/locations: status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	var loc PantryLocation
+	var loc dto.PantryLocation
 	if err := json.Unmarshal(rec.Body.Bytes(), &loc); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
@@ -429,7 +430,7 @@ func TestAPI_PantryRoundTrip(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /pantry/locations: status = %d", rec.Code)
 	}
-	var locs []PantryLocation
+	var locs []dto.PantryLocation
 	if err := json.Unmarshal(rec.Body.Bytes(), &locs); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
@@ -448,7 +449,7 @@ func TestAPI_MealsList(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /meals: status = %d", rec.Code)
 	}
-	var events []MealEventResponse
+	var events []dto.MealEventResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &events); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}

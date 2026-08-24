@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/androidand/spisordning/internal/dto"
 )
 
 func TestHealthHandler(t *testing.T) {
@@ -20,7 +22,7 @@ func TestHealthHandler(t *testing.T) {
 	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
 		t.Errorf("content-type %q, want application/json", ct)
 	}
-	var h Health
+	var h dto.Health
 	if err := json.NewDecoder(rec.Body).Decode(&h); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}

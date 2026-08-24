@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/androidand/spisordning/internal/httpapi"
+	"github.com/androidand/spisordning/internal/dto"
 	"github.com/androidand/spisordning/internal/ingredients"
 	"github.com/androidand/spisordning/internal/persistence"
 	"github.com/androidand/spisordning/internal/service"
@@ -231,7 +231,7 @@ func TestPeopleList(t *testing.T) {
 func TestPeopleCreate(t *testing.T) {
 	f := &fakeStore{people: make(map[string]persistence.Person)}
 	svc := service.NewPeople(f)
-	out, err := svc.CreatePerson(context.Background(), httpapi.PersonInput{Name: "Test"})
+	out, err := svc.CreatePerson(context.Background(), dto.PersonInput{Name: "Test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,9 +280,9 @@ func TestRecipesList(t *testing.T) {
 func TestMealsCreate(t *testing.T) {
 	f := &fakeStore{}
 	svc := service.NewMeals(f, nil)
-	out, err := svc.CreateMealEvent(context.Background(), httpapi.MealEventNew{
+	out, err := svc.CreateMealEvent(context.Background(), dto.MealEventNew{
 		MealieRecipeID: "r1", ServedOn: "2025-01-15",
-		Reactions: []httpapi.MealReactionInput{{PersonID: "p1", Sentiment: 1}},
+		Reactions: []dto.MealReactionInput{{PersonID: "p1", Sentiment: 1}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -313,7 +313,7 @@ func TestPlanningList(t *testing.T) {
 func TestPantryCreateLocation(t *testing.T) {
 	f := &fakeStore{locations: make(map[string]persistence.InventoryLocation)}
 	svc := service.NewPantry(f)
-	out, err := svc.CreateLocation(context.Background(), httpapi.PantryLocationNew{Name: "Kitchen"})
+	out, err := svc.CreateLocation(context.Background(), dto.PantryLocationNew{Name: "Kitchen"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -325,7 +325,7 @@ func TestPantryCreateLocation(t *testing.T) {
 func TestPantryPurchase(t *testing.T) {
 	f := &fakeStore{locations: make(map[string]persistence.InventoryLocation)}
 	svc := service.NewPantry(f)
-	out, err := svc.Purchase(context.Background(), httpapi.PantryPurchaseInput{
+	out, err := svc.Purchase(context.Background(), dto.PantryPurchaseInput{
 		IngredientID: "cauliflower", Quantity: 1.0, Unit: "piece", LocationID: "kitchen",
 	})
 	if err != nil {
@@ -357,7 +357,7 @@ func TestPlanningUpdate(t *testing.T) {
 		1: {ID: 1, WeekStart: weekStart, Status: "draft", CreatedAt: time.Now()},
 	}}
 	svc := service.NewPlanning(f)
-	out, err := svc.UpdatePlan(context.Background(), 1, httpapi.MealPlanUpdate{Status: "approved"})
+	out, err := svc.UpdatePlan(context.Background(), 1, dto.MealPlanUpdate{Status: "approved"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -396,7 +396,7 @@ func TestPantryListLocations(t *testing.T) {
 func TestPantryConsume(t *testing.T) {
 	f := &fakeStore{locations: make(map[string]persistence.InventoryLocation)}
 	svc := service.NewPantry(f)
-	err := svc.Consume(context.Background(), 1, httpapi.PantryConsumeInput{Quantity: 1.0})
+	err := svc.Consume(context.Background(), 1, dto.PantryConsumeInput{Quantity: 1.0})
 	if err != nil {
 		t.Fatal(err)
 	}

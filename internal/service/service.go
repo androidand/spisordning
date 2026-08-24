@@ -1,8 +1,8 @@
 // Package service implements the application service layer for spisordning.
 // Services depend on persistence.Store for data access and on other services
 // for cross-cutting concerns (e.g., Meals uses Preferences for reaction
-// learning). They never import httpapi (the DI contract lives in httpapi) or
-// cmd (the composition root).
+// learning). They depend on the shared contract in internal/dto and never
+// import httpapi (the HTTP transport layer) or cmd (the composition root).
 package service
 
 import (
@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/androidand/spisordning/internal/httpapi"
+	"github.com/androidand/spisordning/internal/dto"
 	"github.com/androidand/spisordning/internal/persistence"
 	"github.com/jackc/pgx/v5"
 )
@@ -63,37 +63,37 @@ type txConn interface {
 	Rollback(ctx context.Context) error
 }
 
-// People implements the PersonService interface defined in httpapi.
+// People implements the PersonService interface defined in dto.
 type People struct{ db Store }
 
 // NewPeople returns a People service backed by db.
 func NewPeople(db Store) *People { return &People{db: db} }
 
-func (s *People) ListPeople(ctx context.Context) ([]httpapi.PersonResponse, error) {
+func (s *People) ListPeople(ctx context.Context) ([]dto.PersonResponse, error) {
 	people, err := s.db.ListPeople(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("service: list people: %w", err)
 	}
-	out := make([]httpapi.PersonResponse, 0, len(people))
+	out := make([]dto.PersonResponse, 0, len(people))
 	for _, p := range people {
-		out = append(out, httpapi.PersonResponse{
+		out = append(out, dto.PersonResponse{
 			ID: p.ID, Name: p.Name, Weight: p.Weight, CreatedAt: p.CreatedAt,
 		})
 	}
 	return out, nil
 }
 
-func (s *People) GetPerson(ctx context.Context, id string) (httpapi.PersonResponse, error) {
+func (s *People) GetPerson(ctx context.Context, id string) (dto.PersonResponse, error) {
 	p, err := s.db.GetPerson(ctx, id)
 	if err != nil {
-		return httpapi.PersonResponse{}, fmt.Errorf("service: get person: %w", err)
+		return dto.PersonResponse{}, fmt.Errorf("service: get person: %w", err)
 	}
-	return httpapi.PersonResponse{
+	return dto.PersonResponse{
 		ID: p.ID, Name: p.Name, Weight: p.Weight, CreatedAt: p.CreatedAt,
 	}, nil
 }
 
-func (s *People) CreatePerson(ctx context.Context, in httpapi.PersonInput) (httpapi.PersonResponse, error) {
+func (s *People) CreatePerson(ctx context.Context, in dto.PersonInput) (dto.PersonResponse, error) {
 	weight := in.Weight
 	if weight <= 0 {
 		weight = 1.0
@@ -105,27 +105,27 @@ func (s *People) CreatePerson(ctx context.Context, in httpapi.PersonInput) (http
 		CreatedAt: time.Now(),
 	}
 	if err := s.db.CreatePerson(ctx, p); err != nil {
-		return httpapi.PersonResponse{}, fmt.Errorf("service: create person: %w", err)
+		return dto.PersonResponse{}, fmt.Errorf("service: create person: %w", err)
 	}
-	return httpapi.PersonResponse{
+	return dto.PersonResponse{
 		ID: p.ID, Name: p.Name, Weight: p.Weight, CreatedAt: p.CreatedAt,
 	}, nil
 }
 
-// Preferences implements the PreferencesService interface defined in httpapi.
+// Preferences implements the PreferencesService interface defined in dto.
 type Preferences struct{ db Store }
 
 // NewPreferences returns a Preferences service backed by db.
 func NewPreferences(db Store) *Preferences { return &Preferences{db: db} }
 
-func (s *Preferences) ListPreferences(ctx context.Context, personID string) ([]httpapi.PersonPreferenceResponse, error) {
+func (s *Preferences) ListPreferences(ctx context.Context, personID string) ([]dto.PersonPreferenceResponse, error) {
 	prefs, err := s.db.ListPreferences(ctx, personID)
 	if err != nil {
 		return nil, fmt.Errorf("service: list preferences: %w", err)
 	}
-	out := make([]httpapi.PersonPreferenceResponse, 0, len(prefs))
+	out := make([]dto.PersonPreferenceResponse, 0, len(prefs))
 	for _, p := range prefs {
-		out = append(out, httpapi.PersonPreferenceResponse{
+		out = append(out, dto.PersonPreferenceResponse{
 			PersonID: p.PersonID, Tag: p.Tag, Sentiment: int(p.Sentiment),
 			Confidence: p.Confidence, UpdatedAt: p.UpdatedAt,
 		})
@@ -133,20 +133,20 @@ func (s *Preferences) ListPreferences(ctx context.Context, personID string) ([]h
 	return out, nil
 }
 
-// Recipes implements the RecipesService interface defined in httpapi.
+// Recipes implements the RecipesService interface defined in dto.
 type Recipes struct{ db Store }
 
 // NewRecipes returns a Recipes service backed by db.
 func NewRecipes(db Store) *Recipes { return &Recipes{db: db} }
 
-func (s *Recipes) ListRecipes(ctx context.Context) ([]httpapi.RecipeRefResponse, error) {
+func (s *Recipes) ListRecipes(ctx context.Context) ([]dto.RecipeRefResponse, error) {
 	refs, err := s.db.ListRecipeRefs(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("service: list recipes: %w", err)
 	}
-	out := make([]httpapi.RecipeRefResponse, 0, len(refs))
+	out := make([]dto.RecipeRefResponse, 0, len(refs))
 	for _, r := range refs {
-		out = append(out, httpapi.RecipeRefResponse{
+		out = append(out, dto.RecipeRefResponse{
 			MealieRecipeID: r.MealieRecipeID, Title: r.Title, Tags: r.Tags,
 			Effort: r.Effort, LastSyncedAt: r.LastSyncedAt,
 		})
@@ -154,34 +154,34 @@ func (s *Recipes) ListRecipes(ctx context.Context) ([]httpapi.RecipeRefResponse,
 	return out, nil
 }
 
-// Meals implements the MealsService interface defined in httpapi.
+// Meals implements the MealsService interface defined in dto.
 type Meals struct {
 	db    Store
-	prefs httpapi.PreferencesService
+	prefs dto.PreferencesService
 }
 
 // NewMeals returns a Meals service backed by db. prefs is used for reaction
 // learning (recording preference observations); pass nil to skip.
-func NewMeals(db Store, prefs httpapi.PreferencesService) *Meals {
+func NewMeals(db Store, prefs dto.PreferencesService) *Meals {
 	return &Meals{db: db, prefs: prefs}
 }
 
-func (s *Meals) CreateMealEvent(ctx context.Context, in httpapi.MealEventNew) (httpapi.MealEventResponse, error) {
+func (s *Meals) CreateMealEvent(ctx context.Context, in dto.MealEventNew) (dto.MealEventResponse, error) {
 	servedOn, err := time.Parse("2006-01-02", in.ServedOn)
 	if err != nil {
-		return httpapi.MealEventResponse{}, fmt.Errorf("service: meals create: invalid served_on %q: %w", in.ServedOn, err)
+		return dto.MealEventResponse{}, fmt.Errorf("service: meals create: invalid served_on %q: %w", in.ServedOn, err)
 	}
 
 	tx, err := s.db.BeginTx(ctx)
 	if err != nil {
-		return httpapi.MealEventResponse{}, fmt.Errorf("service: meals create: begin tx: %w", err)
+		return dto.MealEventResponse{}, fmt.Errorf("service: meals create: begin tx: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
 	const insertEventQ = `INSERT INTO meal_event (mealie_recipe_id, served_on) VALUES ($1, $2) RETURNING id`
 	var eventID int64
 	if err := tx.QueryRow(ctx, insertEventQ, in.MealieRecipeID, servedOn).Scan(&eventID); err != nil {
-		return httpapi.MealEventResponse{}, fmt.Errorf("service: meals create: insert event: %w", err)
+		return dto.MealEventResponse{}, fmt.Errorf("service: meals create: insert event: %w", err)
 	}
 
 	for _, rx := range in.Reactions {
@@ -190,12 +190,12 @@ func (s *Meals) CreateMealEvent(ctx context.Context, in httpapi.MealEventNew) (h
 			ON CONFLICT (meal_event_id, person_id) DO UPDATE SET sentiment = EXCLUDED.sentiment,
 				note = EXCLUDED.note`
 		if _, err := tx.Exec(ctx, insertRxQ, eventID, rx.PersonID, rx.Sentiment, ""); err != nil {
-			return httpapi.MealEventResponse{}, fmt.Errorf("service: meals create: add reaction: %w", err)
+			return dto.MealEventResponse{}, fmt.Errorf("service: meals create: add reaction: %w", err)
 		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return httpapi.MealEventResponse{}, fmt.Errorf("service: meals create: commit tx: %w", err)
+		return dto.MealEventResponse{}, fmt.Errorf("service: meals create: commit tx: %w", err)
 	}
 
 	// Record preference observations outside the transaction — non-fatal.
@@ -214,64 +214,64 @@ func (s *Meals) CreateMealEvent(ctx context.Context, in httpapi.MealEventNew) (h
 
 	rxns, err := s.db.ListMealReactions(ctx, eventID)
 	if err != nil {
-		return httpapi.MealEventResponse{}, fmt.Errorf("service: meals create: read reactions: %w", err)
+		return dto.MealEventResponse{}, fmt.Errorf("service: meals create: read reactions: %w", err)
 	}
-	out := httpapi.MealEventResponse{
+	out := dto.MealEventResponse{
 		ID: eventID, MealieRecipeID: in.MealieRecipeID,
 		ServedOn:  in.ServedOn,
 		CreatedAt: time.Now(),
-		Reactions: make([]httpapi.MealReactionResponse, 0, len(rxns)),
+		Reactions: make([]dto.MealReactionResponse, 0, len(rxns)),
 	}
 	for _, r := range rxns {
-		out.Reactions = append(out.Reactions, httpapi.MealReactionResponse{
+		out.Reactions = append(out.Reactions, dto.MealReactionResponse{
 			PersonID: r.PersonID, Sentiment: r.Sentiment,
 		})
 	}
 	return out, nil
 }
 
-func (s *Meals) GetMeal(ctx context.Context, id int64) (httpapi.MealEventResponse, error) {
+func (s *Meals) GetMeal(ctx context.Context, id int64) (dto.MealEventResponse, error) {
 	event, err := s.db.GetMealEvent(ctx, id)
 	if err != nil {
-		return httpapi.MealEventResponse{}, fmt.Errorf("service: get meal: %w", err)
+		return dto.MealEventResponse{}, fmt.Errorf("service: get meal: %w", err)
 	}
 	rxns, err := s.db.ListMealReactions(ctx, event.ID)
 	if err != nil {
-		return httpapi.MealEventResponse{}, fmt.Errorf("service: get meal: list reactions: %w", err)
+		return dto.MealEventResponse{}, fmt.Errorf("service: get meal: list reactions: %w", err)
 	}
-	out := httpapi.MealEventResponse{
+	out := dto.MealEventResponse{
 		ID: event.ID, MealieRecipeID: event.MealieRecipeID,
 		ServedOn:  event.ServedOn.Format("2006-01-02"),
 		CreatedAt: event.CreatedAt,
-		Reactions: make([]httpapi.MealReactionResponse, 0, len(rxns)),
+		Reactions: make([]dto.MealReactionResponse, 0, len(rxns)),
 	}
 	for _, r := range rxns {
-		out.Reactions = append(out.Reactions, httpapi.MealReactionResponse{
+		out.Reactions = append(out.Reactions, dto.MealReactionResponse{
 			PersonID: r.PersonID, Sentiment: r.Sentiment,
 		})
 	}
 	return out, nil
 }
 
-func (s *Meals) ListMeals(ctx context.Context, mealieRecipeID, servedOn string) ([]httpapi.MealEventResponse, error) {
+func (s *Meals) ListMeals(ctx context.Context, mealieRecipeID, servedOn string) ([]dto.MealEventResponse, error) {
 	events, err := s.db.ListMealEvents(ctx, mealieRecipeID, servedOn)
 	if err != nil {
 		return nil, fmt.Errorf("service: list meals: %w", err)
 	}
-	out := make([]httpapi.MealEventResponse, 0, len(events))
+	out := make([]dto.MealEventResponse, 0, len(events))
 	for _, event := range events {
 		rxns, err := s.db.ListMealReactions(ctx, event.ID)
 		if err != nil {
 			return nil, fmt.Errorf("service: list meals: list reactions: %w", err)
 		}
-		resp := httpapi.MealEventResponse{
+		resp := dto.MealEventResponse{
 			ID: event.ID, MealieRecipeID: event.MealieRecipeID,
 			ServedOn:  event.ServedOn.Format("2006-01-02"),
 			CreatedAt: event.CreatedAt,
-			Reactions: make([]httpapi.MealReactionResponse, 0, len(rxns)),
+			Reactions: make([]dto.MealReactionResponse, 0, len(rxns)),
 		}
 		for _, r := range rxns {
-			resp.Reactions = append(resp.Reactions, httpapi.MealReactionResponse{
+			resp.Reactions = append(resp.Reactions, dto.MealReactionResponse{
 				PersonID: r.PersonID, Sentiment: r.Sentiment,
 			})
 		}
