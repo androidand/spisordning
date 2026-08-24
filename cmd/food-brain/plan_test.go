@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+
+	"github.com/androidand/spisordning/internal/ambient"
 )
 
 // newTestEnv wires the complete pipe against fake services (Mealie with 2
@@ -144,8 +146,10 @@ func assertWishlist(t *testing.T, body map[string]any, run int) {
 // TestRunPlan_EndToEnd drives the complete pipe against fake services:
 // Mealie (2 recipes) → scorer with Skolmaten dedup (fish at school Monday) →
 // Olla (returns prose; plan proceeds on scorer order) → adapter resolution →
-// wishlist creation. Asserts the wishlist request contains the confidently
-// resolved product and excludes the needs-review one.
+// wishlist creation. Also exercises --write-tonight (task 5.2): asserts the
+// ambient projection file is written and carries the planned dinners. Asserts
+// the wishlist request contains the confidently resolved product and excludes
+// the needs-review one.
 func TestRunPlan_EndToEnd(t *testing.T) {
 	// Fake Olla returns prose (unparseable) — pipe must proceed anyway.
 	proseOlla := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -154,6 +158,7 @@ func TestRunPlan_EndToEnd(t *testing.T) {
 		})
 	})
 	familyPath, wishlistBody := newTestEnv(t, proseOlla)
+	tonightPath := filepath.Join(filepath.Dir(familyPath), "tonight.json")
 
 	err := runPlan([]string{
 		"--family", familyPath,
@@ -161,10 +166,32 @@ func TestRunPlan_EndToEnd(t *testing.T) {
 		"--week", "2026-W31",
 		"--days", "2",
 		"--create-wishlist",
+		"--write-tonight", tonightPath,
 	})
 	if err != nil {
 		t.Fatalf("runPlan: %v", err)
 	}
+
+	// The ambient projection (task 5.2) must be written and carry the planned dinners.
+	projBuf, err := os.ReadFile(tonightPath)
+	if err != nil {
+		t.Fatalf("tonight projection not written: %v", err)
+	}
+	var proj ambient.PlanFile
+	if err := json.Unmarshal(projBuf, &proj); err != nil {
+		t.Fatalf("parse tonight projection: %v", err)
+	}
+	if proj.Week != "2026-W31" {
+		t.Errorf("unexpected projection week %q", proj.Week)
+	}
+	if len(proj.Slots) != 2 {
+		t.Fatalf("expected 2 projected dinners, got %d", len(proj.Slots))
+	}
+	if proj.Slots[0].Tags == nil || proj.Slots[0].Title == "" {
+		t.Errorf("projected slot missing title/tags: %+v", proj.Slots[0])
+	}
+
+	// laxfilé was needs-review and must NOT have been silently added.
 	assertWishlist(t, wishlistBody(), 0)
 }
 

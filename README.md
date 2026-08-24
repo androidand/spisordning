@@ -22,7 +22,10 @@ A homelab recon found much of the generic layer already running:
   optional Mealie write → optional Willys enrichment. **Spisordning absorbs this as its v1**:
   the durable domains and scoring move into tested Go; n8n is demoted to a thin
   scheduler/webhook (or retired). Two overlapping planners is exactly the integration
-  nightmare this project's rule forbids.
+  nightmare this project's rule forbids. The demotion is done: the in-n8n planner is
+  replaced by a thin weekly scheduler that shells out to `food-brain plan`
+  (`n8n/weekly-meal-planner.demoted.workflow.json`); the original workflow is left
+  archived/inactive and is retired once the demoted one is imported into n8n.
 - **Mealie** — already deployed (tengil app `hlab-mealie`). Reuse it; don't stand up another.
 - **Olla** — local Ollama/OpenAI-compatible LLM proxy (`192.168.1.240:40114`). Food Brain uses
   it for candidate variation and human-readable explanations (see suggestion engine below).
@@ -209,6 +212,21 @@ Confidently-resolved products go on the wishlist; anything below the review thre
 printed as needing review and **never silently added**. Payment and slot booking stay in the
 Willys app.
 
+The ambient surface (task 5.2) projects the plan for Home Assistant and folds one-tap
+reactions back into the preference model. `plan --write-tonight` writes the week projection;
+`tonight` reads it and records reactions:
+
+```bash
+go run ./cmd/food-brain plan --write-tonight tonight.json    # also writes the HA projection
+go run ./cmd/food-brain tonight                              # show tonight's dinner
+go run ./cmd/food-brain tonight --json                       # HA payload for the homeops MCP
+go run ./cmd/food-brain tonight --person kid --sentiment loves  # record a reaction
+```
+
+Home Assistant (via the homeops MCP) drives `tonight --json` to populate a dashboard and
+`tonight --person … --sentiment …` to record one-tap post-meal reactions; each reaction
+updates the family's preference confidence in `family.json`.
+
 The demo shows all six scoring signals at work — preferences (confidence-weighted, per-person
 weight), effort vs. the day's kitchen energy, a repetition penalty, school-lunch dedup,
 campaign bias, and novelty/familiarity (whether the household has cooked it before) — plus
@@ -224,16 +242,19 @@ hard-constraint feasibility. Layout:
 - `internal/recipefamily` — in-memory recipe-family/revision DAG core (immutable revisions)
 - `internal/recipeimport` — external recipe JSON-LD import into review candidates
 - `internal/httpclient` — shared JSON-over-HTTP transport for every backend client
-- `cmd/food-brain` — the CLI (`demo`, `plan`)
-- `migrations/0001-0007` — the durable PostgreSQL schema
+- `internal/ambient` — the ambient surface: week projection + one-tap reaction → preference update
+- `cmd/food-brain` — the CLI (`demo`, `plan`, `ingredients`, `tonight`)
+- `n8n/weekly-meal-planner.demoted.workflow.json` — the demoted n8n scheduler (task 5.3)
+- `migrations/` — the durable PostgreSQL schema (see `migrations/` for the current sequence)
 
 The **willys-adapter** is built and lives with its TypeScript dependency in the willys-client
 repo (`apps/willys-adapter`, `npm run adapter`, port 8402); the Go side talks to it through
 `internal/retailer`. `docker-compose.yml` here runs Postgres (schema auto-applied) + the
 adapter — copy `.env.example` to `.env` first.
 
-Still to wire: Postgres persistence (the schema is ready; `plan` currently syncs per run),
-the ingredient-mapping review surface, and Home Assistant surfacing. Tracked in
+Still to wire: Postgres persistence (the schema is ready; `plan` currently syncs per run and
+`tonight` reads a file projection). The ingredient-mapping review surface (`food-brain
+ingredients`) and Home Assistant surfacing (`food-brain tonight`) are in. Tracked in
 `openspec/changes/food-brain-first-slice/tasks.md`.
 
 ## Related repos

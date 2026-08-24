@@ -7,7 +7,7 @@
 // Layers:
 //
 //	domain       internal/domain, internal/recipefamily, internal/scoring — pure, no I/O
-//	application  internal/planning                                — use-case logic
+//	application  internal/planning, internal/ambient               — use-case logic
 //	client       internal/mealie, internal/skolmaten, internal/retailer,
 //	             internal/llm, internal/httpclient, internal/recipeimport
 //	persistence  internal/persistence                      — Postgres repos
@@ -51,7 +51,7 @@ var layerPrefixes = []prefix{
 	{Cmd, []string{"cmd"}},
 	{Test, []string{"internal/architecturetest"}},
 	{Domain, []string{"internal/domain", "internal/recipefamily", "internal/scoring", "internal/ingredients", "internal/openapi"}},
-	{Application, []string{"internal/planning"}},
+	{Application, []string{"internal/planning", "internal/ambient"}},
 	{Client, []string{
 		"internal/mealie",
 		"internal/skolmaten",

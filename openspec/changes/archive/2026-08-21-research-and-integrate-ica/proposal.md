@@ -87,3 +87,10 @@ verified rather than invented answers.
   branch independently produced two versions of `docs/research/ica-current-api.md` for the same
   investigation. Merged into one document (best material from each, one open disagreement flagged
   rather than silently resolved — see the doc's §3.1 token-lifetime note); see `tasks.md` §6.
+- **Update (2026-08-25)**: `ica-client` (now in the sibling `store-clients` repo) has since gone
+  from scaffold to a fully working, live-verified client this same week — mobile OAuth2 (browser-
+  free, DCR + HTML-form login), the ecom web storefront (customer/cart/orders, session obtained
+  via a browser-refresh flow since that surface is gated behind Akamai/AWS WAF bot detection),
+  and a matching `openapi.yaml`. `spisordning`'s `integrate-ica` change (see
+  `openspec/changes/integrate-ica`) should be read against that current state, not this
+  research-stage document alone.

@@ -24,11 +24,11 @@ const (
 
 // Person is a family member whose preferences shape the plan.
 type Person struct {
-	ID   string
-	Name string
+	ID   string `json:"id"`
+	Name string `json:"name"`
 	// Weight lets some people count for more in the aggregate (e.g. a picky
 	// child whose buy-in matters most). Defaults to 1.0 when zero.
-	Weight float64
+	Weight float64 `json:"weight"`
 }
 
 // EffectiveWeight returns Weight, defaulting to 1.0 when unset.
@@ -42,10 +42,10 @@ func (p Person) EffectiveWeight() float64 {
 // Preference is one person's confidence-weighted sentiment toward a tag
 // (an ingredient, cuisine, or dish trait such as "spicy" or "fish").
 type Preference struct {
-	PersonID   string
-	Tag        string
-	Sentiment  Sentiment
-	Confidence float64 // [0,1]; freshly-guessed = low, well-observed = high.
+	PersonID   string   `json:"personId"`
+	Tag        string   `json:"tag"`
+	Sentiment  Sentiment `json:"sentiment"`
+	Confidence float64  `json:"confidence"` // [0,1]; freshly-guessed = low, well-observed = high.
 }
 
 // Effort classifies how much active work a meal costs the cook.
