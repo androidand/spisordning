@@ -18,7 +18,9 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" ./cmd/mcp-server
 FROM gcr.io/distroless/static-debian12
 COPY --from=build /src/food-brain /usr/local/bin/food-brain
 COPY --from=build /src/mcp-server /usr/local/bin/mcp-server
-# Runtime needs the migrations to apply on boot (see 2.4).
+# Migrations live in migrations/ for docker-compose (mounted into postgres
+# initdb). The container itself does not apply migrations at boot — that is
+# the job of the postgres initdb volume mount in docker-compose.yml.
 COPY migrations /migrations
 ENTRYPOINT ["food-brain"]
 CMD ["serve"]

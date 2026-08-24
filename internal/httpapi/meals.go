@@ -1,51 +1,21 @@
 package httpapi
 
 import (
-	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"strconv"
 	"time"
+
+	"github.com/androidand/spisordning/internal/dto"
 )
 
-// MealReactionResponse mirrors api/openapi.yaml components/schemas/MealReaction.
-type MealReactionResponse struct {
-	PersonID  string `json:"person_id"`
-	Sentiment int    `json:"sentiment"` // -2..2
-}
-
-// MealEventResponse mirrors api/openapi.yaml components/schemas/MealEvent.
-type MealEventResponse struct {
-	ID             int64                  `json:"id"`
-	MealieRecipeID string                 `json:"mealie_recipe_id"`
-	ServedOn       string                 `json:"served_on"`  // date (date-only)
-	CreatedAt      time.Time              `json:"created_at"` // rendered as RFC3339
-	Reactions      []MealReactionResponse `json:"reactions"`
-}
-
-// MealEventNew is the POST /meals request body (api/openapi.yaml MealEventNew).
-type MealEventNew struct {
-	MealieRecipeID string              `json:"mealie_recipe_id"`
-	ServedOn       string              `json:"served_on"` // date
-	Reactions      []MealReactionInput `json:"reactions"`
-}
-
-// MealReactionInput is the request-side view of a reaction (person_id + sentiment).
-type MealReactionInput struct {
-	PersonID  string `json:"person_id"`
-	Sentiment int    `json:"sentiment"` // -2..2
-}
-
-// MealsService is the write surface the /meals handler needs.
-type MealsService interface {
-	CreateMealEvent(ctx context.Context, in MealEventNew) (MealEventResponse, error)
-}
-
 type mealsHandler struct {
-	svc MealsService
+	svc dto.MealsService
 }
 
 func (h *mealsHandler) createMealEvent(w http.ResponseWriter, r *http.Request) {
-	var in MealEventNew
+	var in dto.MealEventNew
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid JSON body: " + err.Error()})
 		return
@@ -74,6 +44,36 @@ func (h *mealsHandler) createMealEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, out)
+}
+
+func (h *mealsHandler) listMeals(w http.ResponseWriter, r *http.Request) {
+	mealieRecipeID := r.URL.Query().Get("mealieRecipeId")
+	servedOn := r.URL.Query().Get("servedOn")
+	out, err := h.svc.ListMeals(r.Context(), mealieRecipeID, servedOn)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "list meals: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (h *mealsHandler) getMeal(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid meal id: " + idStr})
+		return
+	}
+	out, err := h.svc.GetMeal(r.Context(), id)
+	if errors.Is(err, ErrNotFound) {
+		writeJSON(w, http.StatusNotFound, errorBody{Message: "meal " + idStr + " not found"})
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "get meal: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // parseDate validates that s is a date-only (YYYY-MM-DD) value per api/openapi.yaml

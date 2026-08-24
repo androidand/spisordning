@@ -8,48 +8,50 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/androidand/spisordning/internal/dto"
 )
 
 // fakePersonSvc is an in-memory PersonService for handler unit tests — no DB needed.
 type fakePersonSvc struct {
-	people  []PersonResponse
+	people  []dto.PersonResponse
 	created int
 	err     error // returned by every method when non-nil
 }
 
 func newFake() *fakePersonSvc {
 	return &fakePersonSvc{
-		people: []PersonResponse{
+		people: []dto.PersonResponse{
 			{ID: "p1", Name: "Ada", Weight: 1.0, CreatedAt: time.Date(2026, 8, 19, 9, 0, 0, 0, time.UTC)},
 			{ID: "p2", Name: "Blaise", Weight: 1.2, CreatedAt: time.Date(2026, 8, 19, 9, 5, 0, 0, time.UTC)},
 		},
 	}
 }
 
-func (f *fakePersonSvc) ListPeople(ctx context.Context) ([]PersonResponse, error) {
+func (f *fakePersonSvc) ListPeople(ctx context.Context) ([]dto.PersonResponse, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
 	return f.people, nil
 }
 
-func (f *fakePersonSvc) GetPerson(ctx context.Context, id string) (PersonResponse, error) {
+func (f *fakePersonSvc) GetPerson(ctx context.Context, id string) (dto.PersonResponse, error) {
 	if f.err != nil {
-		return PersonResponse{}, f.err
+		return dto.PersonResponse{}, f.err
 	}
 	for _, p := range f.people {
 		if p.ID == id {
 			return p, nil
 		}
 	}
-	return PersonResponse{}, ErrNotFound
+	return dto.PersonResponse{}, ErrNotFound
 }
 
-func (f *fakePersonSvc) CreatePerson(ctx context.Context, in PersonInput) (PersonResponse, error) {
+func (f *fakePersonSvc) CreatePerson(ctx context.Context, in dto.PersonInput) (dto.PersonResponse, error) {
 	if f.err != nil {
-		return PersonResponse{}, f.err
+		return dto.PersonResponse{}, f.err
 	}
-	p := PersonResponse{
+	p := dto.PersonResponse{
 		ID: "new", Name: in.Name, Weight: in.Weight, CreatedAt: time.Now(),
 	}
 	f.people = append(f.people, p)
@@ -84,6 +86,15 @@ func doPost(t *testing.T, mux *http.ServeMux, path, body string) *httptest.Respo
 	return rec
 }
 
+func doPatch(t *testing.T, mux *http.ServeMux, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(rec, req)
+	return rec
+}
+
 func mustJSON(t *testing.T, data []byte, out any) {
 	t.Helper()
 	if err := json.Unmarshal(data, out); err != nil {
@@ -99,7 +110,7 @@ func TestListPeople_HappyPath(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body)
 	}
 
-	var got []PersonResponse
+	var got []dto.PersonResponse
 	mustJSON(t, rec.Body.Bytes(), &got)
 	if len(got) != 2 {
 		t.Fatalf("got %d people, want 2", len(got))
@@ -133,7 +144,7 @@ func TestGetPerson_HappyPath(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body)
 	}
 
-	var got PersonResponse
+	var got dto.PersonResponse
 	mustJSON(t, rec.Body.Bytes(), &got)
 	if got.ID != "p2" || got.Name != "Blaise" || got.Weight != 1.2 {
 		t.Fatalf("unexpected person: %+v", got)
@@ -163,7 +174,7 @@ func TestCreatePerson_HappyPath(t *testing.T) {
 		t.Fatalf("status = %d, want 201; body: %s", rec.Code, rec.Body)
 	}
 
-	var got PersonResponse
+	var got dto.PersonResponse
 	mustJSON(t, rec.Body.Bytes(), &got)
 	if got.Name != "Grace" || got.Weight != 1.1 || got.ID == "" || got.CreatedAt.IsZero() {
 		t.Fatalf("unexpected created person: %+v", got)
@@ -203,7 +214,7 @@ func TestHealthStillWorks(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
-	var h Health
+	var h dto.Health
 	mustJSON(t, rec.Body.Bytes(), &h)
 	if h.Status != "ok" {
 		t.Fatalf(`status = %q, want "ok"`, h.Status)

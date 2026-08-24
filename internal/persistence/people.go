@@ -78,11 +78,21 @@ func (s *Store) UpsertPreference(ctx context.Context, p PersonPreference) error 
 	return nil
 }
 
-// ListPreferences returns the preferences for one person.
+// ListPreferences returns preferences, optionally filtered to personID when
+// non-empty. An empty personID returns all preferences (used by the unfiltered
+// GET /preferences endpoint).
 func (s *Store) ListPreferences(ctx context.Context, personID string) ([]PersonPreference, error) {
-	rows, err := s.db.Query(ctx,
-		`SELECT person_id, tag, sentiment, confidence, updated_at
-		 FROM person_preference WHERE person_id = $1 ORDER BY tag`, personID)
+	var rows pgx.Rows
+	var err error
+	if personID == "" {
+		rows, err = s.db.Query(ctx,
+			`SELECT person_id, tag, sentiment, confidence, updated_at
+			 FROM person_preference ORDER BY person_id, tag`)
+	} else {
+		rows, err = s.db.Query(ctx,
+			`SELECT person_id, tag, sentiment, confidence, updated_at
+			 FROM person_preference WHERE person_id = $1 ORDER BY tag`, personID)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("persistence: list preferences: %w", err)
 	}

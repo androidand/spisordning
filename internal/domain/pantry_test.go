@@ -54,6 +54,32 @@ func TestNormalizeGTIN(t *testing.T) {
 		t.Errorf("NormalizeGTIN with dash = %q, want %q (same as without dash)", got2, got)
 	}
 
+	// GTIN-8 (EAN-8) — a valid 8-digit barcode.
+	got8, err := NormalizeGTIN("96385074")
+	if err != nil {
+		t.Fatalf("NormalizeGTIN(valid8): %v", err)
+	}
+	want8 := "00000096385074" // 8 digits, left-padded with six zeros to 14
+	if got8 != want8 {
+		t.Errorf("NormalizeGTIN(valid8) = %q, want %q", got8, want8)
+	}
+	if len(got8) != 14 {
+		t.Errorf("expected 14-digit canonical form for GTIN-8, got %d digits: %q", len(got8), got8)
+	}
+
+	// GTIN-12 (UPC-A) — a valid 12-digit barcode.
+	got12, err := NormalizeGTIN("012345678905")
+	if err != nil {
+		t.Fatalf("NormalizeGTIN(valid12): %v", err)
+	}
+	want12 := "00012345678905" // 12 digits, left-padded with two zeros to 14
+	if got12 != want12 {
+		t.Errorf("NormalizeGTIN(valid12) = %q, want %q", got12, want12)
+	}
+	if len(got12) != 14 {
+		t.Errorf("expected 14-digit canonical form for GTIN-12, got %d digits: %q", len(got12), got12)
+	}
+
 	// Wrong check digit (last digit altered from the valid 7300400176354).
 	if _, err := NormalizeGTIN("7300400176353"); err == nil {
 		t.Error("expected error for invalid check digit, got nil")

@@ -25,11 +25,18 @@ type Weights struct {
 	// discovery (recipes the household has rarely or never cooked). A mode
 	// (safe choice / surprise me) is a deterministic re-weighting of this field.
 	Familiarity float64
+	// Pantry weights the pantry-availability signal. Positive values reward
+	// recipes that can be made from current inventory; the scorer does not
+	// treat infeasible pantry as a hard constraint — it is a soft signal
+	// like campaign bonus. See implement-recipe-availability for the
+	// underlying computation.
+	Pantry float64
 }
 
 // DefaultWeights is the baseline tuning. Preference dominates; the others nudge.
 // Familiarity is a moderate positive pull so the default leans slightly toward
-// known favorites while still leaving room for discovery.
+// known favorites while still leaving room for discovery. Pantry is a moderate
+// positive pull so recipes that can be made from current inventory score higher.
 func DefaultWeights() Weights {
 	return Weights{
 		Preference:  1.0,
@@ -38,6 +45,7 @@ func DefaultWeights() Weights {
 		SchoolDedup: 0.7,
 		Campaign:    0.4,
 		Familiarity: 0.5,
+		Pantry:      0.5,
 	}
 }
 
@@ -106,11 +114,12 @@ type Breakdown struct {
 	SchoolDedup float64
 	Campaign    float64
 	Familiarity float64
+	Pantry      float64
 }
 
 // Total sums the breakdown.
 func (b Breakdown) Total() float64 {
-	return b.Preference + b.Effort + b.Repetition + b.SchoolDedup + b.Campaign + b.Familiarity
+	return b.Preference + b.Effort + b.Repetition + b.SchoolDedup + b.Campaign + b.Familiarity + b.Pantry
 }
 
 // ScoredCandidate is a candidate with its computed score and feasibility.
@@ -124,6 +133,10 @@ type ScoredCandidate struct {
 	Feasible bool
 	// Reason is a short machine-generated note; the LLM may replace it with prose.
 	Reason string
+	// PantryStatus records the recipe's current pantry availability, surfaced
+	// so the planner can surface it to the user. Empty when no pantry data
+	// was provided in the context.
+	PantryStatus domain.PantryStatus
 }
 
 // Rank scores every candidate against the context and returns them sorted best
@@ -196,18 +209,23 @@ func SelectBatch(ranked []ScoredCandidate, ctx domain.PlanContext, n int) []Scor
 		}
 	}
 	if poolFav && !batchFav {
-		swapIn(func(sc ScoredCandidate) bool { return IsKnownFavorite(sc.Candidate, ctx) })
+		swapIn(func(sc ScoredCandidate) bool { return sc.Feasible && IsKnownFavorite(sc.Candidate, ctx) })
 	}
 	if poolNovel && !batchNovel {
-		swapIn(func(sc ScoredCandidate) bool { return IsDiscovery(sc.Candidate, ctx) })
+		swapIn(func(sc ScoredCandidate) bool { return sc.Feasible && IsDiscovery(sc.Candidate, ctx) })
 	}
 	return batch
 }
 
-// groupsPresent reports whether the given candidates include at least one known
-// favorite and/or at least one discovery candidate.
+// groupsPresent reports whether the given candidates include at least one
+// known favorite and/or at least one discovery candidate. Only feasible
+// candidates are counted: an infeasible candidate is never surfaced by the
+// balance guarantee, so it must not trigger the swap-in.
 func groupsPresent(cands []ScoredCandidate, ctx domain.PlanContext) (fav, novel bool) {
 	for _, sc := range cands {
+		if !sc.Feasible {
+			continue
+		}
 		if !fav && IsKnownFavorite(sc.Candidate, ctx) {
 			fav = true
 		}
@@ -232,6 +250,7 @@ func score(c domain.Candidate, ctx domain.PlanContext, w Weights) ScoredCandidat
 		SchoolDedup: w.SchoolDedup * schoolDedupPenalty(c, ctx),
 		Campaign:    w.Campaign * campaignBonus(c, ctx),
 		Familiarity: w.Familiarity * familiarityScore(c, ctx, cooks),
+		Pantry:      w.Pantry * pantryScore(c, ctx),
 	}
 
 	feasible, reason := feasibility(c, ctx)
@@ -243,11 +262,12 @@ func score(c domain.Candidate, ctx domain.PlanContext, w Weights) ScoredCandidat
 		fullReason = reason + "; " + fullReason
 	}
 	return ScoredCandidate{
-		Candidate: c,
-		Score:     b.Total(),
-		Breakdown: b,
-		Feasible:  feasible,
-		Reason:    fullReason,
+		Candidate:    c,
+		Score:        b.Total(),
+		Breakdown:    b,
+		Feasible:     feasible,
+		Reason:       fullReason,
+		PantryStatus: ctx.PantryAvailability[c.MealieRecipeID],
 	}
 }
 
@@ -259,6 +279,34 @@ func feasibility(c domain.Candidate, ctx domain.PlanContext) (bool, string) {
 		return false, "needs more effort than the cook has today"
 	}
 	return true, "ok"
+}
+
+// pantryScore returns a value in [0, 1] reflecting how well the recipe's
+// ingredients are covered by current inventory:
+//
+//	1.0  fully feasible (all ingredients on-hand or substituted)
+//	0.6  feasible with substitution (some ingredients require a sub)
+//	0.0  infeasible (at least one ingredient missing with no substitute)
+//	0.0  no pantry data available (empty map in PlanContext)
+//
+// Pantry availability is a soft scoring signal, not a hard constraint: an
+// infeasible recipe still scores via other dimensions and ranks last only
+// because of its zero pantry score, not because it is excluded.
+func pantryScore(c domain.Candidate, ctx domain.PlanContext) float64 {
+	status, ok := ctx.PantryAvailability[c.MealieRecipeID]
+	if !ok {
+		return 0
+	}
+	switch status {
+	case domain.PantryFeasible:
+		return 1.0
+	case domain.PantryFeasibleWithSub:
+		return 0.6
+	case domain.PantryInfeasible:
+		return 0.0
+	default:
+		return 0.0
+	}
 }
 
 // preferenceScore is the family-aggregate sentiment toward the candidate's

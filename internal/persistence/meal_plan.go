@@ -16,9 +16,15 @@ import (
 // module uses; cmd/food-brain constructs it once and passes it down.
 //
 // All operations run outside an explicit transaction here; callers that need
-// multi-statement atomicity should use a pgx.Tx obtained from the pool.
+// multi-statement atomicity should use a pgx.Tx obtained via BeginTx.
 type Store struct {
 	db *pgxpool.Pool
+}
+
+// BeginTx starts a new transaction on the underlying pool. Callers are
+// responsible for committing or rolling back.
+func (s *Store) BeginTx(ctx context.Context) (pgx.Tx, error) {
+	return s.db.Begin(ctx)
 }
 
 // New opens a pooled connection to Postgres using cfg.
@@ -245,6 +251,25 @@ func (s *Store) ListShoppingRequirements(ctx context.Context, planID int64) ([]S
 			return nil, err
 		}
 		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// ListMealPlans returns all plans ordered by week_start descending.
+func (s *Store) ListMealPlans(ctx context.Context) ([]MealPlan, error) {
+	rows, err := s.db.Query(ctx,
+		`SELECT id, week_start, status, created_at FROM meal_plan ORDER BY week_start DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("persistence: list meal_plans: %w", err)
+	}
+	defer rows.Close()
+	var out []MealPlan
+	for rows.Next() {
+		var m MealPlan
+		if err := rows.Scan(&m.ID, &m.WeekStart, &m.Status, &m.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
 	}
 	return out, rows.Err()
 }

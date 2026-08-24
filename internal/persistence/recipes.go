@@ -166,6 +166,17 @@ func (s *Store) UpsertIngredientMapping(ctx context.Context, m IngredientMapping
 	return nil
 }
 
+// GetIngredientMapping fetches a mapping by mealie_food_id.
+func (s *Store) GetIngredientMapping(ctx context.Context, mealieFoodID string) (IngredientMapping, error) {
+	const q = `SELECT mealie_food_id, ingredient_id, grams_per_unit, default_form, needs_review, updated_at
+		FROM ingredient_mapping WHERE mealie_food_id = $1`
+	var m IngredientMapping
+	if err := s.db.QueryRow(ctx, q, mealieFoodID).Scan(&m.MealieFoodID, &m.IngredientID, &m.GramsPerUnit, &m.DefaultForm, &m.NeedsReview, &m.UpdatedAt); err != nil {
+		return IngredientMapping{}, fmt.Errorf("persistence: get ingredient_mapping: %w", err)
+	}
+	return m, nil
+}
+
 // ListNeedsReviewMappings returns mappings awaiting review — the input to the
 // ingredient-mapping review surface (task 2.6).
 func (s *Store) ListNeedsReviewMappings(ctx context.Context) ([]IngredientMapping, error) {

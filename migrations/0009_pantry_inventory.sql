@@ -4,6 +4,11 @@
 
 BEGIN;
 
+-- unaccent is a built-in PG extension (part of the standard distribution, not
+-- a third-party module) used for accent-insensitive product name matching in
+-- ListCandidateProductsForIngredient. Available in postgres:16-alpine (CI).
+CREATE EXTENSION IF NOT EXISTS unaccent;
+
 -- A named place physical inventory sits, scoped to a household. location_type is an optional,
 -- non-authoritative hint (D9, invariant 8) — never identity: two FRIDGE-typed rows are still
 -- distinct locations. parent_location_id supports arbitrary-depth nesting; most locations are

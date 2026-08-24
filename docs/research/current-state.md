@@ -43,9 +43,13 @@ openspec/                 see below
 `implement-mcp-server`; the protocol/SDK/binary-placement rationale is recorded in
 `docs/adr/mcp-protocol-2026-07-28-and-go-sdk.md`. The architecture test confines pgx to
 `internal/persistence` and forbids `internal/mcptools` from importing clients, persistence,
-httpapi, or cmd. `go build ./... && go test ./...` passes: 199 tests across 18 packages
-(7 persistence integration tests skip locally without a Postgres; they run in CI's
-`persistence-test` job).
+httpapi, or cmd; `establish-enforced-go-architecture` further added `service`/`contract`
+layers (`internal/service`, `internal/dto`) enforcing that services depend on `internal/dto`
+rather than `internal/httpapi` importing `internal/service` directly. `go build ./... &&
+go test ./...` passes (exact count drifts as changes land — check CI for the current number;
+persistence integration tests skip locally without a Postgres and run in CI's
+`persistence-test` job). CI also runs architecture-enforcement, migrations-apply,
+docker-build, and codegen-verify jobs.
 
 No `AGENTS.md`/`CLAUDE.md` existed before this change. No `docs/` existed before this change.
 

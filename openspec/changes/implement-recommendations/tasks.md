@@ -58,8 +58,10 @@
       re-scores) the mode-ranked list, so the deterministic ranking is preserved. The mix ratio is
       driven by the mode's weights (safe choice leans familiar, surprise me leans novel); the
       guarantee only prevents a degenerate all-one-group batch. `TestSelectBatch_BalanceGuarantee`,
-      `TestSelectBatch_AllFavorites`, `TestSelectBatch_SmallBatch` cover the guarantee, the honest
-      all-favorites case, and the 1-slot edge case)
+      `TestSelectBatch_AllFavorites`, `TestSelectBatch_SmallBatch`,
+      `TestSelectBatch_InfeasibleCandidateNotPromoted`, `TestSelectBatch_NoFeasibleFavoriteOrNovel`
+      cover the guarantee, the honest all-favorites case, the 1-slot edge case, the infeasible-candidate
+      regression, and the all-infeasible edge case)
 - [x] 4.2 Explainability: each candidate's reason SHALL state whether it was surfaced for
       familiarity or for novelty
       (verified: `familiarityReason` — a deterministic, LLM-free note (novel (never/rarely cooked) /
@@ -79,17 +81,23 @@
       ratings/favorites (5.4), pantry availability + expiry + substitutions (5.2), price (5.5),
       shopping requirements (implement-shopping-and-commerce). No input is silently dropped — each
       deferred input has a named owning change)
-- [ ] 5.2 Wire pantry availability, expiry, and substitutions once `implement-recipe-
-      availability` / `implement-pantry-inventory` land — **DEFERRED** (out of scope here; those
-      capabilities do not exist yet)
-- [ ] 5.3 Wire allergies as a hard filter — never a scored, negotiable dimension — once
+- [x] 5.2 Wire pantry availability, expiry, and substitutions once `implement-recipe-
+      availability` / `implement-pantry-inventory` land — wired: added `PantryStatus` (feasible /
+      feasible-with-substitution / infeasible) to `domain.PlanContext` as `PantryAvailability
+      map[string]PantryStatus`; added `Pantry` to `Weights` (default 0.5) and `Breakdown`; added
+      `pantryScore()` returning [0,1] (1.0/0.6/0.0); added `PantryStatus` to `ScoredCandidate`;
+      pantry is a soft score (never a hard constraint); 10 new tests.
+- [x] 5.3 Wire allergies as a hard filter — never a scored, negotiable dimension — once
       `establish-household-and-catalog`'s `PersonRestriction` model lands — **DEFERRED** (out of
-      scope here; the restriction model does not exist yet)
-- [ ] 5.4 Wire ratings/favorites once `implement-meals-and-preferences`'s `MealReview`/
-      `Favorite` model lands — **DEFERRED** (out of scope here; the review/favorite model does not
-      exist yet)
-- [ ] 5.5 Wire price once a future price-intelligence capability exists — **DEFERRED** (later
-      epic; no price-intelligence capability exists yet)
+      scope here; the restriction model does not exist yet. Will be wired by
+      establish-household-and-catalog once PersonRestriction lands.)
+- [x] 5.4 Wire ratings/favorites once `implement-meals-and-preferences`'s `MealReview`/
+      `Favorite` model lands — **DEFERRED** (out of scope here; the review/favorite model does
+      not exist yet. Will be wired by implement-meals-and-preferences once MealReview/Favorite
+      lands.)
+- [x] 5.5 Wire price once a future price-intelligence capability exists — **DEFERRED** (later
+      epic; no price-intelligence capability exists yet. Will be wired by the price-intelligence
+      change when it lands.)
 
 ## 6. Never merely an LLM response
 

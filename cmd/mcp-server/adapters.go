@@ -61,7 +61,9 @@ func (a mcpStoreAdapter) RecordReaction(ctx context.Context, in mcptools.RecordR
 	if err != nil {
 		return mcptools.RecordReactionResult{}, fmt.Errorf("record reaction: invalid served_on %q: %w", in.ServedOn, err)
 	}
-	eventID, err := a.db.CreateMealEvent(ctx, in.Recipe, servedOn)
+	// planID/planSlotDate: not available at this call site (MCP-driven reaction
+	// recording isn't tied to a specific plan slot) — nil means "unlinked".
+	eventID, err := a.db.CreateMealEvent(ctx, in.Recipe, servedOn, nil, nil)
 	if err != nil {
 		return mcptools.RecordReactionResult{}, fmt.Errorf("record reaction: create meal event: %w", err)
 	}

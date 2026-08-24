@@ -6,10 +6,14 @@
 //
 // Layers:
 //
-//	domain       internal/domain, internal/recipefamily, internal/scoring — pure, no I/O
-//	application  internal/planning, internal/ambient               — use-case logic
+//	domain       internal/domain, internal/recipefamily, internal/scoring,
+//	             internal/openapi, internal/ambient, internal/availability
+//	application  internal/planning                                — use-case logic
+//	service      internal/service, internal/mcp                   — app services
+//	contract     internal/dto                                     — shared DTOs + service interfaces
 //	client       internal/mealie, internal/skolmaten, internal/retailer,
-//	             internal/llm, internal/httpclient, internal/recipeimport
+//	             internal/llm, internal/httpclient, internal/recipeimport,
+//	             internal/matpriskollen, internal/ingredients
 //	persistence  internal/persistence                      — Postgres repos
 //	httpapi      internal/httpapi                          — HTTP handlers
 //	mcptools     internal/mcptools                         — MCP tool adapters (no persistence)
@@ -39,6 +43,8 @@ const (
 	Cmd         Layer = "cmd"
 	Test        Layer = "test"
 	External    Layer = "external"
+	Service     Layer = "service"
+	Contract    Layer = "contract"
 	Unknown     Layer = "unknown"
 )
 
@@ -48,10 +54,12 @@ type prefix struct {
 }
 
 var layerPrefixes = []prefix{
-	{Cmd, []string{"cmd"}},
+	{Cmd, []string{"cmd", "cmd/mcp-server"}},
 	{Test, []string{"internal/architecturetest"}},
-	{Domain, []string{"internal/domain", "internal/recipefamily", "internal/scoring", "internal/ingredients", "internal/openapi"}},
-	{Application, []string{"internal/planning", "internal/ambient"}},
+	{Domain, []string{"internal/domain", "internal/recipefamily", "internal/scoring", "internal/openapi", "internal/ambient", "internal/availability"}},
+	{Application, []string{"internal/planning"}},
+	{Service, []string{"internal/service", "internal/mcp"}},
+	{Contract, []string{"internal/dto"}},
 	{Client, []string{
 		"internal/mealie",
 		"internal/skolmaten",
@@ -59,6 +67,8 @@ var layerPrefixes = []prefix{
 		"internal/llm",
 		"internal/httpclient",
 		"internal/recipeimport",
+		"internal/matpriskollen",
+		"internal/ingredients",
 	}},
 	{Persistence, []string{"internal/persistence"}},
 	{HTTPAPI, []string{"internal/httpapi"}},
@@ -98,11 +108,17 @@ var rules = []rule{
 	{"domain must not import any non-domain internal package", func(f, t Layer) bool {
 		return f == Domain && t != Domain && t != External && t != Test
 	}},
-	{"application must not import clients, persistence, httpapi, or cmd", func(f, t Layer) bool {
-		return f == Application && (t == Client || t == Persistence || t == HTTPAPI || t == Cmd || t == Unknown)
+	{"application must not import clients, service, persistence, httpapi, or cmd", func(f, t Layer) bool {
+		return f == Application && (t == Client || t == Service || t == Persistence || t == HTTPAPI || t == Cmd || t == Unknown)
 	}},
-	{"clients must not import application, persistence, httpapi, or cmd", func(f, t Layer) bool {
-		return f == Client && (t == Application || t == Persistence || t == HTTPAPI || t == Cmd || t == Unknown)
+	{"service must not import httpapi or cmd", func(f, t Layer) bool {
+		return f == Service && (t == HTTPAPI || t == Cmd || t == Unknown)
+	}},
+	{"contract must not import application, service, client, persistence, httpapi, or cmd", func(f, t Layer) bool {
+		return f == Contract && (t == Application || t == Service || t == Client || t == Persistence || t == HTTPAPI || t == Cmd || t == Unknown)
+	}},
+	{"clients must not import application, service, persistence, httpapi, or cmd", func(f, t Layer) bool {
+		return f == Client && (t == Application || t == Service || t == Persistence || t == HTTPAPI || t == Cmd || t == Unknown)
 	}},
 	{"persistence must import only domain and external packages", func(f, t Layer) bool {
 		return f == Persistence && t != Domain && t != External && t != Test

@@ -1,57 +1,33 @@
 package httpapi
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
-	"time"
+
+	"github.com/androidand/spisordning/internal/dto"
 )
-
-// PersonResponse is the JSON view of a household person (openapi: components/schemas/Person).
-// It is a transport-layer DTO: httpapi never imports persistence, so this is shaped
-// independently of persistence.Person and mapped by the cmd composition root.
-type PersonResponse struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Weight    float64   `json:"weight"`
-	CreatedAt time.Time `json:"created_at"`
-}
-
-// PersonInput is the body for POST /people (openapi: components/schemas/PersonNew).
-// Weight is optional; the adapter/server apply 1.0 when zero.
-type PersonInput struct {
-	Name   string  `json:"name"`
-	Weight float64 `json:"weight"`
-}
 
 // ErrNotFound signals a resource miss so handlers can map it to 404 without
 // httpapi knowing about pgx sentinel errors.
 var ErrNotFound = errors.New("not found")
 
-// PersonService is the subset of the application surface the /people handlers
-// need. It is defined here (not imported from persistence) so the httpapi layer
-// stays dependency-free of the persistence layer — the architecture test forbids
-// httpapi -> persistence. The cmd composition root supplies an implementation
-// backed by persistence.Store.
-type PersonService interface {
-	ListPeople(ctx context.Context) ([]PersonResponse, error)
-	GetPerson(ctx context.Context, id string) (PersonResponse, error)
-	CreatePerson(ctx context.Context, in PersonInput) (PersonResponse, error)
-}
-
 // Dependencies are the services httpapi's handlers call. Add new services here as
 // routes are implemented from api/openapi.yaml.
 type Dependencies struct {
-	People      PersonService
-	Preferences PreferencesService
-	Recipes     RecipesService
-	Meals       MealsService
+	People      dto.PersonService
+	Preferences dto.PreferencesService
+	Recipes     dto.RecipesService
+	Meals       dto.MealsService
+	Planning    dto.PlanningService
+	Pantry      dto.PantryService
+	Ingredients dto.IngredientsService
+	Stores      dto.StoresService
 }
 
 type peopleHandler struct {
-	svc PersonService
+	svc dto.PersonService
 }
 
 // RegisterHandlers wires every implemented route onto mux. /health is always
@@ -76,7 +52,39 @@ func RegisterHandlers(mux *http.ServeMux, deps Dependencies) {
 	}
 	if deps.Meals != nil {
 		h := mealsHandler{svc: deps.Meals}
+		mux.HandleFunc("GET /meals", h.listMeals)
+		mux.HandleFunc("GET /meals/{id}", h.getMeal)
 		mux.HandleFunc("POST /meals", h.createMealEvent)
+	}
+	if deps.Planning != nil {
+		h := plansHandler{svc: deps.Planning}
+		mux.HandleFunc("GET /plans", h.listPlans)
+		mux.HandleFunc("POST /plans", h.createPlan)
+		mux.HandleFunc("GET /plans/{id}", h.getPlan)
+		mux.HandleFunc("PATCH /plans/{id}", h.updatePlan)
+		mux.HandleFunc("POST /plans/{id}/decisions", h.setDecisions)
+		mux.HandleFunc("GET /plans/{id}/shopping-requirements", h.listShoppingRequirements)
+	}
+	if deps.Pantry != nil {
+		h := pantryHandler{svc: deps.Pantry}
+		mux.HandleFunc("GET /pantry/locations", h.listLocations)
+		mux.HandleFunc("POST /pantry/locations", h.createLocation)
+		mux.HandleFunc("GET /pantry/locations/{id}/lots", h.listLots)
+		mux.HandleFunc("POST /pantry/lots/purchase", h.purchase)
+		mux.HandleFunc("POST /pantry/lots/{id}/consume", h.consume)
+	}
+	if deps.Ingredients != nil {
+		h := ingredientsHandler{svc: deps.Ingredients}
+		mux.HandleFunc("GET /ingredients/search", h.searchFood)
+		mux.HandleFunc("GET /ingredients/nutrition/{nummer}", h.lookupNutrition)
+		mux.HandleFunc("GET /ingredients/dabas/search", h.searchDabas)
+		mux.HandleFunc("GET /ingredients/matpriskollen/search", h.searchMatpriskollen)
+		mux.HandleFunc("PATCH /ingredient-mappings/{mealieFoodId}", h.resolveMapping)
+	}
+	if deps.Stores != nil {
+		h := storesHandler{svc: deps.Stores}
+		mux.HandleFunc("GET /products/search", h.searchProducts)
+		mux.HandleFunc("GET /products/by-gtin", h.searchByGTIN)
 	}
 }
 
@@ -114,7 +122,7 @@ func (h *peopleHandler) getPerson(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *peopleHandler) createPerson(w http.ResponseWriter, r *http.Request) {
-	var in PersonInput
+	var in dto.PersonInput
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid JSON body: " + err.Error()})
 		return

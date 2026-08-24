@@ -106,7 +106,23 @@ type PlanContext struct {
 	RecentMealIDs       []RecentMeal
 	SchoolLunchTags     []string        // tags of dishes served at school today
 	CampaignIngredients map[string]bool // canonical ingredient id -> on campaign
+	// PantryAvailability maps a recipe's MealieRecipeID to its current
+	// pantry availability status. Populated by the meal planner from the
+	// recipe-availability capability. Empty map = no pantry data available
+	// (the pantry dimension scores 0).
+	PantryAvailability map[string]PantryStatus
 }
+
+// PantryStatus classifies whether a recipe can be made from the household's
+// current inventory, accounting for substitutions. Owned by
+// implement-recipe-availability; consumed read-only by the scorer.
+type PantryStatus string
+
+const (
+	PantryFeasible          PantryStatus = "feasible"
+	PantryFeasibleWithSub   PantryStatus = "feasible-with-substitution"
+	PantryInfeasible        PantryStatus = "infeasible"
+)
 
 // RecentMeal records that a recipe was served on a day, used for the
 // repetition penalty. More recent repeats are penalized harder.
@@ -128,3 +144,16 @@ type ShoppingRequirement struct {
 	AcceptableForms []string
 	PreferredForm   string
 }
+
+// Note: IngredientForm and IngredientSubstitution are NOT defined here.
+// Both were originally stubbed in this file (a simple string-enum
+// IngredientForm, a SubstitutionTier taxonomy) by a branch written before
+// establish-household-and-catalog's real versions existed - the stub's own
+// comments said as much ("owned by establish-household-and-catalog...
+// consumed read-only"). That owner has since landed in catalog.go with a
+// richer shape (IngredientForm as a struct with IngredientID/Form/Notes,
+// SubstitutionCategory with a Valid() method) - reconciled 2026-08-25 by
+// removing the stub in favor of catalog.go's real types rather than keeping
+// two incompatible definitions of the same concept. Anything consuming the
+// old stub shape (e.g. recipe-availability) needs updating to catalog.go's
+// types when merged.

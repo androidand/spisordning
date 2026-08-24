@@ -75,9 +75,10 @@ func (s *Store) GetProduct(ctx context.Context, id string) (Product, error) {
 	return p, nil
 }
 
-// ListProducts returns every registered product, ordered by id. Used today
-// only by ListCandidateProductsForIngredient's name-match fallback
-// (internal/persistence/pantry.go) — there is no catalog-browse UI yet.
+// ListProducts returns every registered product, ordered by id. Not used
+// today — ListCandidateProductsForIngredient runs its own SQL for the
+// name-match fallback rather than calling this. Exposed for potential
+// future catalog-browse UI.
 func (s *Store) ListProducts(ctx context.Context) ([]Product, error) {
 	const q = `SELECT id, name, brand, package_size, created_at FROM product ORDER BY id`
 	rows, err := s.db.Query(ctx, q)

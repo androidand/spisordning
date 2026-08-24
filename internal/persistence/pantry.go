@@ -184,6 +184,9 @@ func (s *Store) RecordPurchase(ctx context.Context, ingredientID, productID, loc
 	if source == sourceShoppingOrder && productID == "" {
 		return 0, errors.New("persistence: RecordPurchase: productId is required when source is shopping_order")
 	}
+	if quantity <= 0 {
+		return 0, errors.New("persistence: RecordPurchase: quantity must be > 0")
+	}
 	confidence := domain.ConfidenceForEvent(domain.EventPurchase, source, false)
 
 	tx, err := s.db.Begin(ctx)
@@ -219,6 +222,11 @@ func (s *Store) RecordPurchase(ctx context.Context, ingredientID, productID, loc
 // lot's own identity field, the one exception to "lots only change via an
 // event" the design allows for this specific field (D8's own text: "at any
 // later time without altering the lot's quantity, location, or confidence").
+//
+// The design.md Step 5 command signature includes a `source` parameter, but
+// this implementation drops it: a refinement is not an inventory event and
+// carries no delta, so there is no event row to attach a source to. The
+// deviation is intentional and documented in tasks.md 4.5's note.
 func (s *Store) RefineLotProduct(ctx context.Context, lotID int64, productID string) error {
 	if productID == "" {
 		return errors.New("persistence: RefineLotProduct: productID is required")
@@ -250,8 +258,12 @@ func (s *Store) ListCandidateProductsForIngredient(ctx context.Context, ingredie
 	if err != nil {
 		return nil, err
 	}
+	// unaccent() makes the match accent-insensitive so "mjölk" matches "milk"
+	// and similar Scandinavian/English name pairs. Lowercasing both sides makes
+	// it case-insensitive as well.
 	const q = `SELECT id, name, brand, package_size, created_at FROM product
-		WHERE name ILIKE '%' || $1 || '%' ORDER BY id`
+		WHERE unaccent(lower(name)) LIKE '%' || unaccent(lower($1)) || '%'
+		ORDER BY id`
 	rows, err := s.db.Query(ctx, q, ing.Display)
 	if err != nil {
 		return nil, fmt.Errorf("persistence: name-match candidate products: %w", err)
@@ -331,8 +343,12 @@ func (s *Store) RecordDiscard(ctx context.Context, lotID int64, quantity float64
 // this command sets an absolute target rather than applying a known delta,
 // so it locks the row (SELECT ... FOR UPDATE) inside its own transaction to
 // read the prior quantity safely, rather than reading it in a separate,
-// racy query beforehand.
+// racy query beforehand. newQuantity must be non-negative; negative targets
+// would silently drive the lot into negative territory.
 func (s *Store) RecordAdjust(ctx context.Context, lotID int64, newQuantity float64, estimated bool, reason, source string) error {
+	if newQuantity < 0 {
+		return errors.New("persistence: RecordAdjust: newQuantity must be >= 0")
+	}
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("persistence: begin RecordAdjust: %w", err)
@@ -502,6 +518,42 @@ func (s *Store) RecordTransfer(ctx context.Context, lotID int64, toLocationID st
 		return 0, fmt.Errorf("persistence: commit RecordTransfer: %w", err)
 	}
 	return newLotID, nil
+}
+
+// ListInventoryLocations returns every location matching householdID (empty = all).
+// Used by the pantry service to list available locations for a household.
+func (s *Store) ListInventoryLocations(ctx context.Context, householdID string) ([]InventoryLocation, error) {
+	var rows pgx.Rows
+	var err error
+	if householdID == "" {
+		rows, err = s.db.Query(ctx,
+			`SELECT id, household_id, name, location_type, parent_location_id, archived_at
+			 FROM inventory_location ORDER BY id`)
+	} else {
+		rows, err = s.db.Query(ctx,
+			`SELECT id, household_id, name, location_type, parent_location_id, archived_at
+			 FROM inventory_location WHERE household_id = $1 ORDER BY id`, householdID)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("persistence: list inventory_locations: %w", err)
+	}
+	defer rows.Close()
+	var out []InventoryLocation
+	for rows.Next() {
+		var l InventoryLocation
+		var locType, parent *string
+		if err := rows.Scan(&l.ID, &l.HouseholdID, &l.Name, &locType, &parent, &l.ArchivedAt); err != nil {
+			return nil, err
+		}
+		if locType != nil {
+			l.LocationType = *locType
+		}
+		if parent != nil {
+			l.ParentLocationID = *parent
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
 }
 
 // LookupBarcode normalizes gtin and resolves it against ProductIdentifier —

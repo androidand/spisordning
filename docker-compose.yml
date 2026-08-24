@@ -1,12 +1,11 @@
-# spisordning deployment baseline (design D7): plain docker-compose.
-# Tengil `package` deployment is the strategic target, planned in the tengil repo.
+# spisordning deployment: docker-compose (local) + Tengil compose package.
 #
-# Usage:
+# Local usage:
 #   cp .env.example .env   # fill in Willys credentials
 #   docker compose up -d
 #
-# NOTE: the willys-adapter build context points at the sibling willys-client
-# repo; keep ~/dev/willys checked out next to ~/dev/spisordning.
+# Tengil usage:
+#   Deploy via POST /api/apps with type=compose (see openspec/changes/deploy-via-docker-compose/)
 
 services:
   postgres:
@@ -15,7 +14,7 @@ services:
     environment:
       POSTGRES_DB: spisordning
       POSTGRES_USER: spisordning
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data
       # Apply the schema on first boot.
@@ -29,21 +28,17 @@ services:
       retries: 10
 
   willys-adapter:
-    build:
-      context: ../willys/willys-client
-      dockerfile: Dockerfile.adapter
+    image: ghcr.io/androidand/spisordning/willys-adapter:latest
     restart: unless-stopped
     environment:
       ADAPTER_PORT: '8402'
-      WILLYS_USERNAME: ${WILLYS_USERNAME:?set in .env}
-      WILLYS_PASSWORD: ${WILLYS_PASSWORD:?set in .env}
+      WILLYS_USERNAME: ${WILLYS_USERNAME}
+      WILLYS_PASSWORD: ${WILLYS_PASSWORD}
     ports:
       - '8402:8402'
 
   food-brain:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/androidand/spisordning/food-brain:latest
     restart: unless-stopped
     depends_on:
       postgres:

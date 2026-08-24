@@ -71,7 +71,9 @@
       records a reaction and updates `family.json`); `plan --write-tonight` emits the projection.
       Home Assistant drives `tonight --json` + `tonight --person … --sentiment …` via the homeops
       MCP. Verified: `go build`/`go vet`/`go test` green; smoke-tested show/json/react against a
-      temp projection (family.json format preserved)
+      temp projection (family.json format preserved). Reconciled 2026-08-25 into the same
+      `plan.go` this branch and `establish-enforced-go-architecture` both extended in parallel —
+      see that change's own task notes for its additions (retailer selection, service/dto layer).
 - [x] 5.3 Demote the n8n `weekly-meal-planner` workflow to scheduler/webhook (or retire) once
       the Go pipe is verified — Go pipe verified (6.2); the in-n8n planner is retired in favor of
       a thin weekly scheduler that shells out to `food-brain plan --write-tonight … --create-wishlist`
@@ -80,8 +82,9 @@
 
 ## 6. Verification & docs
 
-- [x] 6.1 `go test ./...` green (41 tests across 10 packages incl. the end-to-end plan test and
-      the ambient-surface tests); `go vet` clean. In-memory demo: `go run ./cmd/food-brain demo`
+- [x] 6.1 `go test ./...` green (exact count drifts as changes land — check CI for the current
+      number; includes the end-to-end plan test and the ambient-surface tests); `go vet` clean.
+      In-memory demo: `go run ./cmd/food-brain demo`
 - [x] 6.2 Integration smoke: ran `food-brain plan --create-wishlist` against real Mealie (4 ICA recipes) + real Willys; created wishlist "Vecka 30", no cart/payment side effects
 - [x] 6.3 README updated with run instructions; architecture decisions reflected
 - [x] 6.4 Generated a real week plan and created the Willys wishlist (2026-07-19); owner to eyeball "Vecka 30" in the app. FOUND: confidence model caps correct-but-piece/weight-mismatched matches at 0.65, under the 0.7 review threshold -> wishlist under-filled; see live-findings memory
