@@ -1,3 +1,4 @@
+-- +goose Up
 -- Order (a completed, fidelity-preserving purchase record).
 --
 -- This migration adds the tables that record spisordning's completed purchase records
@@ -28,7 +29,6 @@
 --   * Manual confirmation pre-fills from the most recent shopping_cart checkpoint and marks the
 --     cart 'confirmed' (design "Manual order-confirmation flow"; task 4.2).
 
-BEGIN;
 
 -- ── Orders (completed, fidelity-preserving purchase records, v1) ───────────
 
@@ -58,4 +58,6 @@ CREATE TABLE order_item (
 );
 CREATE INDEX ON order_item (order_id);
 
-COMMIT;
+-- +goose Down
+DROP TABLE IF EXISTS order_item CASCADE;
+DROP TABLE IF EXISTS "order" CASCADE;

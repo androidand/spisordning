@@ -1,3 +1,4 @@
+-- +goose Up
 -- Full household/catalog schema for establish-household-and-catalog.
 --
 -- This migration adds the tables that implement-household-and-catalog designs but that
@@ -7,7 +8,6 @@
 -- Idempotent: uses CREATE TABLE IF NOT EXISTS and ALTER TABLE ... ADD COLUMN IF NOT EXISTS
 -- so it can be run against a database that already has some of these tables/columns.
 
-BEGIN;
 
 -- ── 1. Account ↔ Person shape (design.md Step 5½) ───────────────────────────
 
@@ -35,12 +35,14 @@ ALTER TABLE person
 --     exist yet. Now that account is created above, add the FK constraint so
 --     referential integrity is enforced. Uses a DO block with exception handling
 --     for idempotency (PostgreSQL has no ADD CONSTRAINT IF NOT EXISTS).
+-- +goose StatementBegin
 DO $$ BEGIN
     ALTER TABLE household_membership
         ADD CONSTRAINT household_membership_ended_by_fkey
             FOREIGN KEY (ended_by) REFERENCES account(id) ON DELETE SET NULL;
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
+-- +goose StatementEnd
 
 -- ── 2. Person restrictions (design.md Step 5½½) ──────────────────────────────
 
@@ -139,19 +141,23 @@ CREATE TABLE IF NOT EXISTS ingredient_unit_conversion (
 -- ── 6½. Enforce same-dimension constraint on unit_conversion ─────────────────
 --     Invariant 9 forbids cross-dimension conversions on unit_conversion.
 --     A CHECK constraint via a pure-SQL function enforces this at the DB level.
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION same_dimension(a TEXT, b TEXT) RETURNS BOOLEAN AS $$
     SELECT u1.dimension = u2.dimension
     FROM unit u1, unit u2
     WHERE u1.code = a AND u2.code = b;
 $$ LANGUAGE sql STABLE;
+-- +goose StatementEnd
 
 -- Idempotent via DO/EXCEPTION (PostgreSQL has no ADD CONSTRAINT IF NOT EXISTS).
+-- +goose StatementBegin
 DO $$ BEGIN
     ALTER TABLE unit_conversion
         ADD CONSTRAINT unit_conversion_same_dimension
             CHECK (same_dimension(from_unit, to_unit));
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
+-- +goose StatementEnd
 
 -- ── 7. Seed universal same-dimension conversions ────────────────────────────
 
@@ -173,4 +179,14 @@ INSERT INTO unit_conversion (from_unit, to_unit, factor) VALUES
     ('tsp', 'tbsp', 1.0/3.0)
 ON CONFLICT (from_unit, to_unit) DO NOTHING;
 
-COMMIT;
+-- +goose Down
+DROP TABLE IF EXISTS ingredient_unit_conversion CASCADE;
+DROP TABLE IF EXISTS unit_conversion CASCADE;
+DROP FUNCTION IF EXISTS same_dimension(TEXT, TEXT);
+DROP TABLE IF EXISTS unit CASCADE;
+DROP TABLE IF EXISTS ingredient_substitution CASCADE;
+DROP TABLE IF EXISTS ingredient_form CASCADE;
+ALTER TABLE ingredient DROP COLUMN IF EXISTS merged_into_id;
+DROP TABLE IF EXISTS person_restriction CASCADE;
+ALTER TABLE person DROP COLUMN IF EXISTS account_id;
+DROP TABLE IF EXISTS account CASCADE;

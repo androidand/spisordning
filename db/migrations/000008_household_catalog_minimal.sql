@@ -1,3 +1,4 @@
+-- +goose Up
 -- Minimal household/catalog prerequisite slice.
 --
 -- establish-household-and-catalog (openspec/changes/establish-household-and-catalog) designs a
@@ -9,7 +10,6 @@
 -- explicitly deferred; see openspec/changes/establish-household-and-catalog/tasks.md's
 -- 2026-08-19 update note.
 
-BEGIN;
 
 -- The unit that owns inventory locations. No account/membership modeling yet — that is
 -- establish-household-and-catalog's own scope, deferred.
@@ -52,4 +52,8 @@ CREATE TABLE product_ingredient_mapping (
 );
 CREATE INDEX ON product_ingredient_mapping (ingredient_id);
 
-COMMIT;
+-- +goose Down
+DROP TABLE IF EXISTS product_ingredient_mapping CASCADE;
+DROP TABLE IF EXISTS product_identifier CASCADE;
+DROP TABLE IF EXISTS product CASCADE;
+DROP TABLE IF EXISTS household CASCADE;

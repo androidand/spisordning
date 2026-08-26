@@ -1,3 +1,4 @@
+-- +goose Up
 -- Shopping cart (a checkpoint record of a to-cart call, not the retailer's live cart).
 --
 -- This migration adds the tables that record spisordning's checkpoint of a to-cart call
@@ -23,7 +24,6 @@
 --   * Cart creation calls the adapter's POST /shopping-lists/:id/to-cart and records the
 --     resolved items as the checkpoint (design D3; task 3.2).
 
-BEGIN;
 
 -- ── Shopping carts (to-cart call checkpoint, v1) ────────────────────────────
 
@@ -51,4 +51,6 @@ CREATE TABLE shopping_cart_item (
 );
 CREATE INDEX ON shopping_cart_item (shopping_cart_id);
 
-COMMIT;
+-- +goose Down
+DROP TABLE IF EXISTS shopping_cart_item CASCADE;
+DROP TABLE IF EXISTS shopping_cart CASCADE;

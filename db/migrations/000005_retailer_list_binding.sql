@@ -1,3 +1,4 @@
+-- +goose Up
 -- Retailer list binding (a shopping_list projected onto an external retailer list).
 --
 -- This migration adds the table that records spisordning's outbound projection of a
@@ -20,7 +21,6 @@
 --   * Pushing calls the adapter's POST /shopping-lists and records the returned wishlistId
 --     and outcome (design D2; task 2.2).
 
-BEGIN;
 
 -- ── Retailer list bindings (outbound projection, v1) ────────────────────────
 
@@ -40,4 +40,5 @@ CREATE TABLE retailer_list_binding (
     UNIQUE (shopping_list_id, retailer)
 );
 
-COMMIT;
+-- +goose Down
+DROP TABLE IF EXISTS retailer_list_binding CASCADE;

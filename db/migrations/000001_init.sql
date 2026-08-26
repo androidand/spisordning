@@ -1,3 +1,4 @@
+-- +goose Up
 -- Food Brain initial schema.
 --
 -- One owner per domain: this database owns the FAMILY (people, preferences,
@@ -5,7 +6,6 @@
 -- Recipes are owned by Mealie and referenced by id + snapshot, never copied as
 -- the source of truth. Retailer product ids never live on a recipe.
 
-BEGIN;
 
 -- ── People & preferences ────────────────────────────────────────────────────
 
@@ -157,4 +157,19 @@ CREATE TABLE shopping_requirement (
     UNIQUE (plan_id, ingredient_id)
 );
 
-COMMIT;
+-- +goose Down
+DROP TABLE IF EXISTS shopping_requirement CASCADE;
+DROP TABLE IF EXISTS meal_plan_decision CASCADE;
+DROP TABLE IF EXISTS meal_plan_candidate CASCADE;
+DROP TABLE IF EXISTS meal_plan CASCADE;
+DROP TABLE IF EXISTS planning_constraint CASCADE;
+DROP TABLE IF EXISTS effort_profile CASCADE;
+DROP TABLE IF EXISTS meal_reaction CASCADE;
+DROP TABLE IF EXISTS meal_event CASCADE;
+DROP TABLE IF EXISTS ingredient_mapping CASCADE;
+DROP TABLE IF EXISTS recipe_ingredient CASCADE;
+DROP TABLE IF EXISTS ingredient CASCADE;
+DROP TABLE IF EXISTS recipe_ref CASCADE;
+DROP TABLE IF EXISTS preference_observation CASCADE;
+DROP TABLE IF EXISTS person_preference CASCADE;
+DROP TABLE IF EXISTS person CASCADE;

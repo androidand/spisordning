@@ -1,3 +1,4 @@
+-- +goose Up
 -- Recipe family / variant / revision hierarchy.
 --
 -- This migration adds the four tables that back the git-like recipe hierarchy
@@ -23,7 +24,6 @@
 --   * Revision parentage never cycles (checked at edge-insert time).
 --   * default_variant_id resolves within its own family (checked at set time).
 
-BEGIN;
 
 -- ── Recipe families (conceptual dishes) ─────────────────────────────────────
 
@@ -98,4 +98,8 @@ ALTER TABLE recipe_family
     ADD CONSTRAINT recipe_family_default_variant_fk
     FOREIGN KEY (default_variant_id) REFERENCES recipe_variant(id) ON DELETE RESTRICT;
 
-COMMIT;
+-- +goose Down
+DROP TABLE IF EXISTS recipe_revision_parent CASCADE;
+DROP TABLE IF EXISTS recipe_revision CASCADE;
+DROP TABLE IF EXISTS recipe_variant CASCADE;
+DROP TABLE IF EXISTS recipe_family CASCADE;

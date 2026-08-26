@@ -1,8 +1,8 @@
+-- +goose Up
 -- Pantry inventory: locations, lots, and the inventory event ledger.
 -- See openspec/changes/implement-pantry-inventory/design.md (Step 7 persistence sketch,
 -- amended by D8 graduated item specificity and D9 location taxonomy/hierarchy).
 
-BEGIN;
 
 -- unaccent is a built-in PG extension (part of the standard distribution, not
 -- a third-party module) used for accent-insensitive product name matching in
@@ -70,4 +70,7 @@ CREATE TABLE inventory_event (
 );
 CREATE INDEX ON inventory_event (lot_id, recorded_at);
 
-COMMIT;
+-- +goose Down
+DROP TABLE IF EXISTS inventory_event CASCADE;
+DROP TABLE IF EXISTS inventory_lot CASCADE;
+DROP TABLE IF EXISTS inventory_location CASCADE;

@@ -9,7 +9,7 @@
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:19beta3-alpine
     restart: unless-stopped
     environment:
       POSTGRES_DB: spisordning
@@ -17,8 +17,6 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data
-      # Apply the schema on first boot.
-      - ./migrations:/docker-entrypoint-initdb.d:ro
     ports:
       - '5433:5432'
     healthcheck:
@@ -26,6 +24,20 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  # One-shot schema migration: applies the embedded Goose migrations (and seeds)
+  # before the app starts. The image must include the `migrate` command (see
+  # establish-migration-and-postgres-19). food-brain depends on this completing.
+  migrate:
+    image: ghcr.io/androidand/spisordning/food-brain:latest
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://spisordning:${POSTGRES_PASSWORD}@postgres:5432/spisordning?sslmode=disable
+    entrypoint: ["food-brain"]
+    command: ["migrate", "up", "--seed"]
 
   willys-adapter:
     image: ghcr.io/androidand/spisordning/willys-adapter:latest
@@ -43,6 +55,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     environment:
       # food-brain reads postgres + homelab services from .env; see .env.example.
       DATABASE_URL: postgres://spisordning:${POSTGRES_PASSWORD}@postgres:5432/spisordning?sslmode=disable

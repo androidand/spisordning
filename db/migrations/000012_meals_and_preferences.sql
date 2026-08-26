@@ -1,3 +1,4 @@
+-- +goose Up
 -- implement-meals-and-preferences: actual-meal-side entities.
 --
 -- Extends migrations/0001_init.sql (meal_event/meal_reaction) and
@@ -17,7 +18,6 @@
 -- lifecycle (joined_at/ended_at) is establish-household-and-catalog's deferred
 -- scope — this migration works with what exists today.
 
-BEGIN;
 
 -- Link a cooked meal back to the specific plan decision (plan_id + slot_date)
 -- that produced it. Nullable: ad-hoc meals (never planned) have no link.
@@ -85,4 +85,10 @@ CREATE INDEX ON favorite (mealie_recipe_id);
 CREATE INDEX ON favorite (person_id);
 CREATE INDEX ON favorite (household_id);
 
-COMMIT;
+-- +goose Down
+DROP TABLE IF EXISTS favorite CASCADE;
+DROP TABLE IF EXISTS meal_review CASCADE;
+DROP TABLE IF EXISTS meal_participant CASCADE;
+ALTER TABLE meal_event DROP CONSTRAINT IF EXISTS meal_event_plan_decision_fk;
+ALTER TABLE meal_event DROP COLUMN IF EXISTS meal_plan_slot_date;
+ALTER TABLE meal_event DROP COLUMN IF EXISTS meal_plan_id;

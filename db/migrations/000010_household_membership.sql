@@ -1,3 +1,4 @@
+-- +goose Up
 -- Migrate existing flat-person data into the household model.
 --
 -- establish-household-and-catalog (openspec/changes/establish-household-and-catalog)
@@ -10,7 +11,6 @@
 -- Idempotent: safe to run multiple times. If the default household already
 -- exists and memberships are already in place, this is a no-op.
 
-BEGIN;
 
 -- ── 1. Create the household table if it does not already exist.
 --     (0008_household_catalog_minimal.sql may have created it already.)
@@ -56,4 +56,5 @@ INSERT INTO household_membership (household_id, person_id, joined_at)
     LEFT JOIN household_membership hm ON hm.person_id = p.id
     WHERE hm.person_id IS NULL;
 
-COMMIT;
+-- +goose Down
+DROP TABLE IF EXISTS household_membership CASCADE;

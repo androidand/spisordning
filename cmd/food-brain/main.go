@@ -13,6 +13,8 @@
 //	food-brain ingredients  — review surface: show the curated Swedish-unit → grams →
 //	                          package-size ingredient mappings (task 2.3)
 //	food-brain sync-offers  — sync retailer campaign/offer data for campaign-aware planning
+//	food-brain migrate      — apply/check the embedded schema migrations (Goose):
+//	                          `migrate up [--seed]` applies, `migrate status` reports
 //
 // Running with no arguments is equivalent to `demo`.
 package main
@@ -57,8 +59,13 @@ func main() {
 			fmt.Fprintln(os.Stderr, "❌", err)
 			os.Exit(1)
 		}
+	case "migrate":
+		if err := runMigrate(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "❌", err)
+			os.Exit(1)
+		}
 	default:
-		fmt.Fprintf(os.Stderr, "unknown command %q (want: demo, plan, serve, tonight, ingredients, sync-offers)\n", cmd)
+		fmt.Fprintf(os.Stderr, "unknown command %q (want: demo, plan, serve, tonight, ingredients, sync-offers, migrate)\n", cmd)
 		os.Exit(2)
 	}
 }

@@ -1,3 +1,4 @@
+-- +goose Up
 -- Shopping list (retailer-independent, durable, human-editable).
 --
 -- This migration adds the two tables that back spisordning's own shopping list
@@ -25,7 +26,6 @@
 --   * Seeding never mutates or duplicates shopping_requirement (design, 1.3).
 --   * Manual add/remove/check-off semantics (design, 1.4).
 
-BEGIN;
 
 -- ── Shopping lists (retailer-independent, durable) ──────────────────────────
 
@@ -71,4 +71,6 @@ CREATE INDEX ON shopping_list_item (shopping_list_id);
 CREATE UNIQUE INDEX ON shopping_list_item (shopping_list_id, shopping_requirement_id)
     WHERE shopping_requirement_id IS NOT NULL;
 
-COMMIT;
+-- +goose Down
+DROP TABLE IF EXISTS shopping_list_item CASCADE;
+DROP TABLE IF EXISTS shopping_list CASCADE;

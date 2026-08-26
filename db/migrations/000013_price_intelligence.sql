@@ -1,3 +1,4 @@
+-- +goose Up
 -- Price intelligence: retailer/store identity, retailer product SKUs, store
 -- offers, and an append-only price-observation series.
 --
@@ -11,7 +12,6 @@
 --   - price_observation: append-only, never updated; price is always a derived read
 --   - current_store_product_price: read-optimized view, not the source of truth
 
-BEGIN;
 
 -- ── 1. Retailer ───────────────────────────────────────────────────────────────
 -- A retail chain (ICA, Willys, Coop, ...). One row per chain, not per store.
@@ -100,4 +100,10 @@ FROM store_product_offer spo
 JOIN price_observation po ON po.store_product_offer_id = spo.id
 ORDER BY spo.id, po.price_kind, po.observed_at DESC, po.id DESC;
 
-COMMIT;
+-- +goose Down
+DROP VIEW IF EXISTS current_store_product_price;
+DROP TABLE IF EXISTS price_observation CASCADE;
+DROP TABLE IF EXISTS store_product_offer CASCADE;
+DROP TABLE IF EXISTS retailer_product CASCADE;
+DROP TABLE IF EXISTS store CASCADE;
+DROP TABLE IF EXISTS retailer CASCADE;

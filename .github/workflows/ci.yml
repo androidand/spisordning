@@ -29,11 +29,11 @@ jobs:
         run: go test -count=1 ./...
 
   migrations:
-    name: migrations apply cleanly
+    name: migrations apply cleanly (PG19 fresh bootstrap)
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:19beta3
         env:
           POSTGRES_DB: spisordning
           POSTGRES_USER: spisordning
@@ -43,26 +43,36 @@ jobs:
           --health-cmd 'pg_isready -U spisordning'
           --health-interval 5s
           --health-timeout 5s
-          --health-retries 5
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
-      - name: install psql (for migration checks)
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client
-      - name: apply migrations in order (must all succeed)
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.1'
+          cache: true
+      - name: build food-brain
+        run: go build -o food-brain ./cmd/food-brain
+      - name: apply migrations via goose (must all succeed)
         run: |
           set -euo pipefail
-          for f in $(ls migrations/*.sql | sort); do
-            echo "=== applying $f ==="
-            PGPASSWORD=change-me psql -h localhost -U spisordning -d spisordning \
-              -v ON_ERROR_STOP=1 -f "$f"
-          done
+          DATABASE_URL="postgres://spisordning:change-me@localhost:5432/spisordning?sslmode=disable" \
+            ./food-brain migrate up
+      - name: assert expected schema table count
+        run: |
+          set -euo pipefail
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client
+          actual=$(PGPASSWORD=change-me psql -h localhost -U spisordning -d spisordning \
+            -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' AND table_name <> 'goose_db_version'")
+          expected=52
+          echo "schema tables: $actual (expected $expected)"
+          [ "$actual" = "$expected" ]
 
   persistence-test:
     name: persistence integration tests
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:19beta3
         env:
           POSTGRES_DB: spisordning
           POSTGRES_USER: spisordning
@@ -83,13 +93,10 @@ jobs:
         with:
           go-version: '1.26.1'
           cache: true
-      - name: apply migrations in order
-        run: |
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client
-          for f in $(ls migrations/*.sql | sort); do
-            PGPASSWORD=change-me psql -h localhost -U spisordning -d spisordning \
-              -v ON_ERROR_STOP=1 -f "$f"
-          done
+      - name: build food-brain
+        run: go build -o food-brain ./cmd/food-brain
+      - name: apply migrations via goose
+        run: ./food-brain migrate up
       - name: persistence integration tests
         run: go test -count=1 ./internal/persistence/...
 

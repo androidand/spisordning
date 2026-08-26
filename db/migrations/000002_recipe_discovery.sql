@@ -1,3 +1,4 @@
+-- +goose Up
 -- Recipe discovery: provenance + import-candidate staging.
 --
 -- This migration adds the tables that back the external-recipe import
@@ -18,7 +19,6 @@
 --   * promoted_variant_id is set only when status = 'promoted'; the FK to
 --     recipe_variant is deferred until that table exists.
 
-BEGIN;
 
 -- ── External recipe sources ─────────────────────────────────────────────────
 
@@ -94,4 +94,7 @@ CREATE TABLE recipe_import_candidate_ingredient (
 );
 CREATE INDEX ON recipe_import_candidate_ingredient (candidate_id, needs_review);
 
-COMMIT;
+-- +goose Down
+DROP TABLE IF EXISTS recipe_import_candidate_ingredient CASCADE;
+DROP TABLE IF EXISTS recipe_import_candidate CASCADE;
+DROP TABLE IF EXISTS external_recipe_source CASCADE;

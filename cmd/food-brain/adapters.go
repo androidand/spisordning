@@ -46,6 +46,18 @@ func buildDependencies() httpapi.Dependencies {
 		return deps
 	}
 
+	// Refuse to serve on a database whose schema is behind the embedded
+	// migrations. serve never mutates the schema — run `food-brain migrate up`.
+	pending, err := persistence.MigrationsPending(ctx, cfg)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "⚠ migration check failed:", err)
+		return deps
+	}
+	if pending > 0 {
+		fmt.Fprintf(os.Stderr, "❌ %d migration(s) pending — run `food-brain migrate up` before serving\n", pending)
+		os.Exit(1)
+	}
+
 	deps.People = service.NewPeople(store)
 	deps.Preferences = service.NewPreferences(store)
 	deps.Recipes = service.NewRecipes(store)

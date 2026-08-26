@@ -16,10 +16,10 @@ domain entity.
 
 ### Requirement: Human-addressable entities keep a unique slug
 
-Entities that humans address by name (`person`, `ingredient`, `household`, `product`,
-`inventory_location`) SHALL carry a `slug TEXT NOT NULL UNIQUE` column in addition to their
-UUIDv7 primary key. The slug SHALL be stable and human-readable; the UUID SHALL be the
-referential identity.
+Entities that humans address by name SHALL carry a `slug TEXT NOT NULL UNIQUE` column in addition
+to their UUIDv7 primary key. The slugged entities are `person`, `ingredient`, `household`,
+`product`, and `inventory_location`; the slug SHALL be stable and human-readable, and the UUID
+SHALL be the referential identity.
 
 #### Scenario: A product is referenced by UUID but shown by slug
 - **WHEN** a relationship column references a product
