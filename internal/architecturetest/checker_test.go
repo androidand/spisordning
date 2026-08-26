@@ -75,6 +75,51 @@ func TestCheck_HttpapiImportsPersistence(t *testing.T) {
 	}
 }
 
+func TestCheck_ServiceImportsHttpapi(t *testing.T) {
+	deps := graph(
+		"example.com/spisordning/internal/service: example.com/spisordning/internal/httpapi",
+		"example.com/spisordning/internal/httpapi: fmt",
+	)
+	v := Check(testModule, deps)
+	if len(v) == 0 {
+		t.Fatal("expected a violation for service importing httpapi")
+	}
+	if !strings.Contains(v[0], "internal/service") || !strings.Contains(v[0], "internal/httpapi") {
+		t.Fatalf("violation should name both packages, got: %q", v[0])
+	}
+}
+
+func TestCheck_HttpapiImportsClient(t *testing.T) {
+	deps := graph(
+		"example.com/spisordning/internal/httpapi: example.com/spisordning/internal/mealie",
+		"example.com/spisordning/internal/mealie: example.com/spisordning/internal/httpclient",
+	)
+	v := Check(testModule, deps)
+	if len(v) == 0 {
+		t.Fatal("expected a violation for httpapi importing a client")
+	}
+	if !strings.Contains(v[0], "internal/httpapi") || !strings.Contains(v[0], "internal/mealie") {
+		t.Fatalf("violation should name both packages, got: %q", v[0])
+	}
+}
+
+func TestCheck_ServiceCleanGraphPasses(t *testing.T) {
+	deps := graph(
+		"example.com/spisordning/internal/service: example.com/spisordning/internal/domain example.com/spisordning/internal/mealie example.com/spisordning/internal/dto example.com/spisordning/internal/persistence example.com/spisordning/internal/service/sub",
+		"example.com/spisordning/internal/service/sub: example.com/spisordning/internal/domain",
+		"example.com/spisordning/internal/domain: fmt",
+		"example.com/spisordning/internal/mealie: example.com/spisordning/internal/httpclient",
+		"example.com/spisordning/internal/httpclient: net/http",
+		"example.com/spisordning/internal/dto: fmt",
+		"example.com/spisordning/internal/persistence: example.com/spisordning/internal/domain",
+		"example.com/spisordning/internal/httpapi: example.com/spisordning/internal/dto",
+		"example.com/spisordning/cmd/food-brain: example.com/spisordning/internal/service example.com/spisordning/internal/httpapi",
+	)
+	if v := Check(testModule, deps); len(v) != 0 {
+		t.Fatalf("expected clean graph, got violations:\n%s", strings.Join(v, "\n"))
+	}
+}
+
 func TestCheck_McptoolsImportsPersistence(t *testing.T) {
 	deps := graph(
 		"example.com/spisordning/internal/mcptools: example.com/spisordning/internal/persistence",

@@ -2,12 +2,23 @@
 
 ## 1. Architecture foundation
 
-- [ ] 1.1 Update `internal/architecturetest/checker.go` to add the `Service`
+- [x] 1.1 Update `internal/architecturetest/checker.go` to add the `Service`
       layer and classify `internal/service` into it. Rules:
         - service must not import persistence, httpapi, or cmd
         - service may import domain, client, and other service packages
         - httpapi may import domain and service (but not persistence or client)
         - cmd may import everything
+
+      Verified: `Service` layer classifies `internal/service` + `internal/mcp`;
+      rules enforced for service→{httpapi,cmd} and httpapi→{persistence,client}
+      (client rule added this pass; no existing violations). Deviation from the
+      bullet list: service→persistence stays allowed by design — the proposal's
+      `Store` interface is defined over persistence row types and tasks 2.2–9.2
+      all specify services "backed by `persistence.Store`"; forbidding it would
+      require moving persistence row types out of the layer. Added unit tests
+      (service→httpapi violation, httpapi→client violation, clean service graph
+      incl. subpackage). `go build ./... && go vet ./... && go test ./...` green
+      (389 tests).
 - [ ] 1.2 Define service interfaces in `internal/httpapi/services.go` — these
       are the DI contracts. Each interface lists the methods the HTTP handlers
       and MCP server need.

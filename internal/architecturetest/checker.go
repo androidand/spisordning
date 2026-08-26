@@ -112,6 +112,9 @@ var rules = []rule{
 	{"application must not import clients, service, persistence, httpapi, or cmd", func(f, t Layer) bool {
 		return f == Application && (t == Client || t == Service || t == Persistence || t == HTTPAPI || t == Cmd || t == Unknown)
 	}},
+	// service may import domain, client, contract, and persistence: the
+	// proposal's Store interface (internal/service) is defined over
+	// persistence row types, so services depend on persistence by design.
 	{"service must not import httpapi or cmd", func(f, t Layer) bool {
 		return f == Service && (t == HTTPAPI || t == Cmd || t == Unknown)
 	}},
@@ -124,8 +127,8 @@ var rules = []rule{
 	{"persistence must import only domain and external packages", func(f, t Layer) bool {
 		return f == Persistence && t != Domain && t != External && t != Test
 	}},
-	{"httpapi must not import persistence", func(f, t Layer) bool {
-		return f == HTTPAPI && t == Persistence
+	{"httpapi must not import persistence or clients", func(f, t Layer) bool {
+		return f == HTTPAPI && (t == Persistence || t == Client)
 	}},
 	{"mcptools must not import clients, persistence, httpapi, or cmd", func(f, t Layer) bool {
 		return f == MCPTools && (t == Client || t == Persistence || t == HTTPAPI || t == Cmd || t == Unknown)
