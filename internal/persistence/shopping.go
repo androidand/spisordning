@@ -17,12 +17,18 @@ type ShoppingList struct {
 	CreatedAt       time.Time
 }
 
-// CreateShoppingList inserts a new shopping_list and returns its id.
+// CreateShoppingList inserts a new shopping_list and returns its id. An empty
+// status defaults to "active" (the column's CHECK only allows active/archived,
+// and the schema default does not apply when a value is supplied).
 func (s *Store) CreateShoppingList(ctx context.Context, l ShoppingList) (int64, error) {
+	status := l.Status
+	if status == "" {
+		status = "active"
+	}
 	const q = `INSERT INTO shopping_list (owner_person_id, name, status)
 		VALUES ($1, $2, $3) RETURNING id`
 	var id int64
-	err := s.db.QueryRow(ctx, q, l.OwnerPersonID, l.Name, l.Status).Scan(&id)
+	err := s.db.QueryRow(ctx, q, l.OwnerPersonID, l.Name, status).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("persistence: create shopping_list: %w", err)
 	}

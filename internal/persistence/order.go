@@ -22,7 +22,7 @@ type Order struct {
 
 // CreateOrder inserts a new order and returns its id.
 func (s *Store) CreateOrder(ctx context.Context, o Order) (int64, error) {
-	const q = `INSERT INTO order
+	const q = `INSERT INTO "order"
 		(shopping_cart_id, retailer, source, ordered_at, total_price)
 		VALUES ($1, $2, $3, $4, $5) RETURNING id`
 	var id int64
@@ -36,7 +36,7 @@ func (s *Store) CreateOrder(ctx context.Context, o Order) (int64, error) {
 // GetOrder fetches one order by id.
 func (s *Store) GetOrder(ctx context.Context, id int64) (Order, error) {
 	const q = `SELECT id, shopping_cart_id, retailer, source, ordered_at, total_price
-		FROM order WHERE id = $1`
+		FROM "order" WHERE id = $1`
 	var o Order
 	if err := s.db.QueryRow(ctx, q, id).Scan(&o.ID, &o.ShoppingCartID, &o.Retailer, &o.Source, &o.OrderedAt, &o.TotalPrice); err != nil {
 		return Order{}, fmt.Errorf("persistence: get order: %w", err)
@@ -46,7 +46,7 @@ func (s *Store) GetOrder(ctx context.Context, id int64) (Order, error) {
 
 // ListOrders returns orders optionally filtered by cart or retailer.
 func (s *Store) ListOrders(ctx context.Context, cartID *int64, retailer *string) ([]Order, error) {
-	q := `SELECT id, shopping_cart_id, retailer, source, ordered_at, total_price FROM order WHERE 1=1`
+	q := `SELECT id, shopping_cart_id, retailer, source, ordered_at, total_price FROM "order" WHERE 1=1`
 	var args []any
 	idx := 1
 	if cartID != nil {

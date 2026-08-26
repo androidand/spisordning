@@ -13,7 +13,7 @@ import (
 func TestPrice_RetailerAndStore(t *testing.T) {
 	s := skipWithoutDB(t)
 	ctx := context.Background()
-	truncateTables(t, ctx, s, "price_observation", "store_product_offer", "retailer_product", "store", "retailer")
+	truncateTables(t, ctx, s, "price_observation", "store_product_offer", "retailer_product", "product", "store", "retailer")
 
 	// Create retailer.
 	retailer := domain.Retailer{ID: "r-willys", Name: "Willys"}
@@ -63,7 +63,7 @@ func TestPrice_RetailerAndStore(t *testing.T) {
 func TestPrice_RetailerProduct(t *testing.T) {
 	s := skipWithoutDB(t)
 	ctx := context.Background()
-	truncateTables(t, ctx, s, "price_observation", "store_product_offer", "retailer_product", "store", "retailer")
+	truncateTables(t, ctx, s, "price_observation", "store_product_offer", "retailer_product", "product", "store", "retailer")
 
 	// Seed retailer + store + product.
 	if err := s.CreateRetailer(ctx, domain.Retailer{ID: "r-willys", Name: "Willys"}); err != nil {
@@ -115,7 +115,7 @@ func TestPrice_RetailerProduct(t *testing.T) {
 func TestPrice_StoreProductOffer(t *testing.T) {
 	s := skipWithoutDB(t)
 	ctx := context.Background()
-	truncateTables(t, ctx, s, "price_observation", "store_product_offer", "retailer_product", "store", "retailer")
+	truncateTables(t, ctx, s, "price_observation", "store_product_offer", "retailer_product", "product", "store", "retailer")
 
 	if err := s.CreateRetailer(ctx, domain.Retailer{ID: "r-willys", Name: "Willys"}); err != nil {
 		t.Fatalf("CreateRetailer: %v", err)
@@ -160,7 +160,7 @@ func TestPrice_StoreProductOffer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListStoreProductOffers: %v", err)
 	}
-	if len(offers) != 1 || !offers[0].CurrentlyCarried {
+	if len(offers) != 1 || offers[0].CurrentlyCarried {
 		t.Errorf("ListStoreProductOffers = %v", offers)
 	}
 }
@@ -168,7 +168,7 @@ func TestPrice_StoreProductOffer(t *testing.T) {
 func TestPrice_StoreProductOfferMultiple(t *testing.T) {
 	s := skipWithoutDB(t)
 	ctx := context.Background()
-	truncateTables(t, ctx, s, "price_observation", "store_product_offer", "retailer_product", "store", "retailer")
+	truncateTables(t, ctx, s, "price_observation", "store_product_offer", "retailer_product", "product", "store", "retailer")
 
 	if err := s.CreateRetailer(ctx, domain.Retailer{ID: "r-willys", Name: "Willys"}); err != nil {
 		t.Fatalf("CreateRetailer: %v", err)
@@ -237,7 +237,7 @@ func TestPrice_StoreProductOfferMultiple(t *testing.T) {
 func TestPrice_PriceObservationAppendOnly(t *testing.T) {
 	s := skipWithoutDB(t)
 	ctx := context.Background()
-	truncateTables(t, ctx, s, "price_observation", "store_product_offer", "retailer_product", "store", "retailer")
+	truncateTables(t, ctx, s, "price_observation", "store_product_offer", "retailer_product", "product", "store", "retailer")
 
 	if err := s.CreateRetailer(ctx, domain.Retailer{ID: "r-willys", Name: "Willys"}); err != nil {
 		t.Fatalf("CreateRetailer: %v", err)
@@ -277,7 +277,7 @@ func TestPrice_PriceObservationAppendOnly(t *testing.T) {
 	}
 
 	// All three rows should exist (append-only, never updated).
-	all, err := s.ListPriceObservations(ctx, 1)
+	all, err := s.ListPriceObservations(ctx, offerID)
 	if err != nil {
 		t.Fatalf("ListPriceObservations: %v", err)
 	}
@@ -286,7 +286,7 @@ func TestPrice_PriceObservationAppendOnly(t *testing.T) {
 	}
 
 	// Latest regular price.
-	latest, err := s.GetLatestPriceObservation(ctx, 1, domain.PriceKindRegular)
+	latest, err := s.GetLatestPriceObservation(ctx, offerID, domain.PriceKindRegular)
 	if err != nil {
 		t.Fatalf("GetLatestPriceObservation: %v", err)
 	}
@@ -295,7 +295,7 @@ func TestPrice_PriceObservationAppendOnly(t *testing.T) {
 	}
 
 	// Latest member price.
-	latestMember, err := s.GetLatestPriceObservation(ctx, 1, domain.PriceKindMember)
+	latestMember, err := s.GetLatestPriceObservation(ctx, offerID, domain.PriceKindMember)
 	if err != nil {
 		t.Fatalf("GetLatestPriceObservation member: %v", err)
 	}
@@ -304,7 +304,7 @@ func TestPrice_PriceObservationAppendOnly(t *testing.T) {
 	}
 
 	// No campaign price exists.
-	_, err = s.GetLatestPriceObservation(ctx, 1, domain.PriceKindCampaign)
+	_, err = s.GetLatestPriceObservation(ctx, offerID, domain.PriceKindCampaign)
 	if err == nil {
 		t.Error("expected error for missing campaign price")
 	}
@@ -313,7 +313,7 @@ func TestPrice_PriceObservationAppendOnly(t *testing.T) {
 func TestPrice_CurrentPriceView(t *testing.T) {
 	s := skipWithoutDB(t)
 	ctx := context.Background()
-	truncateTables(t, ctx, s, "price_observation", "store_product_offer", "retailer_product", "store", "retailer")
+	truncateTables(t, ctx, s, "price_observation", "store_product_offer", "retailer_product", "product", "store", "retailer")
 
 	if err := s.CreateRetailer(ctx, domain.Retailer{ID: "r-willys", Name: "Willys"}); err != nil {
 		t.Fatalf("CreateRetailer: %v", err)
@@ -358,7 +358,7 @@ func TestPrice_CurrentPriceView(t *testing.T) {
 func TestPrice_PriceObservationNeverUpdated(t *testing.T) {
 	s := skipWithoutDB(t)
 	ctx := context.Background()
-	truncateTables(t, ctx, s, "price_observation", "store_product_offer", "retailer_product", "store", "retailer")
+	truncateTables(t, ctx, s, "price_observation", "store_product_offer", "retailer_product", "product", "store", "retailer")
 
 	if err := s.CreateRetailer(ctx, domain.Retailer{ID: "r-willys", Name: "Willys"}); err != nil {
 		t.Fatalf("CreateRetailer: %v", err)
@@ -408,7 +408,7 @@ func TestPrice_PriceObservationNeverUpdated(t *testing.T) {
 func TestPrice_PriceObservationsForProduct(t *testing.T) {
 	s := skipWithoutDB(t)
 	ctx := context.Background()
-	truncateTables(t, ctx, s, "price_observation", "store_product_offer", "retailer_product", "store", "retailer")
+	truncateTables(t, ctx, s, "price_observation", "store_product_offer", "retailer_product", "product", "store", "retailer")
 
 	if err := s.CreateRetailer(ctx, domain.Retailer{ID: "r-willys", Name: "Willys"}); err != nil {
 		t.Fatalf("CreateRetailer: %v", err)
@@ -450,7 +450,7 @@ func TestPrice_PriceObservationsForProduct(t *testing.T) {
 func TestPrice_PriceObservationsForStore(t *testing.T) {
 	s := skipWithoutDB(t)
 	ctx := context.Background()
-	truncateTables(t, ctx, s, "price_observation", "store_product_offer", "retailer_product", "store", "retailer")
+	truncateTables(t, ctx, s, "price_observation", "store_product_offer", "retailer_product", "product", "store", "retailer")
 
 	if err := s.CreateRetailer(ctx, domain.Retailer{ID: "r-willys", Name: "Willys"}); err != nil {
 		t.Fatalf("CreateRetailer: %v", err)

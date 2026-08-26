@@ -6,12 +6,28 @@ import (
 	"time"
 )
 
+// createCartForOrder sets up the shopping_list → binding → cart chain and returns
+// the cart id (which order.shopping_cart_id references).
+func createCartForOrder(t *testing.T, s *Store, ctx context.Context) int64 {
+	t.Helper()
+	listID, err := s.CreateShoppingList(ctx, ShoppingList{Name: "Order Test List"})
+	if err != nil {
+		t.Fatalf("CreateShoppingList: %v", err)
+	}
+	bindingID := createBindingForList(t, s, ctx, listID)
+	cartID, err := s.CreateShoppingCart(ctx, ShoppingCart{RetailerListBindingID: bindingID})
+	if err != nil {
+		t.Fatalf("CreateShoppingCart: %v", err)
+	}
+	return cartID
+}
+
 func TestOrder_CreateAndGet(t *testing.T) {
 	s := skipWithoutDB(t)
 	ctx := context.Background()
 	truncateTables(t, ctx, s, "order_item", "order", "shopping_cart_item", "shopping_cart", "retailer_list_binding", "shopping_list_item", "shopping_list")
 
-	cartID := int64(1)
+	cartID := createCartForOrder(t, s, ctx)
 	order, err := s.CreateOrder(ctx, Order{
 		ShoppingCartID: &cartID,
 		Retailer:       "willys",
@@ -62,8 +78,8 @@ func TestOrder_ListFilters(t *testing.T) {
 	ctx := context.Background()
 	truncateTables(t, ctx, s, "order_item", "order")
 
-	cart1 := int64(1)
-	cart2 := int64(2)
+	cart1 := createCartForOrder(t, s, ctx)
+	cart2 := createCartForOrder(t, s, ctx)
 	_, err := s.CreateOrder(ctx, Order{ShoppingCartID: &cart1, Retailer: "willys", Source: "manual", OrderedAt: time.Now()})
 	if err != nil {
 		t.Fatalf("CreateOrder 1: %v", err)
@@ -110,16 +126,25 @@ func TestOrderItem_RoundTrip(t *testing.T) {
 		t.Fatalf("CreateOrder: %v", err)
 	}
 
+	// Create the "substituted for" item first (the original that was swapped out).
+	subForID, err := s.CreateOrderItem(ctx, OrderItem{
+		OrderID:           orderID,
+		RetailerProductID: "willys-original",
+		Quantity:          1,
+	})
+	if err != nil {
+		t.Fatalf("CreateOrderItem (substituted-for): %v", err)
+	}
+
 	unitPrice := 49.5
 	totalPrice := 99.0
-	subFor := int64(1)
 	item, err := s.CreateOrderItem(ctx, OrderItem{
 		OrderID:              orderID,
 		RetailerProductID:    "willys-123",
 		Quantity:             2,
 		UnitPrice:            &unitPrice,
 		TotalPrice:           &totalPrice,
-		SubstitutedForItemID: &subFor,
+		SubstitutedForItemID: &subForID,
 	})
 	if err != nil {
 		t.Fatalf("CreateOrderItem: %v", err)
@@ -129,14 +154,23 @@ func TestOrderItem_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListOrderItems: %v", err)
 	}
-	if len(items) != 1 {
-		t.Fatalf("expected 1 item, got %d", len(items))
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
 	}
-	if items[0].RetailerProductID != "willys-123" || items[0].Quantity != 2 {
-		t.Errorf("item = %+v", items[0])
+	var main *OrderItem
+	for i := range items {
+		if items[i].RetailerProductID == "willys-123" {
+			main = &items[i]
+		}
 	}
-	if items[0].SubstitutedForItemID == nil || *items[0].SubstitutedForItemID != 1 {
-		t.Errorf("substituted_for_item_id = %v, want 1", items[0].SubstitutedForItemID)
+	if main == nil {
+		t.Fatalf("expected to find willys-123 item, got %+v", items)
+	}
+	if main.Quantity != 2 {
+		t.Errorf("item = %+v", main)
+	}
+	if main.SubstitutedForItemID == nil || *main.SubstitutedForItemID != subForID {
+		t.Errorf("substituted_for_item_id = %v, want %d", main.SubstitutedForItemID, subForID)
 	}
 	_ = item
 }

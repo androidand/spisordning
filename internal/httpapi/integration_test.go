@@ -46,6 +46,25 @@ func skipWithoutDB(t *testing.T) *persistence.Store {
 	return store
 }
 
+// truncateTables clears the given tables (CASCADE for FK dependents) so
+// integration tests start from a clean slate. Mirrors the persistence
+// package's helper.
+func truncateTables(t *testing.T, store *persistence.Store, tables ...string) {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := store.BeginTx(ctx)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	if _, err := tx.Exec(ctx, "TRUNCATE "+strings.Join(tables, ", ")+" CASCADE"); err != nil {
+		tx.Rollback(ctx)
+		t.Fatalf("TRUNCATE: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+}
+
 // newTestServer builds an http.ServeMux wired to a real *persistence.Store and
 // returns a httptest.Server bound to it. The caller owns the returned server.
 func newTestServer(t *testing.T, store *persistence.Store) *httptest.Server {
@@ -57,6 +76,8 @@ func newTestServer(t *testing.T, store *persistence.Store) *httptest.Server {
 		Preferences: adapter,
 		Recipes:     adapter,
 		Meals:       adapter,
+		Pantry:      adapter,
+		Plans:       &testAdapter{db: store},
 	})
 	return httptest.NewServer(mux)
 }
@@ -217,6 +238,80 @@ func (a dbAdapter) CreateMealEvent(ctx context.Context, in dto.MealEventNew) (dt
 		})
 	}
 	return out, nil
+}
+
+func (a dbAdapter) ListLocations(ctx context.Context, householdID string) ([]dto.PantryLocation, error) {
+	locs, err := a.store.ListInventoryLocations(ctx, householdID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]dto.PantryLocation, 0, len(locs))
+	for _, l := range locs {
+		out = append(out, dto.PantryLocation{
+			ID: l.ID, HouseholdID: l.HouseholdID, Name: l.Name,
+			LocationType: l.LocationType, ParentLocationID: l.ParentLocationID,
+		})
+	}
+	return out, nil
+}
+
+func (a dbAdapter) CreateLocation(ctx context.Context, in dto.PantryLocationNew) (dto.PantryLocation, error) {
+	id := "loc-" + strings.ReplaceAll(time.Now().Format("20060102150405.000000"), ".", "")
+	l := persistence.InventoryLocation{
+		ID: id, HouseholdID: in.HouseholdID, Name: in.Name,
+		LocationType: in.LocationType, ParentLocationID: in.ParentLocationID,
+	}
+	if err := a.store.CreateInventoryLocation(ctx, l); err != nil {
+		return dto.PantryLocation{}, err
+	}
+	return dto.PantryLocation{
+		ID: id, HouseholdID: in.HouseholdID, Name: in.Name,
+		LocationType: in.LocationType, ParentLocationID: in.ParentLocationID,
+	}, nil
+}
+
+func (a dbAdapter) ListLots(ctx context.Context, locationID string) ([]dto.PantryLot, error) {
+	lots, err := a.store.ListLotsUnderLocation(ctx, locationID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]dto.PantryLot, 0, len(lots))
+	for _, l := range lots {
+		out = append(out, dto.PantryLot{
+			ID: l.ID, IngredientID: l.IngredientID, ProductID: l.ProductID,
+			LocationID: l.LocationID, Quantity: l.Quantity, Unit: l.Unit,
+			Confidence: string(l.Confidence), CreatedAt: l.CreatedAt,
+		})
+	}
+	return out, nil
+}
+
+func (a dbAdapter) Purchase(ctx context.Context, in dto.PantryPurchaseInput) (dto.PantryLot, error) {
+	var bestBefore *time.Time
+	if in.BestBefore != "" {
+		bb, err := time.Parse(time.RFC3339, in.BestBefore)
+		if err != nil {
+			return dto.PantryLot{}, err
+		}
+		bestBefore = &bb
+	}
+	lotID, err := a.store.RecordPurchase(ctx, in.IngredientID, in.ProductID, in.LocationID, in.Quantity, in.Unit, bestBefore, in.Source)
+	if err != nil {
+		return dto.PantryLot{}, err
+	}
+	lot, err := a.store.GetInventoryLot(ctx, lotID)
+	if err != nil {
+		return dto.PantryLot{}, err
+	}
+	return dto.PantryLot{
+		ID: lot.ID, IngredientID: lot.IngredientID, ProductID: lot.ProductID,
+		LocationID: lot.LocationID, Quantity: lot.Quantity, Unit: lot.Unit,
+		Confidence: string(lot.Confidence), CreatedAt: lot.CreatedAt,
+	}, nil
+}
+
+func (a dbAdapter) Consume(ctx context.Context, lotID int64, in dto.PantryConsumeInput) error {
+	return a.store.RecordConsume(ctx, lotID, in.Quantity, in.Estimated, in.Source)
 }
 
 func (a *testAdapter) GetTonight(ctx context.Context) (TonightView, error) {
@@ -515,12 +610,17 @@ func TestAPI_PeopleRoundTrip(t *testing.T) {
 func TestAPI_MealsRoundTrip(t *testing.T) {
 	store := skipWithoutDB(t)
 	ctx := context.Background()
+	truncateTables(t, store, "meal_reaction", "meal_event", "person")
 
 	// meal_event has a FK to recipe_ref, so seed one.
 	if err := store.UpsertRecipeRef(ctx, persistence.RecipeRef{
 		MealieRecipeID: "r-integ-pasta", Title: "Pasta Bolognese", Tags: []string{"pasta"}, Effort: 2,
 	}); err != nil {
 		t.Fatalf("UpsertRecipeRef: %v", err)
+	}
+	// meal_reaction has a FK to person, so seed the reacting person.
+	if err := store.CreatePerson(ctx, persistence.Person{ID: "p-kid", Name: "Kid", Weight: 1.0}); err != nil {
+		t.Fatalf("CreatePerson: %v", err)
 	}
 
 	server := newTestServer(t, store)
@@ -607,6 +707,7 @@ func serverDoPatch(server *httptest.Server, path, body string) *httptest.Respons
 // TestAPI_PlanRoundTrip exercises the /plans lifecycle against a real Postgres store.
 func TestAPI_PlanRoundTrip(t *testing.T) {
 	store := skipWithoutDB(t)
+	truncateTables(t, store, "meal_plan_decision", "meal_plan_candidate", "meal_plan")
 	server := newTestServer(t, store)
 	defer server.Close()
 
@@ -632,8 +733,17 @@ func TestAPI_PlanRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &plans); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
-	if len(plans) != 1 {
-		t.Fatalf("expected 1 plan, got %d", len(plans))
+	// Check the created plan is present (not a global count, which is unsafe
+	// when other packages' tests write to the same DB in parallel).
+	planFound := false
+	for _, p := range plans {
+		if p.ID == plan.ID {
+			planFound = true
+			break
+		}
+	}
+	if !planFound {
+		t.Fatalf("created plan %d not found in list of %d plans", plan.ID, len(plans))
 	}
 
 	// Get plan.
@@ -646,6 +756,12 @@ func TestAPI_PlanRoundTrip(t *testing.T) {
 // TestAPI_PantryRoundTrip exercises the /pantry/locations lifecycle against a real Postgres store.
 func TestAPI_PantryRoundTrip(t *testing.T) {
 	store := skipWithoutDB(t)
+	ctx := context.Background()
+	truncateTables(t, store, "household", "inventory_lot", "inventory_location")
+	// inventory_location has an FK to household, so seed one.
+	if err := store.CreateHousehold(ctx, persistence.Household{ID: "h1", Name: "Test Household"}); err != nil {
+		t.Fatalf("CreateHousehold: %v", err)
+	}
 	server := newTestServer(t, store)
 	defer server.Close()
 
@@ -671,8 +787,17 @@ func TestAPI_PantryRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &locs); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
-	if len(locs) != 1 || locs[0].Name != "Kitchen" {
-		t.Errorf("unexpected locations: %+v", locs)
+	// Check the created location is present (not a global count, which is
+	// unsafe when other packages' tests write to the same DB in parallel).
+	locFound := false
+	for _, l := range locs {
+		if l.ID == loc.ID && l.Name == "Kitchen" {
+			locFound = true
+			break
+		}
+	}
+	if !locFound {
+		t.Errorf("created location %q not found in list of %d locations", loc.ID, len(locs))
 	}
 }
 

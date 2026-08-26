@@ -25,13 +25,13 @@ func (s *Store) DefineUnitConversion(ctx context.Context, fromUnit, toUnit strin
 
 // DefineIngredientUnitConversion is the ONLY write path to
 // ingredient_unit_conversion (design.md invariant 11). It inserts an
-// ingredient-specific (possibly cross-dimension) conversion. form is optional
-// ("" = form-agnostic, stored as NULL). A duplicate (ingredient, from, to, form)
-// is a hard error — the caller must not silently overwrite a curated factor.
-func (s *Store) DefineIngredientUnitConversion(ctx context.Context, ingredientID, form, fromUnit, toUnit string, factor float64) error {
-	const q = `INSERT INTO ingredient_unit_conversion (ingredient_id, form, from_unit, to_unit, factor)
-		VALUES ($1, NULLIF($2, ''), $3, $4, $5)`
-	if _, err := s.db.Exec(ctx, q, ingredientID, form, fromUnit, toUnit, factor); err != nil {
+// ingredient-specific (possibly cross-dimension) conversion. A duplicate
+// (ingredient, from, to) is a hard error — the caller must not silently
+// overwrite a curated factor.
+func (s *Store) DefineIngredientUnitConversion(ctx context.Context, ingredientID, fromUnit, toUnit string, factor float64) error {
+	const q = `INSERT INTO ingredient_unit_conversion (ingredient_id, from_unit, to_unit, factor)
+		VALUES ($1, $2, $3, $4)`
+	if _, err := s.db.Exec(ctx, q, ingredientID, fromUnit, toUnit, factor); err != nil {
 		return fmt.Errorf("persistence: define ingredient_unit_conversion: %w", err)
 	}
 	return nil
@@ -62,10 +62,10 @@ func (s *Store) CountIngredientUnitConversions(ctx context.Context, ingredientID
 // conversion, or found=false when none is defined. Absence is a valid,
 // queryable state per invariant 11 — "no conversion defined yet", never a
 // silent 1:1 default.
-func (s *Store) GetIngredientUnitConversion(ctx context.Context, ingredientID, form, fromUnit, toUnit string) (factor float64, found bool, err error) {
+func (s *Store) GetIngredientUnitConversion(ctx context.Context, ingredientID, fromUnit, toUnit string) (factor float64, found bool, err error) {
 	const q = `SELECT factor FROM ingredient_unit_conversion
-		WHERE ingredient_id = $1 AND COALESCE(form, '') = $2 AND from_unit = $3 AND to_unit = $4`
-	err = s.db.QueryRow(ctx, q, ingredientID, form, fromUnit, toUnit).Scan(&factor)
+		WHERE ingredient_id = $1 AND from_unit = $2 AND to_unit = $3`
+	err = s.db.QueryRow(ctx, q, ingredientID, fromUnit, toUnit).Scan(&factor)
 	if err == pgx.ErrNoRows {
 		return 0, false, nil
 	}

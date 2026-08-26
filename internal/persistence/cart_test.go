@@ -6,6 +6,26 @@ import (
 	"time"
 )
 
+// createBindingForList creates a retailer_list_binding for the given shopping
+// list and returns the binding's id (which shopping_cart.retailer_list_binding_id
+// references — not the shopping_list id).
+func createBindingForList(t *testing.T, s *Store, ctx context.Context, listID int64) int64 {
+	t.Helper()
+	if err := s.CreateOrUpdateRetailerListBinding(ctx, RetailerListBinding{
+		ShoppingListID: listID,
+		Retailer:       "willys",
+		ExternalListID: "9639791045159",
+		SyncDirection:  "outbound",
+	}); err != nil {
+		t.Fatalf("CreateOrUpdateRetailerListBinding: %v", err)
+	}
+	b, err := s.GetRetailerListBinding(ctx, listID, "willys")
+	if err != nil {
+		t.Fatalf("GetRetailerListBinding: %v", err)
+	}
+	return b.ID
+}
+
 func TestShoppingCart_CreateAndGet(t *testing.T) {
 	s := skipWithoutDB(t)
 	ctx := context.Background()
@@ -15,16 +35,9 @@ func TestShoppingCart_CreateAndGet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateShoppingList: %v", err)
 	}
-	if err := s.CreateOrUpdateRetailerListBinding(ctx, RetailerListBinding{
-		ShoppingListID: listID,
-		Retailer:       "willys",
-		ExternalListID: "9639791045159",
-		SyncDirection:  "outbound",
-	}); err != nil {
-		t.Fatalf("CreateOrUpdateRetailerListBinding: %v", err)
-	}
+	bindingID := createBindingForList(t, s, ctx, listID)
 
-	cart, err := s.CreateShoppingCart(ctx, ShoppingCart{RetailerListBindingID: listID})
+	cart, err := s.CreateShoppingCart(ctx, ShoppingCart{RetailerListBindingID: bindingID})
 	if err != nil {
 		t.Fatalf("CreateShoppingCart: %v", err)
 	}
@@ -46,8 +59,9 @@ func TestShoppingCart_StatusTransitions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateShoppingList: %v", err)
 	}
+	bindingID := createBindingForList(t, s, ctx, listID)
 
-	cartID, err := s.CreateShoppingCart(ctx, ShoppingCart{RetailerListBindingID: listID})
+	cartID, err := s.CreateShoppingCart(ctx, ShoppingCart{RetailerListBindingID: bindingID})
 	if err != nil {
 		t.Fatalf("CreateShoppingCart: %v", err)
 	}
@@ -72,8 +86,9 @@ func TestShoppingCartItem_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateShoppingList: %v", err)
 	}
+	bindingID := createBindingForList(t, s, ctx, listID)
 
-	cartID, err := s.CreateShoppingCart(ctx, ShoppingCart{RetailerListBindingID: listID})
+	cartID, err := s.CreateShoppingCart(ctx, ShoppingCart{RetailerListBindingID: bindingID})
 	if err != nil {
 		t.Fatalf("CreateShoppingCart: %v", err)
 	}
@@ -111,8 +126,9 @@ func TestShoppingCartItem_NullPrice(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateShoppingList: %v", err)
 	}
+	bindingID := createBindingForList(t, s, ctx, listID)
 
-	cartID, err := s.CreateShoppingCart(ctx, ShoppingCart{RetailerListBindingID: listID})
+	cartID, err := s.CreateShoppingCart(ctx, ShoppingCart{RetailerListBindingID: bindingID})
 	if err != nil {
 		t.Fatalf("CreateShoppingCart: %v", err)
 	}
@@ -146,15 +162,9 @@ func TestShoppingCart_CASCADEDeletesWithBinding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateShoppingList: %v", err)
 	}
-	if err := s.CreateOrUpdateRetailerListBinding(ctx, RetailerListBinding{
-		ShoppingListID: listID,
-		Retailer:       "willys",
-		ExternalListID: "9639791045159",
-	}); err != nil {
-		t.Fatalf("CreateOrUpdateRetailerListBinding: %v", err)
-	}
+	bindingID := createBindingForList(t, s, ctx, listID)
 
-	cartID, err := s.CreateShoppingCart(ctx, ShoppingCart{RetailerListBindingID: listID})
+	cartID, err := s.CreateShoppingCart(ctx, ShoppingCart{RetailerListBindingID: bindingID})
 	if err != nil {
 		t.Fatalf("CreateShoppingCart: %v", err)
 	}
@@ -177,7 +187,10 @@ func TestShoppingCart_CASCADEDeletesWithBinding(t *testing.T) {
 		t.Error("expected cart to be deleted via CASCADE")
 	}
 	items, err := s.ListShoppingCartItems(ctx, cartID)
-	if err == nil || len(items) != 0 {
+	if err != nil {
+		t.Fatalf("ListShoppingCartItems after CASCADE: %v", err)
+	}
+	if len(items) != 0 {
 		t.Errorf("expected 0 cart items after CASCADE, got %d", len(items))
 	}
 }
@@ -191,18 +204,19 @@ func TestListShoppingCarts_Order(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateShoppingList: %v", err)
 	}
+	bindingID := createBindingForList(t, s, ctx, listID)
 
-	_, err = s.CreateShoppingCart(ctx, ShoppingCart{RetailerListBindingID: listID})
+	_, err = s.CreateShoppingCart(ctx, ShoppingCart{RetailerListBindingID: bindingID})
 	if err != nil {
 		t.Fatalf("CreateShoppingCart 1: %v", err)
 	}
 	time.Sleep(10 * time.Millisecond)
-	_, err = s.CreateShoppingCart(ctx, ShoppingCart{RetailerListBindingID: listID})
+	_, err = s.CreateShoppingCart(ctx, ShoppingCart{RetailerListBindingID: bindingID})
 	if err != nil {
 		t.Fatalf("CreateShoppingCart 2: %v", err)
 	}
 
-	carts, err := s.ListShoppingCarts(ctx, listID)
+	carts, err := s.ListShoppingCarts(ctx, bindingID)
 	if err != nil {
 		t.Fatalf("ListShoppingCarts: %v", err)
 	}

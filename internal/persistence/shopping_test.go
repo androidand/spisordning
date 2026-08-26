@@ -9,9 +9,13 @@ import (
 func TestShoppingList_CreateAndGet(t *testing.T) {
 	s := skipWithoutDB(t)
 	ctx := context.Background()
-	truncateTables(t, ctx, s, "shopping_list_item", "shopping_list")
+	truncateTables(t, ctx, s, "shopping_list_item", "shopping_list", "person")
 
+	// owner_person_id is an FK to person(id); create the owner first.
 	owner := "p-001"
+	if err := s.CreatePerson(ctx, Person{ID: owner, Name: "Owner"}); err != nil {
+		t.Fatalf("CreatePerson: %v", err)
+	}
 	l, err := s.CreateShoppingList(ctx, ShoppingList{
 		OwnerPersonID: &owner,
 		Name:          "Vecka 30",
@@ -291,7 +295,16 @@ func TestShoppingRequirement_Get(t *testing.T) {
 		t.Fatalf("InsertShoppingRequirement: %v", err)
 	}
 
-	got, err := s.GetShoppingRequirement(ctx, req.ID)
+	// InsertShoppingRequirement is an upsert that doesn't return the id, so
+	// look the requirement up by (plan_id, ingredient_id) to get its id.
+	reqs, err := s.ListShoppingRequirements(ctx, planID)
+	if err != nil {
+		t.Fatalf("ListShoppingRequirements: %v", err)
+	}
+	if len(reqs) != 1 {
+		t.Fatalf("expected 1 requirement, got %d", len(reqs))
+	}
+	got, err := s.GetShoppingRequirement(ctx, reqs[0].ID)
 	if err != nil {
 		t.Fatalf("GetShoppingRequirement: %v", err)
 	}

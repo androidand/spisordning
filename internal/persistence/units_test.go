@@ -50,7 +50,7 @@ func TestInvariant11_RegisterProductCreatesNoConversions(t *testing.T) {
 
 	// The absence of a conversion is a valid, queryable state — not a silent
 	// 1:1 default.
-	if _, found, err := s.GetIngredientUnitConversion(ctx, "flour", "", "dl", "g"); err != nil {
+	if _, found, err := s.GetIngredientUnitConversion(ctx, "flour", "dl", "g"); err != nil {
 		t.Fatalf("GetIngredientUnitConversion (absent): %v", err)
 	} else if found {
 		t.Error("found a dl->g conversion before any was explicitly defined")
@@ -58,10 +58,10 @@ func TestInvariant11_RegisterProductCreatesNoConversions(t *testing.T) {
 
 	// Explicitly defining a conversion is the only write path, and it stores the
 	// real factor with no collision (Grocy's auto 1:1 row collided here).
-	if err := s.DefineIngredientUnitConversion(ctx, "flour", "", "dl", "g", 60); err != nil {
+	if err := s.DefineIngredientUnitConversion(ctx, "flour", "dl", "g", 60); err != nil {
 		t.Fatalf("DefineIngredientUnitConversion: %v", err)
 	}
-	factor, found, err := s.GetIngredientUnitConversion(ctx, "flour", "", "dl", "g")
+	factor, found, err := s.GetIngredientUnitConversion(ctx, "flour", "dl", "g")
 	if err != nil {
 		t.Fatalf("GetIngredientUnitConversion (defined): %v", err)
 	}

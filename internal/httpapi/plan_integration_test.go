@@ -1,12 +1,14 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
 	"testing"
 	"time"
 
+	"github.com/androidand/spisordning/internal/persistence"
 	"github.com/oapi-codegen/runtime/types"
 )
 
@@ -90,6 +92,13 @@ func TestIntegration_PlanLifecycle(t *testing.T) {
 
 func TestIntegration_PlanDecisions(t *testing.T) {
 	s := skipWithoutDB(t)
+	ctx := context.Background()
+	// meal_plan_decision has an FK to recipe_ref, so seed the referenced recipes.
+	for _, id := range []string{"r-1", "r-2"} {
+		if err := s.UpsertRecipeRef(ctx, persistence.RecipeRef{MealieRecipeID: id, Title: id, Effort: 2}); err != nil {
+			t.Fatalf("UpsertRecipeRef(%s): %v", id, err)
+		}
+	}
 	adapter := &testAdapter{db: s}
 	mux := newMux(t, Dependencies{Plans: adapter})
 
@@ -149,16 +158,23 @@ func TestIntegration_EffortProfile(t *testing.T) {
 	}
 	var profiles []EffortProfileResponse
 	mustJSON(t, rec.Body.Bytes(), &profiles)
-	if len(profiles) != 1 {
-		t.Fatalf("expected 1 profile, got %d", len(profiles))
+	// Check the weekday-1 profile is present (not a global count, which is
+	// unsafe when other packages' tests write to the same DB in parallel).
+	profileFound := false
+	for _, p := range profiles {
+		if p.Weekday == 1 && p.KitchenEnergy == 2 {
+			profileFound = true
+			break
+		}
 	}
-	if profiles[0].Weekday != 1 || profiles[0].KitchenEnergy != 2 {
-		t.Fatalf("unexpected profile: %+v", profiles[0])
+	if !profileFound {
+		t.Fatalf("profile for weekday 1 not found in list of %d profiles", len(profiles))
 	}
 }
 
 func TestIntegration_PlanningConstraint(t *testing.T) {
 	s := skipWithoutDB(t)
+	truncateTables(t, s, "planning_constraint")
 	adapter := &testAdapter{db: s}
 	mux := newMux(t, Dependencies{Plans: adapter, PlanningConstraints: adapter})
 
@@ -181,8 +197,17 @@ func TestIntegration_PlanningConstraint(t *testing.T) {
 	}
 	var constraints []PlanningConstraintResponse
 	mustJSON(t, rec.Body.Bytes(), &constraints)
-	if len(constraints) != 1 {
-		t.Fatalf("expected 1 constraint, got %d", len(constraints))
+	// Check the created constraint is present (not a global count, which is
+	// unsafe when other packages' tests write to the same DB in parallel).
+	constraintFound := false
+	for _, c := range constraints {
+		if c.ID == constraint.ID {
+			constraintFound = true
+			break
+		}
+	}
+	if !constraintFound {
+		t.Fatalf("created constraint %d not found in list of %d constraints", constraint.ID, len(constraints))
 	}
 }
 

@@ -102,7 +102,7 @@ func (s *Store) AddMealParticipant(ctx context.Context, p MealParticipant) error
 // ListMealParticipants returns all participants for an event.
 func (s *Store) ListMealParticipants(ctx context.Context, eventID int64) ([]MealParticipant, error) {
 	rows, err := s.db.Query(ctx, `SELECT id, meal_event_id, person_id, created_at
-		FROM meal_participant WHERE meal_event_id = $1 ORDER BY created_at`)
+		FROM meal_participant WHERE meal_event_id = $1 ORDER BY created_at`, eventID)
 	if err != nil {
 		return nil, fmt.Errorf("persistence: list meal_participants: %w", err)
 	}
@@ -147,7 +147,7 @@ func (s *Store) UpsertMealReview(ctx context.Context, r MealReview) error {
 // ListMealReviews returns all reviews for an event.
 func (s *Store) ListMealReviews(ctx context.Context, eventID int64) ([]MealReview, error) {
 	rows, err := s.db.Query(ctx, `SELECT id, meal_event_id, person_id, rating, note, created_at, updated_at
-		FROM meal_review WHERE meal_event_id = $1 ORDER BY created_at`)
+		FROM meal_review WHERE meal_event_id = $1 ORDER BY created_at`, eventID)
 	if err != nil {
 		return nil, fmt.Errorf("persistence: list meal_reviews: %w", err)
 	}
@@ -259,7 +259,7 @@ func (s *Store) DeleteFavorite(ctx context.Context, personID, householdID, meali
 // for a given recipe.
 func (s *Store) ListFavoritesForRecipe(ctx context.Context, mealieRecipeID string) ([]Favorite, error) {
 	rows, err := s.db.Query(ctx, `SELECT id, person_id, household_id, mealie_recipe_id, created_at
-		FROM favorite WHERE mealie_recipe_id = $1 ORDER BY created_at`)
+		FROM favorite WHERE mealie_recipe_id = $1 ORDER BY created_at`, mealieRecipeID)
 	if err != nil {
 		return nil, fmt.Errorf("persistence: list favorites: %w", err)
 	}

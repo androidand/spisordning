@@ -85,7 +85,8 @@ func TestMealsAndPreferences_RecipeRatingAggregation(t *testing.T) {
 	e1, _ := s.CreateMealEvent(ctx, "r-pasta", date(t, "2026-08-01"), nil, nil)
 	e2, _ := s.CreateMealEvent(ctx, "r-pasta", date(t, "2026-08-08"), nil, nil)
 
-	// Mum rates both 5; kid rates both 3. Weighted avg = (1*5 + 2*3 + 1*5 + 2*3) / (1+2+1+2) = 24/6 = 4.0.
+	// Mum (weight 1) rates both 5; kid (weight 2) rates both 3.
+	// Weighted avg = (1*5 + 2*3 + 1*5 + 2*3) / (1+2+1+2) = 22/6 ≈ 3.667.
 	s.UpsertMealReview(ctx, MealReview{MealEventID: e1, PersonID: "p-mum", Rating: 5})
 	s.UpsertMealReview(ctx, MealReview{MealEventID: e1, PersonID: "p-kid", Rating: 3})
 	s.UpsertMealReview(ctx, MealReview{MealEventID: e2, PersonID: "p-mum", Rating: 5})
@@ -98,8 +99,8 @@ func TestMealsAndPreferences_RecipeRatingAggregation(t *testing.T) {
 	if rating.ReviewCount != 4 {
 		t.Errorf("review count = %d, want 4", rating.ReviewCount)
 	}
-	if rating.Average < 3.99 || rating.Average > 4.01 {
-		t.Errorf("average = %v, want ~4.0", rating.Average)
+	if rating.Average < 3.66 || rating.Average > 3.68 {
+		t.Errorf("average = %v, want ~3.667", rating.Average)
 	}
 
 	// Rating for a recipe with no reviews is zero-valued.
