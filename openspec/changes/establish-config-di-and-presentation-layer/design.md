@@ -70,14 +70,40 @@ wherever the Proxmox-deployed `ica-adapter` runs. This needed one small cross-re
 done: `IcaClientOptions.cookieCachePath` (new, `store-clients/ica-client/src/index.ts`) plumbed
 through to `EcomAuth`, and `ica-adapter/server.ts` reading `ICA_ELEVATED_CREDENTIAL_PATH` — the
 same env var name `Config.ICAElevatedCredentialPath` (D2/task 2.3) already documented on the Go
-side, now actually meaningful on the TS side too. The sync step itself (copying the file from Mac
-to Proxmox) stays a manual, undocumented-as-automation step — see
+side, now actually meaningful on the TS side too. See
 `docs/infrastructure/ica-elevated-auth.md` for the full writeup and the two alternatives considered
 (keeping `ica-adapter` Mac-resident like `willys-adapter`; a remote-viewable headless browser via
-Xvfb+VNC) and why they were rejected. **Cross-repo note**: the `store-clients` half of this (three
-files: `src/index.ts`, `apps/ica-adapter/server.ts`) is implemented and verified (runtime
-construction check + full existing test suite, no regressions) but is sitting **uncommitted** in
-that sibling repo — this session's git-worktree isolation blocks committing to any repo other than
+Xvfb+VNC) and why they were rejected.
+
+**D2b — The sync step is an HTTP upload/fetch through spisordning, not a raw file copy (decided
+2026-08-28, in response to the household recalling the existing login-capture mechanism and asking
+for it to upload directly).** `EcomAuth`'s login flow already writes captured cookies to a local
+file (`refreshViaBrowser()` in `ecom-session.ts`) — there's no separate "capture" script, the
+mechanism is embedded in `ensureLogin()` itself. Rather than scp-ing that file to Proxmox (which
+would need the Mac and the Proxmox host to agree on a filesystem path, and a human to remember to
+run the copy), spisordning now has a small storage+transfer layer of its own:
+- `db/migrations/000015_retailer_credential.sql`: one `retailer_credential(retailer, tier,
+  payload jsonb, uploaded_at)` table — payload is opaque to Go, stored and served back verbatim.
+- `internal/persistence.{Upsert,Get}RetailerCredential`.
+- `internal/httpapi`: `POST/GET /retailers/{retailer}/elevated-credential`
+  (`RetailerCredentialService`, wired through `storeAdapter` like the other newer capabilities —
+  see `cmd/food-brain/adapters.go`'s doc comment on that pattern).
+- `store-clients/ica-client/apps/ica-adapter/upload-elevated-credential.ts` (new Mac-side script):
+  runs `client.ecomAuth.ensureLogin()` (opens the browser if needed, otherwise reuses/validates the
+  local cache — unchanged library behavior), then POSTs the resulting cookie JSON to spisordning's
+  upload endpoint. `--apply` gates the actual POST (dry-run by default, mirroring
+  `spisordning-bridge.ts`'s convention); `SPISORDNING_URL`/`--url` picks the target, same pattern.
+
+This decouples the login machine from the adapter machine entirely — no shared filesystem or
+manual copy step, and it composes with wherever `ica-adapter` ends up (a future change would have
+`ica-adapter` poll `GET /retailers/ica/elevated-credential` on startup/refresh and write the result
+to its own `ICA_ELEVATED_CREDENTIAL_PATH` locally — **not yet built**, tracked as task 2.7 below,
+scoped separately since it's `ica-adapter`-side work, not spisordning's). **Cross-repo note**: the
+`store-clients` half of this (four files now: `src/index.ts`, `apps/ica-adapter/server.ts` from
+D2a, plus the new `upload-elevated-credential.ts`) is implemented and verified (runtime
+construction/load checks + full existing test suite, no regressions) but is sitting
+**uncommitted** in that sibling repo — this session's git-worktree isolation blocks committing to
+any repo other than
 this one. Needs a manual commit there before this decision is fully landed.
 
 **D3 — SSE ships for plan/resolve progress; WebSockets are explicitly deferred, not built

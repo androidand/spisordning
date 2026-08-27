@@ -38,6 +38,7 @@ type Dependencies struct {
 	ShoppingListItems   ShoppingListItemService
 	ShoppingPush        ShoppingPushService
 	Orders              OrderService
+	RetailerCredentials RetailerCredentialService
 }
 
 type peopleHandler struct {
@@ -170,6 +171,11 @@ func RegisterHandlers(mux *http.ServeMux, deps Dependencies) {
 		mux.HandleFunc("GET /orders/{orderId}", h2.getOrder)
 		h3 := listOrderItemsHandler{svc: deps.Orders}
 		mux.HandleFunc("GET /orders/{orderId}/items", h3.listOrderItems)
+	}
+	if deps.RetailerCredentials != nil {
+		h := retailerCredentialHandler{svc: deps.RetailerCredentials}
+		mux.HandleFunc("POST /retailers/{retailer}/elevated-credential", h.upload)
+		mux.HandleFunc("GET /retailers/{retailer}/elevated-credential", h.get)
 	}
 }
 

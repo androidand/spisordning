@@ -102,6 +102,40 @@
       validation. **Flagged as a real deployment risk**: this cannot work unattended on a headless
       Proxmox LXC (`deploy-food-brain-to-proxmox`'s target) — ICA wishlist push realistically needs
       to stay a human-attended operation unless/until a remote-login-friendly path exists.)
+- [x] 2.7 Build the actual upload path (added 2026-08-28, in response to the household recalling
+      the existing login-capture mechanism and asking for it to upload to spisordning directly,
+      rather than leaving the Mac→Proxmox sync as an undocumented manual copy per 2.6's original
+      writeup).
+      (Done, spisordning side: `db/migrations/000015_retailer_credential.sql` (one
+      `retailer_credential(retailer, tier, payload jsonb, uploaded_at)` table, payload opaque to
+      Go); `internal/persistence.{Upsert,Get}RetailerCredential` +
+      `internal/persistence/retailer_credential_test.go` (3 tests: upload-then-get, overwrite
+      semantics, per-retailer independence — written against the same `skipWithoutDB` pattern as
+      the rest of the suite; **not run against a live Postgres this session — Docker wasn't
+      running** — verify before merging); `internal/httpapi/retailer_credential.go`
+      (`RetailerCredentialService`, `POST`/`GET /retailers/{retailer}/elevated-credential`) wired
+      through `storeAdapter` (`cmd/food-brain/adapters.go`), matching the existing "newer
+      capabilities added straight against persistence.Store" pattern; 4 httpapi unit tests, all
+      passing against a fake service. Full `go build`/`go vet`/`go test ./...` — 465 passed.
+      Store-clients side (uncommitted — see D2b): new
+      `apps/ica-adapter/upload-elevated-credential.ts` runs `ecomAuth.ensureLogin()` then POSTs the
+      resulting cookie JSON to spisordning's upload endpoint, `--apply`-gated dry-run-by-default
+      matching `spisordning-bridge.ts`'s established convention. Verified the script loads/parses
+      correctly (imported as a module so `main()` doesn't fire) — **did not run it for real**, since
+      that would open a real browser window against the live ICA account, a genuine side effect
+      requiring explicit sign-off, not something to trigger while just verifying code.)
+- [ ] 2.8 Have `ica-adapter` itself consume the uploaded credential: on startup (and/or
+      periodically), fetch `GET /retailers/ica/elevated-credential` from spisordning and write the
+      result to its local `cookieCachePath` (the `ICA_ELEVATED_CREDENTIAL_PATH` it already reads
+      per D2a) before `EcomAuth.ensureLogin()` runs, so a Proxmox-deployed adapter actually picks up
+      what the Mac script uploaded. **Not yet built** — scoped separately since it's entirely
+      `ica-adapter`-side (store-clients) work with no spisordning-side component; the upload half
+      (2.7) is a complete, independently useful piece without it (a human could still fetch the
+      credential from spisordning's GET endpoint and place it manually, in the interim).
+- [ ] 2.9 Verify 2.7's persistence tests against a real (or throwaway containerized) Postgres —
+      not done this session (Docker unavailable); the migration SQL closely mirrors
+      `000014_meal_plan_slots.sql`'s proven pattern and the Go code mirrors `units.go`'s, but that's
+      not a substitute for actually running it.
 
 ## 3. SSE progress streaming
 
