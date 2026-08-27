@@ -95,6 +95,10 @@ type SearchTerms map[string]string
 
 // ResolveRequirements sends canonical requirements to the adapter and returns
 // its product resolutions, review flags intact.
+//
+// AuthTier: AuthBasic for every retailer — for ICA this runs over the
+// anonymous ecom surface, which never goes stale (confirmed in
+// expose-shopping-price-and-notes-bridge's task 1.2 research).
 func (c *Client) ResolveRequirements(
 	ctx context.Context,
 	reqs []domain.ShoppingRequirement,
@@ -136,6 +140,10 @@ type CreatedList struct {
 }
 
 // CreateShoppingList creates the per-week wishlist. It never fills a cart.
+//
+// AuthTier: AuthElevated for ICA (needs the mobile OAuth2 session; see
+// AuthTier's doc comment) — a stale session surfaces as ErrElevatedAuthStale
+// where detectable. AuthBasic for Willys (no tiered auth).
 func (c *Client) CreateShoppingList(
 	ctx context.Context,
 	name string,
@@ -148,7 +156,7 @@ func (c *Client) CreateShoppingList(
 
 	var out CreatedList
 	if err := c.http.PostJSON(ctx, "/shopping-lists", payload, &out, nil); err != nil {
-		return nil, err
+		return nil, wrapElevatedAuthError(err)
 	}
 	return &out, nil
 }
@@ -246,6 +254,8 @@ type SyncedList struct {
 
 // SyncShoppingList sends a MERGE sync delta to an ICA adapter and returns the
 // server-confirmed list state.
+// AuthTier: AuthElevated for ICA (see CreateShoppingList's doc comment; the
+// same session backs both create and sync).
 func (c *Client) SyncShoppingList(
 	ctx context.Context,
 	listID string,
@@ -253,7 +263,7 @@ func (c *Client) SyncShoppingList(
 ) (*SyncedList, error) {
 	var out SyncedList
 	if err := c.http.PostJSON(ctx, "/shopping-lists/"+listID+"/sync", delta, &out, nil); err != nil {
-		return nil, err
+		return nil, wrapElevatedAuthError(err)
 	}
 	return &out, nil
 }

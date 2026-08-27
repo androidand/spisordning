@@ -41,6 +41,17 @@ type Config struct {
 	WillysAdapterURL string // ADAPTER_URL. Default "http://localhost:8402".
 	ICAAdapterURL    string // ICA_ADAPTER_URL. Default "http://localhost:8403".
 
+	// ICAElevatedCredentialPath is where ica-adapter's manually-refreshed
+	// elevated (OAuth2 mobile session) credential is expected to live on disk —
+	// see internal/retailer's AuthTier doc comment. Go never reads this file's
+	// contents (ica-adapter owns the session entirely); the path exists so a
+	// future health check can report the credential's age, and so the manual
+	// refresh handoff has one documented, discoverable location instead of
+	// none (see docs/infrastructure/ica-elevated-auth.md). The 401/403
+	// staleness detection in internal/retailer works independently of this —
+	// it reads the adapter's live HTTP response, not this file.
+	ICAElevatedCredentialPath string // ICA_ELEVATED_CREDENTIAL_PATH
+
 	// Ingredient/product data sources — each independently optional.
 	SLVBaseURL   string // SLV_BASE_URL (Livsmedelsverket nutrition data)
 	DabasEnabled bool   // DABAS_ENABLED
@@ -70,8 +81,9 @@ func Load() Config {
 		SkolmatenClientToken: os.Getenv("SKOLMATEN_CLIENT_TOKEN"),
 		SkolmatenSchool:      os.Getenv("SKOLMATEN_SCHOOL"),
 
-		WillysAdapterURL: envDefault("ADAPTER_URL", "http://localhost:8402"),
-		ICAAdapterURL:    envDefault("ICA_ADAPTER_URL", "http://localhost:8403"),
+		WillysAdapterURL:          envDefault("ADAPTER_URL", "http://localhost:8402"),
+		ICAAdapterURL:             envDefault("ICA_ADAPTER_URL", "http://localhost:8403"),
+		ICAElevatedCredentialPath: os.Getenv("ICA_ELEVATED_CREDENTIAL_PATH"),
 
 		SLVBaseURL:   os.Getenv("SLV_BASE_URL"),
 		DabasEnabled: envBool("DABAS_ENABLED"),

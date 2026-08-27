@@ -23,6 +23,24 @@ type Client struct {
 	http    *http.Client
 }
 
+// StatusError is returned by do() for a non-2xx response, carrying the HTTP
+// status code so a caller can distinguish (e.g.) an auth failure (401/403)
+// from a generic backend error without string-matching the message. Callers
+// use errors.As to recover it.
+type StatusError struct {
+	Prefix     string // backend name, e.g. "ica-adapter"
+	StatusCode int
+	Path       string
+	Body       string // the backend's {"error": "..."} message, when present
+}
+
+func (e *StatusError) Error() string {
+	if e.Body != "" {
+		return fmt.Sprintf("%s: HTTP %d for %s: %s", e.Prefix, e.StatusCode, e.Path, e.Body)
+	}
+	return fmt.Sprintf("%s: HTTP %d for %s", e.Prefix, e.StatusCode, e.Path)
+}
+
 // New returns a Client for baseURL (trailing "/" trimmed) whose errors are
 // prefixed with prefix ("mealie", "skolmaten", "adapter", "olla", ...).
 func New(baseURL, prefix string, timeout time.Duration) *Client {
@@ -79,10 +97,7 @@ func (c *Client) do(req *http.Request, out any) error {
 			Error string `json:"error"`
 		}
 		_ = json.NewDecoder(res.Body).Decode(&apiErr)
-		if apiErr.Error != "" {
-			return fmt.Errorf("%s: HTTP %d for %s: %s", c.prefix, res.StatusCode, req.URL.Path, apiErr.Error)
-		}
-		return fmt.Errorf("%s: HTTP %d for %s", c.prefix, res.StatusCode, req.URL.Path)
+		return &StatusError{Prefix: c.prefix, StatusCode: res.StatusCode, Path: req.URL.Path, Body: apiErr.Error}
 	}
 	if err := json.NewDecoder(res.Body).Decode(out); err != nil {
 		return fmt.Errorf("%s: decode %s: %w", c.prefix, req.URL.Path, err)

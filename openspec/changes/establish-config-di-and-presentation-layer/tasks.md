@@ -49,19 +49,59 @@
 
 ## 2. Retailer auth tiers
 
-- [ ] 2.1 Add an `AuthTier` type (`AuthBasic`/`AuthElevated`) to `internal/retailer`.
-- [ ] 2.2 Mark ICA's operations: `Resolve` = basic, `CreateShoppingList` = elevated (per
+- [x] 2.1 Add an `AuthTier` type (`AuthBasic`/`AuthElevated`) to `internal/retailer`.
+      (Done: `internal/retailer/auth.go`. **Scope correction**: task 2.3's original wording targeted
+      `internal/icaretailer` — checked first and found it's dead code, zero consumers outside itself
+      anywhere in `cmd/`/`internal/` per a full grep; `internal/retailer.Client` (via `NewICA`/
+      `NewFromKind`) is what's actually used for both retailers. `AuthTier` and everything in this
+      task group targets `internal/retailer` instead. `internal/icaretailer`'s dead-code status is
+      worth a cleanup decision but is out of scope for this change — flagging, not deleting.)
+- [x] 2.2 Mark ICA's operations: `Resolve` = basic, `CreateShoppingList` = elevated (per
       `expose-shopping-price-and-notes-bridge` D3's finding that anonymous ecom search is never
       stale but the OAuth2 wishlist-push session is).
-- [ ] 2.3 Add the elevated-credential file-path field to `Config` (task 1.1); wire it into
+      (Done: doc comments on `ResolveRequirements` (AuthBasic), `CreateShoppingList` and
+      `SyncShoppingList` (AuthElevated) in `internal/retailer/client.go`, each citing the specific
+      research finding they're grounded in.)
+- [x] 2.3 Add the elevated-credential file-path field to `Config` (task 1.1); wire it into
       `internal/icaretailer`'s construction instead of any independent env read.
-- [ ] 2.4 Surface elevated-auth staleness as a distinct, typed condition (reusing the 401-detection
+      (Done, redirected per 2.1's note: `Config.ICAElevatedCredentialPath`
+      (`ICA_ELEVATED_CREDENTIAL_PATH`) added to `internal/config/config.go`. Honest limitation
+      documented in the field's own doc comment and in `docs/infrastructure/ica-elevated-auth.md`
+      (task 2.6): this path is not yet wired into `ica-adapter` itself — `ica-client`'s `IcaClient`
+      constructor in that sibling repo's `server.ts` doesn't currently accept a `cookieCachePath`
+      override, so this Config field is a documented, discoverable slot for a future health check,
+      not something Go reads today. The 401/403 staleness detection (2.4) doesn't need it — it
+      reads the adapter's live HTTP response, not this file.)
+- [x] 2.4 Surface elevated-auth staleness as a distinct, typed condition (reusing the 401-detection
       approach from `expose-shopping-price-and-notes-bridge` D3) rather than a generic error.
-- [ ] 2.5 Unit tests: a basic-tier call proceeds without the elevated credential present; an
+      (Done: added `httpclient.StatusError` (new type, carries the real HTTP status code, recoverable
+      via `errors.As` — previously the status was only embedded in an unstructured error string) to
+      `internal/httpclient`, and `internal/retailer.ErrElevatedAuthStale` +
+      `wrapElevatedAuthError()` in `internal/retailer/auth.go`, applied to `CreateShoppingList` and
+      `SyncShoppingList`. Detects 401/403 specifically. **Documented limitation** (in `auth.go`'s
+      doc comment and the D2 write-up): this only catches the "catchable" ICA failure shape from
+      that research (opaque 401/502) — the "dangerous" shape (stale session, still 200/201, silently
+      fabricated data) cannot be detected from this side of the HTTP boundary at all; closing that
+      gap needs a fix inside `ica-adapter` itself, tracked in the other change, not here.)
+- [x] 2.5 Unit tests: a basic-tier call proceeds without the elevated credential present; an
       elevated-tier call with a missing/stale credential reports the typed staleness condition.
-- [ ] 2.6 Document the manual elevated-login handoff (who runs the Playwright login, where the
+      (Done: `internal/retailer/auth_test.go` — 401 and 403 both classify as `ErrElevatedAuthStale`
+      via `errors.Is`; a 502 (the distinct "catchable" shape) does NOT get misclassified as
+      elevated-auth-stale; `ResolveRequirements` (AuthBasic) never wraps even a hypothetical 401 as
+      elevated-auth-stale, since it doesn't go through `wrapElevatedAuthError` at all; plus direct
+      unit tests on `wrapElevatedAuthError` for nil and non-`StatusError` inputs. Also added
+      `TestNon2xx_SurfacesBackendError`'s sibling assertions in `internal/httpclient/httpclient_test.go`
+      confirming `errors.As` recovers the real status code and body. 7 new tests, all passing.)
+- [x] 2.6 Document the manual elevated-login handoff (who runs the Playwright login, where the
       resulting credential file goes) in `docs/infrastructure/` — today this has no documented
       location at all.
+      (Done: `docs/infrastructure/ica-elevated-auth.md`, grounded in reading `ica-client/src/auth/
+      {oauth2,ecom-session}.ts` directly rather than assuming. Key finding worth a second look:
+      `ensureLogin()` opens a real, visible browser window and waits up to 10 minutes for a human —
+      there is no separate script, it's triggered reactively whenever the cached session fails live
+      validation. **Flagged as a real deployment risk**: this cannot work unattended on a headless
+      Proxmox LXC (`deploy-food-brain-to-proxmox`'s target) — ICA wishlist push realistically needs
+      to stay a human-attended operation unless/until a remote-login-friendly path exists.)
 
 ## 3. SSE progress streaming
 

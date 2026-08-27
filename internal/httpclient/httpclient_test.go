@@ -3,6 +3,7 @@ package httpclient
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -74,6 +75,17 @@ func TestNon2xx_SurfacesBackendError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "backend") || !strings.Contains(err.Error(), "session expired") {
 		t.Errorf("error should be attributed and carry the backend message: %v", err)
+	}
+
+	var statusErr *StatusError
+	if !errors.As(err, &statusErr) {
+		t.Fatalf("expected a *StatusError, got %T", err)
+	}
+	if statusErr.StatusCode != http.StatusBadGateway {
+		t.Errorf("StatusCode = %d, want %d", statusErr.StatusCode, http.StatusBadGateway)
+	}
+	if statusErr.Body != "session expired" {
+		t.Errorf("Body = %q, want %q", statusErr.Body, "session expired")
 	}
 }
 

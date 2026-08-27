@@ -19,7 +19,7 @@ func TestLoad_Defaults(t *testing.T) {
 		"SPISORNING_ADDR": "", "SPISORNING_MCP_ADDR": "",
 		"MEALIE_BASE_URL": "", "MEALIE_API_TOKEN": "",
 		"SKOLMATEN_BASE_URL": "", "SKOLMATEN_CLIENT_TOKEN": "", "SKOLMATEN_SCHOOL": "",
-		"ADAPTER_URL": "", "ICA_ADAPTER_URL": "",
+		"ADAPTER_URL": "", "ICA_ADAPTER_URL": "", "ICA_ELEVATED_CREDENTIAL_PATH": "",
 		"SLV_BASE_URL": "", "DABAS_ENABLED": "", "MPK_ENABLED": "",
 		"OLLA_OPENAI_BASE_URL": "", "OLLA_MODEL": "",
 	})
@@ -37,6 +37,9 @@ func TestLoad_Defaults(t *testing.T) {
 	}
 	if cfg.ICAAdapterURL != "http://localhost:8403" {
 		t.Errorf("ICAAdapterURL = %q, want http://localhost:8403", cfg.ICAAdapterURL)
+	}
+	if cfg.ICAElevatedCredentialPath != "" {
+		t.Errorf("ICAElevatedCredentialPath = %q, want empty when unset", cfg.ICAElevatedCredentialPath)
 	}
 	if cfg.SkolmatenBaseURL != "http://192.168.1.120:8787" {
 		t.Errorf("SkolmatenBaseURL = %q, want http://192.168.1.120:8787", cfg.SkolmatenBaseURL)
@@ -58,12 +61,16 @@ func TestLoad_OverridesAndOptionalIntegrations(t *testing.T) {
 		"MEALIE_BASE_URL": "http://mealie.local:9000", "MEALIE_API_TOKEN": "tok",
 		"OLLA_OPENAI_BASE_URL": "http://olla.local", "OLLA_MODEL": "llama",
 		"DABAS_ENABLED": "1", "MPK_ENABLED": "true",
+		"ICA_ELEVATED_CREDENTIAL_PATH": "/etc/spisordning/ica-ecom-cookies.json",
 	})
 
 	cfg := Load()
 
 	if cfg.HTTPAddr != ":9999" {
 		t.Errorf("HTTPAddr override not applied, got %q", cfg.HTTPAddr)
+	}
+	if cfg.ICAElevatedCredentialPath != "/etc/spisordning/ica-ecom-cookies.json" {
+		t.Errorf("ICAElevatedCredentialPath = %q, want the configured path", cfg.ICAElevatedCredentialPath)
 	}
 	if !cfg.MealieEnabled() {
 		t.Error("MealieEnabled() = false with both vars set, want true")
