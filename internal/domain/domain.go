@@ -57,9 +57,23 @@ const (
 	EffortHigh   Effort = 3 // project cooking
 )
 
+// Slot identifies which meal of the day a candidate or decision belongs to.
+type Slot string
+
+const (
+	SlotDinner    Slot = "dinner"
+	SlotBreakfast Slot = "breakfast"
+	SlotSnack     Slot = "snack"
+)
+
+// DefaultSlot returns SlotDinner, the historical default for all existing
+// callers that predate the slot concept.
+func DefaultSlot() Slot { return SlotDinner }
+
 // Candidate is a recipe considered for a slot, carrying the denormalized
 // metadata the scorer needs. Recipes remain owned by Mealie; MealieRecipeID is
-// the reference back to the source of truth.
+// the reference back to the source of truth. For non-Mealie candidates (e.g.
+// the snack fallback list), MealieRecipeID is empty.
 type Candidate struct {
 	MealieRecipeID string
 	Title          string
@@ -68,6 +82,9 @@ type Candidate struct {
 	// Ingredients are canonical ingredient ids (not retailer product ids).
 	Ingredients []string
 	Effort      Effort
+	// Slot identifies which meal of the day this candidate is for.
+	// Defaults to SlotDinner for existing callers.
+	Slot Slot
 }
 
 // Ingredient is one structured line of a recipe's ingredient list in canonical

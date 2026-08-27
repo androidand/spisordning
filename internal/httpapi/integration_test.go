@@ -162,6 +162,17 @@ func (a dbAdapter) ListRecipes(ctx context.Context) ([]dto.RecipeRefResponse, er
 	return out, nil
 }
 
+func (a dbAdapter) GetRecipe(ctx context.Context, id string) (dto.RecipeRefResponse, error) {
+	r, err := a.store.GetRecipeRef(ctx, id)
+	if err != nil {
+		return dto.RecipeRefResponse{}, ErrNotFound
+	}
+	return dto.RecipeRefResponse{
+		MealieRecipeID: r.MealieRecipeID, Title: r.Title, Tags: r.Tags,
+		Effort: r.Effort, LastSyncedAt: r.LastSyncedAt,
+	}, nil
+}
+
 func (a dbAdapter) GetMeal(ctx context.Context, id int64) (dto.MealEventResponse, error) {
 	event, err := a.store.GetMealEvent(ctx, id)
 	if err != nil {

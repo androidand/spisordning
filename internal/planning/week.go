@@ -8,9 +8,10 @@ import (
 	"github.com/androidand/spisordning/internal/scoring"
 )
 
-// PlannedSlot is one chosen dinner for a date.
+// PlannedSlot is one chosen meal for a date and slot kind.
 type PlannedSlot struct {
 	Date   time.Time
+	Slot   domain.Slot
 	Winner scoring.ScoredCandidate
 }
 
@@ -62,9 +63,84 @@ func PlanWeek(ctx context.Context, cfg WeekConfig, monday time.Time, days int) [
 
 		for _, sc := range ranked {
 			if sc.Feasible {
-				slots = append(slots, PlannedSlot{Date: date, Winner: sc})
+				slots = append(slots, PlannedSlot{Date: date, Slot: domain.SlotDinner, Winner: sc})
 				recent = append(recent, domain.RecentMeal{MealieRecipeID: sc.Candidate.MealieRecipeID, Served: date})
 				break
+			}
+		}
+	}
+	return slots
+}
+
+// PlanSimpleSlot plans a single non-dinner slot (breakfast or snack) for a date
+// using a simplified rule set: no school-lunch dedup, no effort filtering.
+// Candidates are scored and the first feasible winner is returned. This is
+// intentionally simpler than PlanWeek — breakfast/snack don't need the full
+// dinner rule set.
+func PlanSimpleSlot(ctx context.Context, cfg WeekConfig, candidates []domain.Candidate, date time.Time, slot domain.Slot) *PlannedSlot {
+	pctx := domain.PlanContext{
+		Day:         date,
+		People:      cfg.People,
+		Preferences: cfg.Preferences,
+	}
+	// No SchoolLunchTags, no KitchenEnergy for non-dinner slots.
+
+	ranked := scoring.RankSimple(candidates, pctx)
+	for _, sc := range ranked {
+		if sc.Feasible {
+			return &PlannedSlot{Date: date, Slot: slot, Winner: sc}
+		}
+	}
+	return nil
+}
+
+// PlanWeekAllSlots plans all three slots (dinner, breakfast, snack) for each
+// date in the range. Dinner uses the full rule set (school-lunch dedup, effort
+// filtering); breakfast and snack use the simplified rule set.
+func PlanWeekAllSlots(ctx context.Context, cfg WeekConfig, monday time.Time, days int, breakfastCandidates, snackCandidates []domain.Candidate) []PlannedSlot {
+	var slots []PlannedSlot
+	var recent []domain.RecentMeal
+
+	for i := 0; i < days; i++ {
+		date := monday.AddDate(0, 0, i)
+
+		// Dinner: full rule set.
+		pctx := domain.PlanContext{
+			Day:           date,
+			People:        cfg.People,
+			Preferences:   cfg.Preferences,
+			RecentMealIDs: recent,
+		}
+		if cfg.EnergyFor != nil {
+			pctx.KitchenEnergy = cfg.EnergyFor(date)
+		}
+		if cfg.SchoolTagsFor != nil {
+			pctx.SchoolLunchTags = cfg.SchoolTagsFor(date)
+		}
+
+		ranked := scoring.Rank(cfg.Candidates, pctx, scoring.DefaultWeights())
+		if cfg.Reorder != nil {
+			ranked = cfg.Reorder(ctx, ranked)
+		}
+		for _, sc := range ranked {
+			if sc.Feasible {
+				slots = append(slots, PlannedSlot{Date: date, Slot: domain.SlotDinner, Winner: sc})
+				recent = append(recent, domain.RecentMeal{MealieRecipeID: sc.Candidate.MealieRecipeID, Served: date})
+				break
+			}
+		}
+
+		// Breakfast: simplified rule set.
+		if len(breakfastCandidates) > 0 {
+			if bs := PlanSimpleSlot(ctx, cfg, breakfastCandidates, date, domain.SlotBreakfast); bs != nil {
+				slots = append(slots, *bs)
+			}
+		}
+
+		// Snack: simplified rule set.
+		if len(snackCandidates) > 0 {
+			if ss := PlanSimpleSlot(ctx, cfg, snackCandidates, date, domain.SlotSnack); ss != nil {
+				slots = append(slots, *ss)
 			}
 		}
 	}

@@ -54,6 +54,57 @@ func TestResolve_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestResolve_PriceFields(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"resolutions": []map[string]any{
+				{
+					"matchType":         "search",
+					"productCode":       "7340039192756",
+					"productName":       "Mjölk 3,2%",
+					"packages":          1,
+					"confidence":        0.92,
+					"needsReview":       false,
+					"quantityUncertain": false,
+					"retailer":          "ica",
+					"priceValue":        18.9,
+					"price":             "18.90 kr",
+				},
+				{
+					"matchType":         "none",
+					"productCode":       "",
+					"packages":          0,
+					"confidence":        0.0,
+					"needsReview":       true,
+					"quantityUncertain": true,
+					"retailer":          "ica",
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	got, err := New(srv.URL).Resolve(context.Background(), []string{"mjölk", "saffran"})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 resolutions, got %d", len(got))
+	}
+	// A priced resolution carries both the numeric (comparable) and display price,
+	// with the same field names/types as internal/retailer.Resolution (Willys).
+	if got[0].PriceValue == nil || *got[0].PriceValue != 18.9 {
+		t.Errorf("expected priceValue 18.9, got %+v", got[0].PriceValue)
+	}
+	if got[0].Price == nil || *got[0].Price != "18.90 kr" {
+		t.Errorf("expected price \"18.90 kr\", got %+v", got[0].Price)
+	}
+	// An unresolved resolution leaves price absent (nil), not zero.
+	if got[1].PriceValue != nil || got[1].Price != nil {
+		t.Errorf("unresolved resolution must have nil price, got %+v", got[1])
+	}
+}
+
 func TestBarcodeLookup(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/barcode/7340039192756" || r.Method != http.MethodGet {

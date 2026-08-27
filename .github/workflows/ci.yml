@@ -101,7 +101,7 @@ jobs:
         run: go test -count=1 ./internal/persistence/...
 
   docker:
-    name: docker image builds
+    name: docker image build + publish
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -113,12 +113,17 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: build
+      - name: build + publish on main
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: false
-          tags: ghcr.io/${{ github.repository_owner }}/food-brain:ci
+          # Build-verify on every push/PR; actually publish to GHCR only on a
+          # push to main (where GITHUB_TOKEN has write scope). The image name
+          # matches the `image:` refs in docker-compose.yml (task 2.1).
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: |
+            ghcr.io/${{ github.repository }}/food-brain:latest
+            ghcr.io/${{ github.repository }}/food-brain:${{ github.sha }}
           # food-brain now runs an HTTP server (api/openapi.yaml); this build
           # ensures the multi-stage Dockerfile stays buildable (task 4.1).
 

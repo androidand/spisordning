@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/androidand/spisordning/internal/ambient"
@@ -14,9 +13,9 @@ import (
 	"github.com/androidand/spisordning/internal/llm"
 	"github.com/androidand/spisordning/internal/mealie"
 	"github.com/androidand/spisordning/internal/planning"
-	"github.com/androidand/spisordning/internal/persistence"
 	"github.com/androidand/spisordning/internal/retailer"
 	"github.com/androidand/spisordning/internal/scoring"
+	"github.com/androidand/spisordning/internal/service"
 	"github.com/androidand/spisordning/internal/skolmaten"
 )
 
@@ -95,16 +94,6 @@ func RunPlan(ctx context.Context, in RunPlanInput) (RunPlanResult, error) {
 	}
 	monday := mondayOfISOWeek(year, week)
 
-	// ── Inputs ────────────────────────────────────────────────────────────────
-	refs, err := mealie.New(mealieURL, mealieToken).SyncRecipes(ctx)
-	if err != nil {
-		return RunPlanResult{}, fmt.Errorf("mealie sync: %w", err)
-	}
-	if len(refs) == 0 {
-		return RunPlanResult{}, fmt.Errorf("no recipes in Mealie — add some first")
-	}
-	candidates, ingredientLines := candidatesFromRefs(refs)
-
 	schoolTags := map[string][]string{} // date -> tags
 	if in.School != "" {
 		sk := skolmaten.New(envOr("SKOLMATEN_BASE_URL", "http://192.168.1.120:8787"), os.Getenv("SKOLMATEN_CLIENT_TOKEN"))
@@ -122,9 +111,23 @@ func RunPlan(ctx context.Context, in RunPlanInput) (RunPlanResult, error) {
 		olla = llm.New(base, os.Getenv("OLLA_MODEL"))
 	}
 
-	// ── Per-day planning ──────────────────────────────────────────────────────
-	planned := planning.PlanWeek(ctx, planning.WeekConfig{
-		Candidates:  candidates,
+	// ── Orchestrate via the planning service (tasks 7.2/7.4) ──────────────────
+	// The service owns mealie sync, candidate conversion, scoring, explanations,
+	// shopping requirements, and persistence. The composition root keeps only the
+	// wiring (store + mealie client) and the CLI-specific display/wishlist path.
+	store, err := openStore(ctx)
+	if err != nil {
+		return RunPlanResult{}, fmt.Errorf("open store: %w", err)
+	}
+	var db service.Store
+	if store != nil {
+		db = store
+	}
+	planningSvc := service.NewPlanning(db, mealie.New(mealieURL, mealieToken))
+
+	pw, err := planningSvc.PlanWeek(ctx, service.PlanWeekInput{
+		WeekStart:   monday,
+		Days:        in.Days,
 		People:      fam.People,
 		Preferences: fam.Preferences,
 		EnergyFor: func(date time.Time) domain.Effort {
@@ -142,17 +145,17 @@ func RunPlan(ctx context.Context, in RunPlanInput) (RunPlanResult, error) {
 			}
 			return ranked
 		},
-	}, monday, in.Days)
-
-	// ── Compute LLM explanations once (shared between display and write-tonight) ──
-	explanations := map[string]string{} // mealie_recipe_id -> explanation
-	if olla != nil {
-		for _, s := range planned {
-			if expl, err := llm.Explain(olla, ctx, s.Winner); err == nil && expl != "" {
-				explanations[s.Winner.Candidate.MealieRecipeID] = strings.TrimSpace(expl)
-			}
-		}
+		Olla: olla,
+	})
+	if err != nil {
+		return RunPlanResult{}, err
 	}
+
+	// Aliases so the display and wishlist sections below read unchanged.
+	planned := pw.Planned
+	explanations := pw.Explanations
+	meals := pw.Meals
+	reqs := pw.Reqs
 
 	// ── Present the plan ──────────────────────────────────────────────────────
 	fmt.Println("\nProposed week:")
@@ -195,33 +198,13 @@ func RunPlan(ctx context.Context, in RunPlanInput) (RunPlanResult, error) {
 		fmt.Printf("\nWrote ambient projection to %s (%d dinners)\n", in.WriteTonight, len(projection.Slots))
 	}
 
-	// ── Shopping requirements ─────────────────────────────────────────────────
-	var meals []planning.ChosenMeal
-	for _, s := range planned {
-		meals = append(meals, ingredientLines[s.Winner.Candidate.MealieRecipeID])
-	}
-	allReqs := planning.BuildRequirements(meals)
-	// Drop pantry staples (salt, pepper, oil, …) — assumed on hand, never bought.
-	reqs, _ := planning.PartitionStaples(allReqs)
-
-	// ── Persist the plan to Postgres (task 2.3) ─────────────────────────────────
-	// No-op when no database is configured (openStore returns nil); the CLI
-	// behavior is otherwise unchanged. Captured here so the catalog path
-	// (task 3.3) can reuse the same connection.
-	var store *persistence.Store
-	if perr := func() error {
-		s, err := openStore(ctx)
-		if err != nil {
-			return err
-		}
-		store = s
-		if s == nil {
-			return nil // no database configured -> stay in-memory
-		}
-		return persistPlan(ctx, s, monday, planned, reqs)
-	}(); perr != nil {
-		fmt.Fprintf(os.Stderr, "⚠ could not persist plan to Postgres: %v\n", perr)
-	} else if store != nil {
+	// ── Persist result (task 2.3) ─────────────────────────────────────────────
+	// The service already persisted the plan (or skipped it when no database is
+	// configured). Persistence is best-effort: a failure warns but does not fail
+	// the run. The store is reused below by the catalog path (task 3.3).
+	if pw.PersistError != nil {
+		fmt.Fprintf(os.Stderr, "⚠ could not persist plan to Postgres: %v\n", pw.PersistError)
+	} else if pw.Persisted {
 		fmt.Printf("✅ persisted plan for week %d-W%02d to Postgres (meal_plan + candidates + decisions + shopping_requirements)\n", year, week)
 	}
 
@@ -301,6 +284,24 @@ func RunPlan(ctx context.Context, in RunPlanInput) (RunPlanResult, error) {
 	if len(items) == 0 {
 		return result, fmt.Errorf("nothing confidently resolved — review the mappings first")
 	}
+
+	// Print what resolved before attempting the wishlist, so a wishlist-creation
+	// failure (a real, observed Willys-side outage) doesn't discard already-done
+	// resolution work — the caller can still act on these products manually.
+	fmt.Printf("\nResolved %d item(s):\n", len(items))
+	for _, res := range resolutions {
+		if res.NeedsReview || res.RetailerProductID == nil {
+			continue
+		}
+		fmt.Printf("  %s  %s  x%d\n", *res.RetailerProductID, res.ProductName, res.Packages)
+	}
+	if len(review) > 0 {
+		fmt.Printf("%d item(s) need manual review:\n", len(review))
+		for _, res := range review {
+			fmt.Printf("  ⚠ %s (confidence %.2f)\n", res.IngredientID, res.Confidence)
+		}
+	}
+
 	name := fmt.Sprintf("Vecka %d", week)
 	created, err := rc.CreateShoppingList(ctx, name, items)
 	if err != nil {
@@ -352,45 +353,6 @@ func runPlan(args []string) error {
 	fmt.Printf("Planning week %d-W%02d (%s) — %d dinners\n", result.WeekYear, result.WeekNum, result.WeekStart.Format("2006-01-02"), result.PlanCount)
 	fmt.Println(result.Message)
 	return nil
-}
-
-// candidatesFromRefs converts Mealie references into scorer candidates and a
-// lookup of each recipe's canonical ingredient lines for requirements.
-func candidatesFromRefs(refs []mealie.RecipeRef) ([]domain.Candidate, map[string]planning.ChosenMeal) {
-	var candidates []domain.Candidate
-	lines := map[string]planning.ChosenMeal{}
-
-	for _, ref := range refs {
-		c := domain.Candidate{
-			MealieRecipeID: ref.MealieRecipeID,
-			Title:          ref.Title,
-			Tags:           ref.Tags,
-			Effort:         ref.Effort,
-		}
-		meal := planning.ChosenMeal{MealieRecipeID: ref.MealieRecipeID}
-		for _, ing := range ref.Ingredients {
-			if ing.FoodName == "" {
-				continue // unmapped free-text line; ingredient_mapping review picks these up
-			}
-			// Canonical id: lowercase food name until the mapping table refines it.
-			id := domain.CanonicalIngredientID(ing.FoodName)
-			c.Ingredients = append(c.Ingredients, id)
-			qty := ing.Quantity
-			if qty <= 0 {
-				qty = 1
-			}
-			unit := ing.Unit
-			if unit == "" {
-				unit = "st"
-			}
-			meal.Ingredients = append(meal.Ingredients, domain.Ingredient{
-				IngredientID: id, Quantity: qty, Unit: unit,
-			})
-		}
-		candidates = append(candidates, c)
-		lines[ref.MealieRecipeID] = meal
-	}
-	return candidates, lines
 }
 
 func loadFamily(path string) (*familyConfig, error) {

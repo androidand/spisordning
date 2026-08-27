@@ -44,6 +44,16 @@ func (h *ingredientsHandler) lookupNutrition(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, out)
 }
 
+func (h *ingredientsHandler) nutritionByID(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	out, err := h.svc.NutritionByID(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "nutrition by id: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 func (h *ingredientsHandler) searchDabas(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("q")
 	out, err := h.svc.SearchDabas(r.Context(), query)

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -22,10 +23,15 @@ import (
 
 type fakePlanner struct {
 	calls   int
-	dinners []mcptools.PlannedDinner
+	dinners []mcptools.PlannedSlot
 }
 
-func (f *fakePlanner) PlanDinners(_ context.Context, _ time.Time, _ int) ([]mcptools.PlannedDinner, error) {
+func (f *fakePlanner) PlanDinners(_ context.Context, _ time.Time, _ int) ([]mcptools.PlannedSlot, error) {
+	f.calls++
+	return f.dinners, nil
+}
+
+func (f *fakePlanner) PlanSlots(_ context.Context, _ time.Time, _ int, _ []string) ([]mcptools.PlannedSlot, error) {
 	f.calls++
 	return f.dinners, nil
 }
@@ -105,7 +111,7 @@ func toolNames(tools []*mcp.Tool) []string {
 // Streamable HTTP via the SDK client: connect, list tools, call a tool, and
 // assert both the response and the side effect on the fake service.
 func TestIntegration_StreamableHTTP(t *testing.T) {
-	planner := &fakePlanner{dinners: []mcptools.PlannedDinner{{Date: "2026-08-20", Recipe: "r1", Title: "Pasta", Score: 0.9}}}
+	planner := &fakePlanner{dinners: []mcptools.PlannedSlot{{Date: "2026-08-20", Slot: "dinner", Recipe: "r1", Title: "Pasta", Score: 0.9}}}
 	reactions := &fakeReactions{}
 	reqs := &fakeRequirements{reqs: []mcptools.ShoppingRequirement{{Ingredient: "tomato", Quantity: 4, Unit: "pcs"}}}
 	deps := mcptools.Dependencies{Planner: planner, Reactions: reactions, Requirements: reqs}
@@ -164,5 +170,84 @@ func TestIntegration_MalformedCallRejected(t *testing.T) {
 	}
 	if reactions.calls != 0 {
 		t.Fatalf("fake reactions called %d times, want 0 (malformed call must not reach the application layer)", reactions.calls)
+	}
+}
+
+// TestIntegration_SevenDayPlanWithAllSlots requests a 7-day plan over MCP with
+// all three slot kinds and asserts dinner+breakfast+snack candidates are
+// returned for each date. It also records a breakfast reaction and verifies
+// the slot is passed through.
+func TestIntegration_SevenDayPlanWithAllSlots(t *testing.T) {
+	// Build a fake planner that returns all three slot kinds for 7 days.
+	var slots []mcptools.PlannedSlot
+	for i := 0; i < 7; i++ {
+		date := time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC).AddDate(0, 0, i).Format("2006-01-02")
+		slots = append(slots,
+			mcptools.PlannedSlot{Date: date, Slot: "dinner", Recipe: fmt.Sprintf("dinner-%d", i), Title: fmt.Sprintf("Dinner %d", i), Score: 0.9},
+			mcptools.PlannedSlot{Date: date, Slot: "breakfast", Recipe: fmt.Sprintf("breakfast-%d", i), Title: fmt.Sprintf("Breakfast %d", i), Score: 0.8},
+			mcptools.PlannedSlot{Date: date, Slot: "snack", Recipe: fmt.Sprintf("snack-%d", i), Title: fmt.Sprintf("Snack %d", i), Score: 0.7},
+		)
+	}
+	planner := &fakePlanner{dinners: slots}
+	reactions := &fakeReactions{}
+	deps := mcptools.Dependencies{Planner: planner, Reactions: reactions}
+
+	cs := connectClient(t, startServer(t, deps))
+
+	// Request a 7-day plan with all slot kinds.
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "list_recipe_candidates",
+		Arguments: map[string]any{
+			"date":  "2026-08-17",
+			"days":  7,
+			"slots": []string{"dinner", "breakfast", "snack"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("call tool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected tool error: %+v", res)
+	}
+	got := structured[[]mcptools.PlannedSlot](t, res)
+	if len(got) != 21 {
+		t.Fatalf("expected 21 slots (7 days x 3 kinds), got %d", len(got))
+	}
+
+	// Verify each date has all three slot kinds.
+	for i := 0; i < 7; i++ {
+		date := time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC).AddDate(0, 0, i).Format("2006-01-02")
+		for _, kind := range []string{"dinner", "breakfast", "snack"} {
+			found := false
+			for _, s := range got {
+				if s.Date == date && s.Slot == kind {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("missing %s slot for %s", kind, date)
+			}
+		}
+	}
+
+	// Record a breakfast reaction and verify the slot is passed through.
+	res2, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "record_meal_reaction",
+		Arguments: map[string]any{
+			"recipe": "breakfast-0", "served_on": "2026-08-17", "person_id": "p1", "sentiment": 1, "slot": "breakfast",
+		},
+	})
+	if err != nil {
+		t.Fatalf("call record_meal_reaction: %v", err)
+	}
+	if res2.IsError {
+		t.Fatalf("unexpected tool error: %+v", res2)
+	}
+	if reactions.calls != 1 {
+		t.Fatalf("fake reactions called %d times, want 1", reactions.calls)
+	}
+	if reactions.last.Slot != "breakfast" {
+		t.Errorf("slot = %q, want breakfast", reactions.last.Slot)
 	}
 }

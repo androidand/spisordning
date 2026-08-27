@@ -12,12 +12,13 @@ import (
 // MealEvent mirrors migrations/0001_init.sql meal_event plus the plan link
 // added by migrations/0010_meals_and_preferences.sql.
 type MealEvent struct {
-	ID               int64
-	MealieRecipeID   string
-	ServedOn         time.Time
-	MealPlanID       *int64     // nil for ad-hoc meals
-	MealPlanSlotDate *time.Time // nil for ad-hoc meals; paired with MealPlanID
-	CreatedAt        time.Time
+	ID                int64
+	MealieRecipeID    string
+	ServedOn          time.Time
+	MealPlanID        *int64     // nil for ad-hoc meals
+	MealPlanSlotDate  *time.Time // nil for ad-hoc meals; paired with MealPlanID
+	MealPlanSlotKind  *string    // nil for ad-hoc meals; paired with MealPlanID
+	CreatedAt         time.Time
 }
 
 // CreateMealEvent records that a recipe was served on a day. When planID and
@@ -30,6 +31,19 @@ func (s *Store) CreateMealEvent(ctx context.Context, mealieRecipeID string, serv
 	var id int64
 	if err := s.db.QueryRow(ctx, q, mealieRecipeID, servedOn, planID, planSlotDate).Scan(&id); err != nil {
 		return 0, fmt.Errorf("persistence: create meal_event: %w", err)
+	}
+	return id, nil
+}
+
+// CreateMealEventWithSlot records that a recipe was served on a day, with an
+// explicit slot_kind. When planID and planSlotDate are both non-nil they form
+// a composite FK to the specific meal_plan_decision row that produced this meal.
+func (s *Store) CreateMealEventWithSlot(ctx context.Context, mealieRecipeID string, servedOn time.Time, planID *int64, planSlotDate *time.Time, planSlotKind *string) (int64, error) {
+	const q = `INSERT INTO meal_event (mealie_recipe_id, served_on, meal_plan_id, meal_plan_slot_date, meal_plan_slot_kind)
+		VALUES ($1, $2, $3, $4, $5) RETURNING id`
+	var id int64
+	if err := s.db.QueryRow(ctx, q, mealieRecipeID, servedOn, planID, planSlotDate, planSlotKind).Scan(&id); err != nil {
+		return 0, fmt.Errorf("persistence: create meal_event with slot: %w", err)
 	}
 	return id, nil
 }
@@ -277,16 +291,18 @@ func (s *Store) ListFavoritesForRecipe(ctx context.Context, mealieRecipeID strin
 
 // GetMealEvent fetches a meal event by id.
 func (s *Store) GetMealEvent(ctx context.Context, id int64) (MealEvent, error) {
-	const q = `SELECT id, mealie_recipe_id, served_on, meal_plan_id, meal_plan_slot_date, created_at
+	const q = `SELECT id, mealie_recipe_id, served_on, meal_plan_id, meal_plan_slot_date, meal_plan_slot_kind, created_at
 		FROM meal_event WHERE id = $1`
 	var m MealEvent
 	var planID *int64
 	var planSlot *time.Time
-	if err := s.db.QueryRow(ctx, q, id).Scan(&m.ID, &m.MealieRecipeID, &m.ServedOn, &planID, &planSlot, &m.CreatedAt); err != nil {
+	var planSlotKind *string
+	if err := s.db.QueryRow(ctx, q, id).Scan(&m.ID, &m.MealieRecipeID, &m.ServedOn, &planID, &planSlot, &planSlotKind, &m.CreatedAt); err != nil {
 		return MealEvent{}, fmt.Errorf("persistence: get meal_event: %w", err)
 	}
 	m.MealPlanID = planID
 	m.MealPlanSlotDate = planSlot
+	m.MealPlanSlotKind = planSlotKind
 	return m, nil
 }
 
@@ -296,19 +312,19 @@ func (s *Store) ListMealEvents(ctx context.Context, mealieRecipeID, servedOn str
 	var q string
 	var args []interface{}
 	if mealieRecipeID != "" && servedOn != "" {
-		q = `SELECT id, mealie_recipe_id, served_on, meal_plan_id, meal_plan_slot_date, created_at
+		q = `SELECT id, mealie_recipe_id, served_on, meal_plan_id, meal_plan_slot_date, meal_plan_slot_kind, created_at
 			 FROM meal_event WHERE mealie_recipe_id = $1 AND served_on = $2 ORDER BY served_on DESC`
 		args = []interface{}{mealieRecipeID, servedOn}
 	} else if mealieRecipeID != "" {
-		q = `SELECT id, mealie_recipe_id, served_on, meal_plan_id, meal_plan_slot_date, created_at
+		q = `SELECT id, mealie_recipe_id, served_on, meal_plan_id, meal_plan_slot_date, meal_plan_slot_kind, created_at
 			 FROM meal_event WHERE mealie_recipe_id = $1 ORDER BY served_on DESC`
 		args = []interface{}{mealieRecipeID}
 	} else if servedOn != "" {
-		q = `SELECT id, mealie_recipe_id, served_on, meal_plan_id, meal_plan_slot_date, created_at
+		q = `SELECT id, mealie_recipe_id, served_on, meal_plan_id, meal_plan_slot_date, meal_plan_slot_kind, created_at
 			 FROM meal_event WHERE served_on = $1 ORDER BY served_on DESC`
 		args = []interface{}{servedOn}
 	} else {
-		q = `SELECT id, mealie_recipe_id, served_on, meal_plan_id, meal_plan_slot_date, created_at
+		q = `SELECT id, mealie_recipe_id, served_on, meal_plan_id, meal_plan_slot_date, meal_plan_slot_kind, created_at
 			 FROM meal_event ORDER BY served_on DESC`
 	}
 	rows, err := s.db.Query(ctx, q, args...)
@@ -326,7 +342,8 @@ func scanMealEvents(rows pgx.Rows) ([]MealEvent, error) {
 		var m MealEvent
 		var planID *int64
 		var planSlot *time.Time
-		if err := rows.Scan(&m.ID, &m.MealieRecipeID, &m.ServedOn, &planID, &planSlot, &m.CreatedAt); err != nil {
+		var planSlotKind *string
+		if err := rows.Scan(&m.ID, &m.MealieRecipeID, &m.ServedOn, &planID, &planSlot, &planSlotKind, &m.CreatedAt); err != nil {
 			return nil, err
 		}
 		if planID != nil {
@@ -335,6 +352,7 @@ func scanMealEvents(rows pgx.Rows) ([]MealEvent, error) {
 		if planSlot != nil {
 			m.MealPlanSlotDate = planSlot
 		}
+		m.MealPlanSlotKind = planSlotKind
 		out = append(out, m)
 	}
 	return out, rows.Err()
@@ -361,11 +379,13 @@ func (s *Store) GetTonightMeal(ctx context.Context, today time.Time) (TonightMea
 		FROM meal_plan mp
 		JOIN meal_plan_decision mpd ON mpd.plan_id = mp.id
 		JOIN meal_event me ON me.served_on = mpd.slot_date AND me.mealie_recipe_id = mpd.mealie_recipe_id
+			AND (me.meal_plan_slot_kind IS NULL OR me.meal_plan_slot_kind = mpd.slot_kind)
 		JOIN recipe_ref rr ON rr.mealie_recipe_id = me.mealie_recipe_id
 		LEFT JOIN meal_reaction mr ON mr.meal_event_id = me.id
 		WHERE mp.week_start = (SELECT week_start FROM meal_plan WHERE week_start <= $1 ORDER BY week_start DESC LIMIT 1)
 		  AND mp.status = 'approved'
 		  AND mpd.slot_date = $1
+		  AND mpd.slot_kind = 'dinner'
 		ORDER BY mr.id`
 	rows, err := s.db.Query(ctx, q, today)
 	if err != nil {

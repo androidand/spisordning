@@ -54,6 +54,7 @@ type IngredientMappingResolve struct {
 type IngredientsService interface {
 	SearchFood(ctx context.Context, query string, limit int) ([]Ingredient, error)
 	LookupNutrition(ctx context.Context, nummer int) ([]IngredientNutrient, error)
+	NutritionByID(ctx context.Context, id string) ([]IngredientNutrient, error)
 	SearchDabas(ctx context.Context, query string) ([]IngredientProduct, error)
 	SearchMatpriskollen(ctx context.Context, query string) ([]IngredientProduct, error)
 	ResolveMapping(ctx context.Context, mealieFoodID string, in IngredientMappingResolve) (IngredientMapping, error)

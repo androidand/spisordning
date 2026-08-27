@@ -5,7 +5,10 @@
 #   docker compose up -d
 #
 # Tengil usage:
-#   Deploy via POST /api/apps with type=compose (see openspec/changes/deploy-via-docker-compose/)
+#   Deploy via POST /api/apps with type=compose (see
+#   openspec/changes/deploy-food-brain-to-proxmox/). Tengil does not support `build:`,
+#   so the Tengil compose file uses pre-pulled GHCR images for every service (mcp-server
+#   included, via an entrypoint override) rather than the local `build:` below.
 
 services:
   postgres:
@@ -16,7 +19,7 @@ services:
       POSTGRES_USER: spisordning
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql
     ports:
       - '5433:5432'
     healthcheck:

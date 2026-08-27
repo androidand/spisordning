@@ -85,10 +85,17 @@ func buildMCPDeps(logger *slog.Logger) mcptools.Dependencies {
 		return deps
 	}
 
-	adapter := mcpStoreAdapter{db: store}
+	adapter := mcpStoreAdapter{
+		db:        store,
+		willysURL: envDefault("ADAPTER_URL", "http://localhost:8402"),
+		icaURL:    envDefault("ICA_ADAPTER_URL", "http://localhost:8403"),
+	}
 	deps.Planner = adapter
 	deps.Reactions = adapter
 	deps.Requirements = adapter
+	deps.ShoppingList = adapter
+	deps.Compare = adapter
+	deps.Wishlist = adapter
 	return deps
 }
 

@@ -7,14 +7,23 @@ import (
 	"time"
 
 	"github.com/androidand/spisordning/internal/dto"
+	"github.com/androidand/spisordning/internal/mealie"
 	"github.com/androidand/spisordning/internal/persistence"
 )
 
-// Planning implements dto.PlanningService.
-type Planning struct{ db Store }
+// Planning implements the PlanningService interface defined in dto and the
+// PlanWeek orchestration used by the `food-brain plan` CLI and the MCP
+// plan_week tool.
+type Planning struct {
+	db     Store
+	mealie *mealie.Client
+}
 
-// NewPlanning returns a Planning service backed by db.
-func NewPlanning(db Store) *Planning { return &Planning{db: db} }
+// NewPlanning returns a Planning service backed by db. mc may be nil when no
+// Mealie instance is configured; PlanWeek then reports an error.
+func NewPlanning(db Store, mc *mealie.Client) *Planning {
+	return &Planning{db: db, mealie: mc}
+}
 
 func (s *Planning) ListPlans(ctx context.Context) ([]dto.MealPlan, error) {
 	plans, err := s.db.ListMealPlans(ctx)

@@ -19,6 +19,7 @@ import (
 	"github.com/androidand/spisordning/internal/dto"
 	"github.com/androidand/spisordning/internal/httpapi"
 	"github.com/androidand/spisordning/internal/ingredients"
+	"github.com/androidand/spisordning/internal/mealie"
 	"github.com/androidand/spisordning/internal/persistence"
 	"github.com/androidand/spisordning/internal/service"
 	"github.com/jackc/pgx/v5"
@@ -58,9 +59,13 @@ func buildDependencies() httpapi.Dependencies {
 		os.Exit(1)
 	}
 
+	var mealieClient *mealie.Client
+	if mealieURL := os.Getenv("MEALIE_BASE_URL"); mealieURL != "" && os.Getenv("MEALIE_API_TOKEN") != "" {
+		mealieClient = mealie.New(mealieURL, os.Getenv("MEALIE_API_TOKEN"))
+	}
 	deps.People = service.NewPeople(store)
 	deps.Preferences = service.NewPreferences(store)
-	deps.Recipes = service.NewRecipes(store)
+	deps.Recipes = service.NewRecipes(store, mealieClient)
 	deps.Meals = service.NewMeals(store, nil)
 	deps.Pantry = service.NewPantry(store)
 
@@ -78,7 +83,7 @@ func buildDependencies() httpapi.Dependencies {
 		mpk = ingredients.NewMatpriskollen()
 	}
 	deps.Ingredients = service.NewIngredients(store, slv, dabas, mpk)
-	deps.Stores = service.NewStores(mpk)
+	deps.Stores = service.NewStores(store, mpk)
 
 	// storeAdapter implements the newer capabilities added straight against
 	// persistence.Store (no internal/service/internal/dto indirection): tonight,
@@ -458,6 +463,37 @@ func (a storeAdapter) CreateShoppingList(ctx context.Context, in httpapi.Shoppin
 		return httpapi.ShoppingListResponse{}, fmt.Errorf("shopping list create: %w", err)
 	}
 	return httpapi.ShoppingListResponse{ID: int(l), Name: in.Name, Status: "active", CreatedAt: time.Now()}, nil
+}
+
+// CreateFromChecklist creates a shopping list plus its line items in one call, the
+// ingestion target for the Mac-local Apple Notes reader (POST /shopping-lists/from-checklist).
+func (a storeAdapter) CreateFromChecklist(ctx context.Context, in httpapi.ShoppingListFromChecklistInput) (httpapi.ShoppingListFromChecklistResponse, error) {
+	items := make([]persistence.ShoppingListItem, 0, len(in.Items))
+	for _, it := range in.Items {
+		label := it.Label
+		items = append(items, persistence.ShoppingListItem{
+			Label: &label, Quantity: float64(it.Quantity), Unit: it.Unit, Checked: false,
+		})
+	}
+	listID, itemIDs, err := a.db.CreateShoppingListWithItems(ctx,
+		persistence.ShoppingList{Name: in.Name, Status: "active"}, items)
+	if err != nil {
+		return httpapi.ShoppingListFromChecklistResponse{}, fmt.Errorf("shopping list from-checklist create: %w", err)
+	}
+	respItems := make([]httpapi.ShoppingListItemResponse, 0, len(in.Items))
+	for i, it := range in.Items {
+		label := it.Label
+		respItems = append(respItems, httpapi.ShoppingListItemResponse{
+			ID: int(itemIDs[i]), ShoppingListID: int(listID), Label: &label,
+			Quantity: it.Quantity, Unit: it.Unit, Checked: false, AddedAt: time.Now(),
+		})
+	}
+	return httpapi.ShoppingListFromChecklistResponse{
+		ShoppingListResponse: httpapi.ShoppingListResponse{
+			ID: int(listID), Name: in.Name, Status: "active", CreatedAt: time.Now(),
+		},
+		Items: respItems,
+	}, nil
 }
 
 func (a storeAdapter) GetShoppingList(ctx context.Context, listID int64) (httpapi.ShoppingListResponse, error) {

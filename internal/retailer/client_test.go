@@ -97,6 +97,58 @@ func TestResolveRequirements_PreservesReviewFlag(t *testing.T) {
 	}
 }
 
+func TestResolveRequirements_PriceFields(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"resolutions": []map[string]any{
+				{
+					"ingredientId":      "cauliflower",
+					"retailerProductId": "willys-123",
+					"productName":       "Blomkål Klass 1",
+					"packages":          1,
+					"matchType":         "exact",
+					"confidence":        0.94,
+					"needsReview":       false,
+					"priceValue":        29.9,
+					"price":             "29,90 kr",
+				},
+				{
+					"ingredientId":      "saffron",
+					"retailerProductId": nil,
+					"packages":          0,
+					"matchType":         "none",
+					"confidence":        0.0,
+					"needsReview":       true,
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	got, err := New(srv.URL).ResolveRequirements(context.Background(),
+		[]domain.ShoppingRequirement{
+			{IngredientID: "cauliflower", Quantity: 500, Unit: "g"},
+			{IngredientID: "saffron", Quantity: 1, Unit: "g"},
+		}, nil)
+	if err != nil {
+		t.Fatalf("ResolveRequirements: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 resolutions, got %d", len(got))
+	}
+	// A priced resolution carries both the numeric (comparable) and display price.
+	if got[0].PriceValue == nil || *got[0].PriceValue != 29.9 {
+		t.Errorf("expected priceValue 29.9, got %+v", got[0].PriceValue)
+	}
+	if got[0].Price == nil || *got[0].Price != "29,90 kr" {
+		t.Errorf("expected price \"29,90 kr\", got %+v", got[0].Price)
+	}
+	// An unresolved resolution leaves price absent (nil), not zero.
+	if got[1].PriceValue != nil || got[1].Price != nil {
+		t.Errorf("unresolved resolution must have nil price, got %+v", got[1])
+	}
+}
+
 func TestCreateShoppingList_RoundTrip(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/shopping-lists" {

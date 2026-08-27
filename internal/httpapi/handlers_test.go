@@ -204,6 +204,13 @@ func (f *fakeIngredientsSvc) GetMapping(ctx context.Context, mealieFoodID string
 	return f.mapping, nil
 }
 
+func (f *fakeIngredientsSvc) NutritionByID(ctx context.Context, id string) ([]dto.IngredientNutrient, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.nutrients, nil
+}
+
 func TestSearchFood_HappyPath(t *testing.T) {
 	svc := &fakeIngredientsSvc{foods: []dto.Ingredient{
 		{ID: "cauliflower", Display: "Cauliflower", Source: "slv"},
@@ -309,6 +316,8 @@ func TestResolveMapping_MissingIngredientID(t *testing.T) {
 
 type fakeStoresSvc struct {
 	products []dto.IngredientProduct
+	stores   []dto.Store
+	offers   []dto.StoreOffer
 	err      error
 }
 
@@ -324,6 +333,20 @@ func (f *fakeStoresSvc) SearchProductsByGTIN(ctx context.Context, gtin string) (
 		return nil, f.err
 	}
 	return f.products, nil
+}
+
+func (f *fakeStoresSvc) ListStores(ctx context.Context) ([]dto.Store, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.stores, nil
+}
+
+func (f *fakeStoresSvc) ListStoreOffers(ctx context.Context, storeID string) ([]dto.StoreOffer, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.offers, nil
 }
 
 func TestSearchProducts_HappyPath(t *testing.T) {
@@ -366,6 +389,46 @@ func TestSearchByGTIN_MissingGTIN(t *testing.T) {
 	rec := doGet(t, mux, "/products/by-gtin")
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestListStores_HappyPath(t *testing.T) {
+	svc := &fakeStoresSvc{stores: []dto.Store{{ID: "s-1", RetailerID: "ica", Name: "ICA"}}}
+	mux := newMux(t, Dependencies{Stores: svc})
+
+	rec := doGet(t, mux, "/stores")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body)
+	}
+	var got []dto.Store
+	mustJSON(t, rec.Body.Bytes(), &got)
+	if len(got) != 1 || got[0].ID != "s-1" {
+		t.Fatalf("unexpected stores: %+v", got)
+	}
+}
+
+func TestListStoreOffers_HappyPath(t *testing.T) {
+	svc := &fakeStoresSvc{offers: []dto.StoreOffer{{ID: 7, StoreID: "s-1", RetailerProductID: "rp-1", CurrentlyCarried: true}}}
+	mux := newMux(t, Dependencies{Stores: svc})
+
+	rec := doGet(t, mux, "/stores/s-1/offers")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body)
+	}
+	var got []dto.StoreOffer
+	mustJSON(t, rec.Body.Bytes(), &got)
+	if len(got) != 1 || got[0].ID != 7 {
+		t.Fatalf("unexpected offers: %+v", got)
+	}
+}
+
+func TestListStores_Error(t *testing.T) {
+	svc := &fakeStoresSvc{err: errSentinel("boom")}
+	mux := newMux(t, Dependencies{Stores: svc})
+
+	rec := doGet(t, mux, "/stores")
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
 	}
 }
 

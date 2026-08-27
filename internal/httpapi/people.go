@@ -63,6 +63,7 @@ func RegisterHandlers(mux *http.ServeMux, deps Dependencies) {
 	if deps.Recipes != nil {
 		h := recipesHandler{svc: deps.Recipes}
 		mux.HandleFunc("GET /recipes", h.listRecipes)
+		mux.HandleFunc("GET /recipes/{id}", h.getRecipe)
 	}
 	if deps.Meals != nil {
 		h := mealsHandler{svc: deps.Meals}
@@ -81,6 +82,7 @@ func RegisterHandlers(mux *http.ServeMux, deps Dependencies) {
 	if deps.Ingredients != nil {
 		h := ingredientsHandler{svc: deps.Ingredients}
 		mux.HandleFunc("GET /ingredients/search", h.searchFood)
+		mux.HandleFunc("GET /ingredients/by-id/{id}/nutrition", h.nutritionByID)
 		mux.HandleFunc("GET /ingredients/nutrition/{nummer}", h.lookupNutrition)
 		mux.HandleFunc("GET /ingredients/dabas/search", h.searchDabas)
 		mux.HandleFunc("GET /ingredients/matpriskollen/search", h.searchMatpriskollen)
@@ -88,6 +90,8 @@ func RegisterHandlers(mux *http.ServeMux, deps Dependencies) {
 	}
 	if deps.Stores != nil {
 		h := storesHandler{svc: deps.Stores}
+		mux.HandleFunc("GET /stores", h.listStores)
+		mux.HandleFunc("GET /stores/{id}/offers", h.listStoreOffers)
 		mux.HandleFunc("GET /products/search", h.searchProducts)
 		mux.HandleFunc("GET /products/by-gtin", h.searchByGTIN)
 	}
@@ -134,10 +138,12 @@ func RegisterHandlers(mux *http.ServeMux, deps Dependencies) {
 		mux.HandleFunc("GET /shopping-lists", h.listShoppingLists)
 		h2 := shoppingListCreateHandler{svc: deps.ShoppingLists}
 		mux.HandleFunc("POST /shopping-lists", h2.createShoppingList)
-		h3 := shoppingListGetHandler{svc: deps.ShoppingLists}
-		mux.HandleFunc("GET /shopping-lists/{listId}", h3.getShoppingList)
-		h4 := shoppingListArchiveHandler{svc: deps.ShoppingLists}
-		mux.HandleFunc("DELETE /shopping-lists/{listId}", h4.archiveShoppingList)
+		h3 := shoppingListFromChecklistHandler{svc: deps.ShoppingLists}
+		mux.HandleFunc("POST /shopping-lists/from-checklist", h3.createFromChecklist)
+		h4 := shoppingListGetHandler{svc: deps.ShoppingLists}
+		mux.HandleFunc("GET /shopping-lists/{listId}", h4.getShoppingList)
+		h5 := shoppingListArchiveHandler{svc: deps.ShoppingLists}
+		mux.HandleFunc("DELETE /shopping-lists/{listId}", h5.archiveShoppingList)
 	}
 	if deps.ShoppingListItems != nil {
 		h := shoppingItemListHandler{svc: deps.ShoppingListItems}

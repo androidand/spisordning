@@ -4,6 +4,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/androidand/spisordning/internal/dto"
@@ -66,6 +67,30 @@ func (s *Ingredients) LookupNutrition(ctx context.Context, nummer int) ([]dto.In
 		})
 	}
 	return out, nil
+}
+
+// NutritionByID returns the nutrient values for a canonical ingredient id of
+// the form "slv-{nummer}". Other id shapes are rejected: only SLV-backed
+// ingredients have a nutrition lookup today.
+func (s *Ingredients) NutritionByID(ctx context.Context, id string) ([]dto.IngredientNutrient, error) {
+	nummer, ok := slvNummerFromID(id)
+	if !ok {
+		return nil, fmt.Errorf("service: nutrition by id: unsupported ingredient id %q (want slv-{nummer})", id)
+	}
+	return s.LookupNutrition(ctx, nummer)
+}
+
+// slvNummerFromID parses an "slv-{nummer}" ingredient id into its SLV nummer.
+func slvNummerFromID(id string) (int, bool) {
+	const prefix = "slv-"
+	if !strings.HasPrefix(id, prefix) {
+		return 0, false
+	}
+	n, err := strconv.Atoi(strings.TrimPrefix(id, prefix))
+	if err != nil {
+		return 0, false
+	}
+	return n, true
 }
 
 func (s *Ingredients) SearchDabas(ctx context.Context, query string) ([]dto.IngredientProduct, error) {

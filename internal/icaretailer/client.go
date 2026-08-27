@@ -31,6 +31,13 @@ type Resolution struct {
 	NeedsReview       bool    `json:"needsReview"`
 	QuantityUncertain bool    `json:"quantityUncertain"`
 	Retailer          string  `json:"retailer"` // "ica"
+	// PriceValue is the numeric SEK price of the resolved product (per package),
+	// when the adapter knows it. Nil when the product has no price. Field names
+	// and types match internal/retailer.Resolution (Willys) for cross-retailer
+	// price comparison.
+	PriceValue *float64 `json:"priceValue"`
+	// Price is the formatted display price (e.g. "29.90 kr"), when available.
+	Price *string `json:"price"`
 }
 
 // ResolveRequest is the body for POST /resolve.

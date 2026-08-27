@@ -9,24 +9,29 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/androidand/spisordning/internal/domain"
 	"github.com/androidand/spisordning/internal/mcptools"
 	"github.com/androidand/spisordning/internal/persistence"
 	"github.com/androidand/spisordning/internal/planning"
+	"github.com/androidand/spisordning/internal/retailer"
+	"github.com/androidand/spisordning/internal/skolmaten"
 )
 
 // mcpStoreAdapter adapts *persistence.Store to the mcptools service interfaces.
 // It is the sole place that knows both the persistence row types and the
 // mcptools DTOs; mcptools sees only the interfaces it defines itself.
 type mcpStoreAdapter struct {
-	db *persistence.Store
+	db        *persistence.Store
+	willysURL string
+	icaURL    string
 }
 
 // PlanDinners loads the household and recipe candidates, then delegates to the
 // application-layer planner.
-func (a mcpStoreAdapter) PlanDinners(ctx context.Context, date time.Time, days int) ([]mcptools.PlannedDinner, error) {
+func (a mcpStoreAdapter) PlanDinners(ctx context.Context, date time.Time, days int) ([]mcptools.PlannedSlot, error) {
 	candidates, err := a.loadCandidates(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("plan dinners: load candidates: %w", err)
@@ -35,17 +40,107 @@ func (a mcpStoreAdapter) PlanDinners(ctx context.Context, date time.Time, days i
 	if err != nil {
 		return nil, fmt.Errorf("plan dinners: load household: %w", err)
 	}
+	energy, err := a.loadEnergyFor(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("plan dinners: load effort profile: %w", err)
+	}
+	schoolTags, err := a.loadSchoolTagsFor(ctx, date)
+	if err != nil {
+		return nil, fmt.Errorf("plan dinners: load school tags: %w", err)
+	}
 
 	slots := planning.PlanWeek(ctx, planning.WeekConfig{
-		Candidates:  candidates,
-		People:      people,
-		Preferences: prefs,
+		Candidates:    candidates,
+		People:        people,
+		Preferences:   prefs,
+		EnergyFor:     energy,
+		SchoolTagsFor: schoolTags,
 	}, date, days)
 
-	out := make([]mcptools.PlannedDinner, 0, len(slots))
+	out := make([]mcptools.PlannedSlot, 0, len(slots))
 	for _, slot := range slots {
-		out = append(out, mcptools.PlannedDinner{
+		out = append(out, mcptools.PlannedSlot{
 			Date:   slot.Date.Format("2006-01-02"),
+			Slot:   string(slot.Slot),
+			Recipe: slot.Winner.Candidate.MealieRecipeID,
+			Title:  slot.Winner.Candidate.Title,
+			Score:  slot.Winner.Score,
+		})
+	}
+	return out, nil
+}
+
+// PlanSlots plans the requested slot kinds for a date range.
+func (a mcpStoreAdapter) PlanSlots(ctx context.Context, date time.Time, days int, slots []string) ([]mcptools.PlannedSlot, error) {
+	candidates, err := a.loadCandidates(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("plan slots: load candidates: %w", err)
+	}
+	people, prefs, err := a.loadHousehold(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("plan slots: load household: %w", err)
+	}
+	energy, err := a.loadEnergyFor(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("plan slots: load effort profile: %w", err)
+	}
+	schoolTags, err := a.loadSchoolTagsFor(ctx, date)
+	if err != nil {
+		return nil, fmt.Errorf("plan slots: load school tags: %w", err)
+	}
+
+	cfg := planning.WeekConfig{
+		Candidates:    candidates,
+		People:        people,
+		Preferences:   prefs,
+		EnergyFor:     energy,
+		SchoolTagsFor: schoolTags,
+	}
+
+	var wantDinner, wantBreakfast, wantSnack bool
+	for _, s := range slots {
+		switch s {
+		case "dinner":
+			wantDinner = true
+		case "breakfast":
+			wantBreakfast = true
+		case "snack":
+			wantSnack = true
+		}
+	}
+
+	var allSlots []planning.PlannedSlot
+
+	if wantDinner || (!wantBreakfast && !wantSnack) {
+		// Default to dinner when no slots specified.
+		allSlots = append(allSlots, planning.PlanWeek(ctx, cfg, date, days)...)
+	}
+
+	if wantBreakfast {
+		for i := 0; i < days; i++ {
+			d := date.AddDate(0, 0, i)
+			breakfastCands := planning.BreakfastCandidates(candidates, d)
+			if bs := planning.PlanSimpleSlot(ctx, cfg, breakfastCands, d, domain.SlotBreakfast); bs != nil {
+				allSlots = append(allSlots, *bs)
+			}
+		}
+	}
+
+	if wantSnack {
+		snackCands := planning.SnackCandidates(candidates)
+		for i := 0; i < days; i++ {
+			d := date.AddDate(0, 0, i)
+			if ss := planning.PlanSimpleSlot(ctx, cfg, snackCands, d, domain.SlotSnack); ss != nil {
+				allSlots = append(allSlots, *ss)
+			}
+		}
+	}
+
+	out := make([]mcptools.PlannedSlot, 0, len(allSlots))
+	for _, slot := range allSlots {
+		out = append(out, mcptools.PlannedSlot{
+			Date:   slot.Date.Format("2006-01-02"),
+			Slot:   string(slot.Slot),
 			Recipe: slot.Winner.Candidate.MealieRecipeID,
 			Title:  slot.Winner.Candidate.Title,
 			Score:  slot.Winner.Score,
@@ -63,7 +158,19 @@ func (a mcpStoreAdapter) RecordReaction(ctx context.Context, in mcptools.RecordR
 	}
 	// planID/planSlotDate: not available at this call site (MCP-driven reaction
 	// recording isn't tied to a specific plan slot) — nil means "unlinked".
-	eventID, err := a.db.CreateMealEvent(ctx, in.Recipe, servedOn, nil, nil)
+	// When a slot kind is specified, pass it through so the meal_event row
+	// carries the slot_kind for future plan-linking.
+	var slotKind *string
+	if in.Slot != "" && in.Slot != "dinner" {
+		s := in.Slot
+		slotKind = &s
+	}
+	var eventID int64
+	if slotKind != nil {
+		eventID, err = a.db.CreateMealEventWithSlot(ctx, in.Recipe, servedOn, nil, nil, slotKind)
+	} else {
+		eventID, err = a.db.CreateMealEvent(ctx, in.Recipe, servedOn, nil, nil)
+	}
 	if err != nil {
 		return mcptools.RecordReactionResult{}, fmt.Errorf("record reaction: create meal event: %w", err)
 	}
@@ -172,4 +279,182 @@ func (a mcpStoreAdapter) loadHousehold(ctx context.Context) ([]domain.Person, []
 		}
 	}
 	return domainPeople, prefs, nil
+}
+
+// loadEnergyFor builds the planner's per-weekday kitchen-energy function from
+// the effort_profile table, mirroring the CLI's family.json KitchenEnergy.
+// Weekdays with no profile row default to EffortMedium, so an unconfigured
+// household still gets a sane budget instead of an infeasible zero.
+func (a mcpStoreAdapter) loadEnergyFor(ctx context.Context) (func(time.Time) domain.Effort, error) {
+	rows, err := a.db.ListEffortProfiles(ctx)
+	if err != nil {
+		return nil, err
+	}
+	energy := make(map[int]domain.Effort, len(rows))
+	for _, e := range rows {
+		energy[e.Weekday] = domain.Effort(e.KitchenEnergy)
+	}
+	return func(date time.Time) domain.Effort {
+		if e, ok := energy[int(date.Weekday())]; ok {
+			return e
+		}
+		return domain.EffortMedium
+	}, nil
+}
+
+// loadSchoolTagsFor builds the planner's school-lunch tag function from the
+// skolmaten service, mirroring the CLI's --school flag. If SKOLMATEN_SCHOOL is
+// unset, it returns a no-op closure (no school dedup). Errors from the
+// skolmaten service are non-fatal: the planner continues without school tags.
+func (a mcpStoreAdapter) loadSchoolTagsFor(ctx context.Context, date time.Time) (func(time.Time) []string, error) {
+	school := os.Getenv("SKOLMATEN_SCHOOL")
+	if school == "" {
+		return func(time.Time) []string { return nil }, nil
+	}
+	baseURL := os.Getenv("SKOLMATEN_BASE_URL")
+	if baseURL == "" {
+		baseURL = "http://192.168.1.120:8787"
+	}
+	token := os.Getenv("SKOLMATEN_CLIENT_TOKEN")
+	sk := skolmaten.New(baseURL, token)
+
+	year, week := date.AddDate(0, 0, 7).ISOWeek()
+	menu, err := sk.WeekMenu(ctx, school, year, week)
+	if err != nil {
+		// Non-fatal: continue without school dedup.
+		return func(time.Time) []string { return nil }, nil
+	}
+
+	tagsByDate := make(map[string][]string, len(menu))
+	for _, day := range menu {
+		tagsByDate[day.Date.Format("2006-01-02")] = skolmaten.TagsForDay(day)
+	}
+	return func(d time.Time) []string {
+		return tagsByDate[d.Format("2006-01-02")]
+	}, nil
+}
+
+// ── Shopping services ───────────────────────────────────────────────────────
+
+// CreateShoppingList creates a spisordning shopping list and its items from
+// canonical requirements.
+func (a mcpStoreAdapter) CreateShoppingList(ctx context.Context, in mcptools.CreateShoppingListInput) (mcptools.CreateShoppingListResult, error) {
+	items := make([]persistence.ShoppingListItem, 0, len(in.Items))
+	for _, item := range in.Items {
+		ingredientID := item.Ingredient
+		items = append(items, persistence.ShoppingListItem{
+			IngredientID: &ingredientID,
+			Quantity:     item.Quantity,
+			Unit:         item.Unit,
+		})
+	}
+	listID, _, err := a.db.CreateShoppingListWithItems(ctx, persistence.ShoppingList{Name: in.Name, Status: "active"}, items)
+	if err != nil {
+		return mcptools.CreateShoppingListResult{}, fmt.Errorf("create shopping list: %w", err)
+	}
+	return mcptools.CreateShoppingListResult{
+		ListID: listID,
+		Name:   in.Name,
+		Status: "active",
+		Items:  len(in.Items),
+	}, nil
+}
+
+// ComparePrices compares prices across retailers for the given requirements.
+// A stale or unavailable retailer degrades to available:false per item rather
+// than failing the whole call.
+func (a mcpStoreAdapter) ComparePrices(ctx context.Context, reqs []mcptools.ShoppingRequirement) (mcptools.PriceComparison, error) {
+	domainReqs := make([]domain.ShoppingRequirement, 0, len(reqs))
+	terms := retailer.SearchTerms{}
+	for _, r := range reqs {
+		domainReqs = append(domainReqs, domain.ShoppingRequirement{
+			IngredientID:    r.Ingredient,
+			Quantity:        r.Quantity,
+			Unit:            r.Unit,
+			AcceptableForms: r.AcceptableForms,
+			PreferredForm:   r.PreferredForm,
+		})
+		terms[r.Ingredient] = r.Ingredient
+	}
+	cmp := retailer.Compare(ctx, domainReqs, terms, a.willysURL, a.icaURL)
+	return toMCPComparison(cmp), nil
+}
+
+// PushToWishlist pushes resolved lines to a retailer's wishlist and records
+// the binding. It never fills a cart or checks out.
+func (a mcpStoreAdapter) PushToWishlist(ctx context.Context, in mcptools.PushWishlistInput) (mcptools.PushWishlistResult, error) {
+	rc, err := retailer.NewFromKind(retailer.RetailerKind(in.Retailer), a.willysURL, a.icaURL)
+	if err != nil {
+		return mcptools.PushWishlistResult{}, fmt.Errorf("push wishlist: %w", err)
+	}
+	items := make([]retailer.ShoppingListItem, 0, len(in.Items))
+	for _, it := range in.Items {
+		items = append(items, retailer.ShoppingListItem{ProductCode: it.ProductCode, Quantity: it.Quantity})
+	}
+	created, err := rc.CreateShoppingList(ctx, in.ListName, items)
+	if err != nil {
+		return mcptools.PushWishlistResult{}, fmt.Errorf("push wishlist: create: %w", err)
+	}
+	if in.ShoppingListID != nil {
+		now := time.Now()
+		status := "success"
+		if err := a.db.CreateOrUpdateRetailerListBinding(ctx, persistence.RetailerListBinding{
+			ShoppingListID: *in.ShoppingListID,
+			Retailer:       in.Retailer,
+			ExternalListID: created.WishlistID,
+			SyncDirection:  "outbound",
+			LastPushedAt:   &now,
+			LastPushStatus: &status,
+		}); err != nil {
+			return mcptools.PushWishlistResult{}, fmt.Errorf("push wishlist: record binding: %w", err)
+		}
+	}
+	return mcptools.PushWishlistResult{
+		Retailer:       in.Retailer,
+		WishlistID:     created.WishlistID,
+		ListName:       created.Name,
+		Items:          len(items),
+		ShoppingListID: in.ShoppingListID,
+	}, nil
+}
+
+// toMCPComparison maps a retailer.Comparison to the MCP tool output shape.
+func toMCPComparison(cmp *retailer.Comparison) mcptools.PriceComparison {
+	out := mcptools.PriceComparison{Items: make([]mcptools.ItemComparison, 0, len(cmp.Items))}
+	for _, item := range cmp.Items {
+		mi := mcptools.ItemComparison{
+			Ingredient: item.Requirement.IngredientID,
+			Results:    make([]mcptools.RetailerPriceResult, 0, len(item.Results)),
+			Unresolved: item.Unresolved,
+		}
+		for _, r := range item.Results {
+			mi.Results = append(mi.Results, toMCPResult(r))
+		}
+		if item.Cheapest != nil {
+			c := toMCPResult(*item.Cheapest)
+			mi.Cheapest = &c
+		}
+		out.Items = append(out.Items, mi)
+	}
+	return out
+}
+
+// toMCPResult maps a single retailer.RetailerResult to the MCP output shape.
+func toMCPResult(r retailer.RetailerResult) mcptools.RetailerPriceResult {
+	mr := mcptools.RetailerPriceResult{
+		Retailer:   string(r.Retailer),
+		Available:  r.Available,
+		PriceValue: r.PriceValue,
+		Error:      r.Error,
+	}
+	if r.Resolution.RetailerProductID != nil {
+		mr.ProductID = r.Resolution.RetailerProductID
+	}
+	if r.Resolution.ProductName != "" {
+		mr.ProductName = &r.Resolution.ProductName
+	}
+	if r.Resolution.Price != nil {
+		mr.Price = r.Resolution.Price
+	}
+	return mr
 }

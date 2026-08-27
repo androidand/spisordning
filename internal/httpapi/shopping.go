@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -16,6 +17,7 @@ import (
 type ShoppingListService interface {
 	ListShoppingLists(ctx context.Context) ([]ShoppingListResponse, error)
 	CreateShoppingList(ctx context.Context, in ShoppingListInput) (ShoppingListResponse, error)
+	CreateFromChecklist(ctx context.Context, in ShoppingListFromChecklistInput) (ShoppingListFromChecklistResponse, error)
 	GetShoppingList(ctx context.Context, listID int64) (ShoppingListResponse, error)
 	ArchiveShoppingList(ctx context.Context, listID int64) error
 }
@@ -36,8 +38,33 @@ type ShoppingListInput struct {
 	OwnerPersonID *string `json:"owner_person_id,omitempty"`
 }
 
+// ShoppingListFromChecklistInput is the body for POST /shopping-lists/from-checklist
+// (openapi: components/schemas/ShoppingListFromChecklist). It is the ingestion target
+// for the Mac-local Apple Notes reader: one named checklist becomes a new shopping
+// list plus its line items in a single call.
+type ShoppingListFromChecklistInput struct {
+	Name  string             `json:"name"`
+	Items []ChecklistItemInput `json:"items"`
+}
+
+// ChecklistItemInput is one line item in a from-checklist submission.
+type ChecklistItemInput struct {
+	Label    string  `json:"label"`
+	Quantity float32 `json:"quantity"`
+	Unit     string  `json:"unit"`
+}
+
+// ShoppingListFromChecklistResponse is the JSON view for POST /shopping-lists/from-checklist
+// (openapi: components/schemas/ShoppingListFromChecklistResult). It embeds the created
+// list and returns the created items so the caller can reference them without a second fetch.
+type ShoppingListFromChecklistResponse struct {
+	ShoppingListResponse
+	Items []ShoppingListItemResponse `json:"items"`
+}
+
 type shoppingListListHandler struct{ svc ShoppingListService }
 type shoppingListCreateHandler struct{ svc ShoppingListService }
+type shoppingListFromChecklistHandler struct{ svc ShoppingListService }
 type shoppingListGetHandler struct{ svc ShoppingListService }
 type shoppingListArchiveHandler struct{ svc ShoppingListService }
 
@@ -64,6 +91,43 @@ func (h *shoppingListCreateHandler) createShoppingList(w http.ResponseWriter, r 
 	out, err := h.svc.CreateShoppingList(r.Context(), in)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "create shopping list: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, out)
+}
+
+func (h *shoppingListFromChecklistHandler) createFromChecklist(w http.ResponseWriter, r *http.Request) {
+	var in ShoppingListFromChecklistInput
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid JSON body: " + err.Error()})
+		return
+	}
+	in.Name = strings.TrimSpace(in.Name)
+	if in.Name == "" {
+		writeJSON(w, http.StatusBadRequest, errorBody{Message: "field 'name' is required"})
+		return
+	}
+	if len(in.Items) == 0 {
+		writeJSON(w, http.StatusBadRequest, errorBody{Message: "field 'items' must contain at least one item"})
+		return
+	}
+	for i, it := range in.Items {
+		if strings.TrimSpace(it.Label) == "" {
+			writeJSON(w, http.StatusBadRequest, errorBody{Message: fmt.Sprintf("item %d: field 'label' is required", i)})
+			return
+		}
+		if it.Quantity <= 0 {
+			writeJSON(w, http.StatusBadRequest, errorBody{Message: fmt.Sprintf("item %d: quantity must be positive", i)})
+			return
+		}
+		if it.Unit == "" {
+			writeJSON(w, http.StatusBadRequest, errorBody{Message: fmt.Sprintf("item %d: field 'unit' is required", i)})
+			return
+		}
+	}
+	out, err := h.svc.CreateFromChecklist(r.Context(), in)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "create shopping list from checklist: "+err.Error())
 		return
 	}
 	writeJSON(w, http.StatusCreated, out)

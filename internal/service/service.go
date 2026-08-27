@@ -7,10 +7,13 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/androidand/spisordning/internal/domain"
 	"github.com/androidand/spisordning/internal/dto"
+	"github.com/androidand/spisordning/internal/mealie"
 	"github.com/androidand/spisordning/internal/persistence"
 	"github.com/jackc/pgx/v5"
 )
@@ -27,6 +30,7 @@ type Store interface {
 	RecordObservation(ctx context.Context, o persistence.PreferenceObservation) error
 	ListRecipeRefs(ctx context.Context) ([]persistence.RecipeRef, error)
 	GetRecipeRef(ctx context.Context, id string) (persistence.RecipeRef, error)
+	UpsertRecipeRef(ctx context.Context, r persistence.RecipeRef) error
 	CreateMealEvent(ctx context.Context, mealieRecipeID string, servedOn time.Time, planID *int64, planSlotDate *time.Time) (int64, error)
 	AddMealReaction(ctx context.Context, r persistence.MealReaction) error
 	ListMealReactions(ctx context.Context, eventID int64) ([]persistence.MealReaction, error)
@@ -52,6 +56,8 @@ type Store interface {
 	GetMealEvent(ctx context.Context, id int64) (persistence.MealEvent, error)
 	ListMealPlans(ctx context.Context) ([]persistence.MealPlan, error)
 	GetIngredientMapping(ctx context.Context, mealieFoodID string) (persistence.IngredientMapping, error)
+	ListAllStores(ctx context.Context) ([]domain.Store, error)
+	ListStoreProductOffers(ctx context.Context, storeID string) ([]domain.StoreProductOffer, error)
 }
 
 // txConn is the minimal transaction surface the Meals service needs.
@@ -134,10 +140,16 @@ func (s *Preferences) ListPreferences(ctx context.Context, personID string) ([]d
 }
 
 // Recipes implements the RecipesService interface defined in dto.
-type Recipes struct{ db Store }
+type Recipes struct {
+	db     Store
+	mealie *mealie.Client
+}
 
-// NewRecipes returns a Recipes service backed by db.
-func NewRecipes(db Store) *Recipes { return &Recipes{db: db} }
+// NewRecipes returns a Recipes service backed by db. mc may be nil when no
+// Mealie instance is configured; SyncFromMealie then reports an error.
+func NewRecipes(db Store, mc *mealie.Client) *Recipes {
+	return &Recipes{db: db, mealie: mc}
+}
 
 func (s *Recipes) ListRecipes(ctx context.Context) ([]dto.RecipeRefResponse, error) {
 	refs, err := s.db.ListRecipeRefs(ctx)
@@ -152,6 +164,45 @@ func (s *Recipes) ListRecipes(ctx context.Context) ([]dto.RecipeRefResponse, err
 		})
 	}
 	return out, nil
+}
+
+func (s *Recipes) GetRecipe(ctx context.Context, id string) (dto.RecipeRefResponse, error) {
+	r, err := s.db.GetRecipeRef(ctx, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return dto.RecipeRefResponse{}, fmt.Errorf("service: get recipe: %w", dto.ErrNotFound)
+		}
+		return dto.RecipeRefResponse{}, fmt.Errorf("service: get recipe: %w", err)
+	}
+	return dto.RecipeRefResponse{
+		MealieRecipeID: r.MealieRecipeID, Title: r.Title, Tags: r.Tags,
+		Effort: r.Effort, LastSyncedAt: r.LastSyncedAt,
+	}, nil
+}
+
+// SyncFromMealie fetches every recipe from Mealie and upserts a reference for
+// each. It returns the number of recipes synced.
+func (s *Recipes) SyncFromMealie(ctx context.Context) (int, error) {
+	if s.mealie == nil {
+		return 0, fmt.Errorf("service: sync recipes: no Mealie client configured")
+	}
+	refs, err := s.mealie.SyncRecipes(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("service: sync recipes: %w", err)
+	}
+	for _, ref := range refs {
+		rr := persistence.RecipeRef{
+			MealieRecipeID: ref.MealieRecipeID,
+			Title:          ref.Title,
+			Tags:           ref.Tags,
+			Effort:         int(ref.Effort),
+			RawSnapshot:    string(ref.Raw),
+		}
+		if err := s.db.UpsertRecipeRef(ctx, rr); err != nil {
+			return 0, fmt.Errorf("service: sync recipes: upsert %s: %w", ref.MealieRecipeID, err)
+		}
+	}
+	return len(refs), nil
 }
 
 // Meals implements the MealsService interface defined in dto.

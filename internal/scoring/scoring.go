@@ -50,6 +50,33 @@ func DefaultWeights() Weights {
 	}
 }
 
+// SimpleWeights is the tuning for non-dinner slots (breakfast, snack). It
+// disables the effort and school-dedup dimensions since those don't apply to
+// breakfast/snack planning. Preference, repetition, campaign, familiarity, and
+// pantry remain in play.
+func SimpleWeights() Weights {
+	return Weights{
+		Preference:  1.0,
+		Effort:      0.0,
+		Repetition:  0.8,
+		SchoolDedup: 0.0,
+		Campaign:    0.4,
+		Familiarity: 0.5,
+		Pantry:      0.5,
+	}
+}
+
+// RankSimple scores candidates with the simplified rule set for non-dinner
+// slots: no effort filtering, no school-lunch dedup. It is equivalent to
+// Rank with SimpleWeights and a PlanContext that has no KitchenEnergy and no
+// SchoolLunchTags.
+func RankSimple(candidates []domain.Candidate, ctx domain.PlanContext) []ScoredCandidate {
+	// Zero out the dimensions that don't apply to non-dinner slots.
+	ctx.KitchenEnergy = 0
+	ctx.SchoolLunchTags = nil
+	return Rank(candidates, ctx, SimpleWeights())
+}
+
 // Mode is a user-facing recommendation control mode. Each mode is a
 // deterministic transformation of the scorer's Weights over the same underlying
 // scorer - never a separate scoring algorithm and never an LLM decision. The

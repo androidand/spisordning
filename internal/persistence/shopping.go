@@ -17,6 +17,18 @@ type ShoppingList struct {
 	CreatedAt       time.Time
 }
 
+// Shared INSERT statements for shopping lists and their items. They live at
+// package level so the single-statement methods and the transactional
+// CreateShoppingListWithItems below issue identical SQL.
+const (
+	createShoppingListSQL = `INSERT INTO shopping_list (owner_person_id, name, status)
+		VALUES ($1, $2, $3) RETURNING id`
+
+	createShoppingListItemSQL = `INSERT INTO shopping_list_item
+		(shopping_list_id, shopping_requirement_id, ingredient_id, label, quantity, unit, checked)
+		VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`
+)
+
 // CreateShoppingList inserts a new shopping_list and returns its id. An empty
 // status defaults to "active" (the column's CHECK only allows active/archived,
 // and the schema default does not apply when a value is supplied).
@@ -25,10 +37,8 @@ func (s *Store) CreateShoppingList(ctx context.Context, l ShoppingList) (int64, 
 	if status == "" {
 		status = "active"
 	}
-	const q = `INSERT INTO shopping_list (owner_person_id, name, status)
-		VALUES ($1, $2, $3) RETURNING id`
 	var id int64
-	err := s.db.QueryRow(ctx, q, l.OwnerPersonID, l.Name, status).Scan(&id)
+	err := s.db.QueryRow(ctx, createShoppingListSQL, l.OwnerPersonID, l.Name, status).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("persistence: create shopping_list: %w", err)
 	}
@@ -94,16 +104,48 @@ type ShoppingListItem struct {
 
 // CreateShoppingListItem inserts a new item and returns its id.
 func (s *Store) CreateShoppingListItem(ctx context.Context, item ShoppingListItem) (int64, error) {
-	const q = `INSERT INTO shopping_list_item
-		(shopping_list_id, shopping_requirement_id, ingredient_id, label, quantity, unit, checked)
-		VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`
 	var id int64
-	err := s.db.QueryRow(ctx, q, item.ShoppingListID, item.ShoppingRequirementID, item.IngredientID,
+	err := s.db.QueryRow(ctx, createShoppingListItemSQL, item.ShoppingListID, item.ShoppingRequirementID, item.IngredientID,
 		item.Label, item.Quantity, item.Unit, item.Checked).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("persistence: create shopping_list_item: %w", err)
 	}
 	return id, nil
+}
+
+// CreateShoppingListWithItems inserts a shopping list and its line items in a
+// single transaction, so a failure partway leaves no partial list behind. It
+// returns the list id and the created item ids (in input order).
+func (s *Store) CreateShoppingListWithItems(ctx context.Context, l ShoppingList, items []ShoppingListItem) (int64, []int64, error) {
+	tx, err := s.BeginTx(ctx)
+	if err != nil {
+		return 0, nil, fmt.Errorf("persistence: begin shopping_list tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }() // no-op once committed
+
+	status := l.Status
+	if status == "" {
+		status = "active"
+	}
+	var listID int64
+	if err := tx.QueryRow(ctx, createShoppingListSQL, l.OwnerPersonID, l.Name, status).Scan(&listID); err != nil {
+		return 0, nil, fmt.Errorf("persistence: create shopping_list: %w", err)
+	}
+
+	itemIDs := make([]int64, 0, len(items))
+	for _, item := range items {
+		var id int64
+		if err := tx.QueryRow(ctx, createShoppingListItemSQL, listID, item.ShoppingRequirementID, item.IngredientID,
+			item.Label, item.Quantity, item.Unit, item.Checked).Scan(&id); err != nil {
+			return 0, nil, fmt.Errorf("persistence: create shopping_list_item: %w", err)
+		}
+		itemIDs = append(itemIDs, id)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return 0, nil, fmt.Errorf("persistence: commit shopping_list tx: %w", err)
+	}
+	return listID, itemIDs, nil
 }
 
 // ListShoppingListItems returns all items for a list, ordered by added_at.

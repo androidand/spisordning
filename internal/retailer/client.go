@@ -82,6 +82,11 @@ type Resolution struct {
 	Confidence        float64 `json:"confidence"`
 	NeedsReview       bool    `json:"needsReview"`
 	QuantityUncertain bool    `json:"quantityUncertain"`
+	// PriceValue is the numeric SEK price of the resolved product (per package),
+	// when the adapter knows it. Nil when the product has no price.
+	PriceValue *float64 `json:"priceValue"`
+	// Price is the formatted display price (e.g. "29,90 kr"), when available.
+	Price *string `json:"price"`
 }
 
 // SearchTerms maps canonical ingredient ids to human search terms (Swedish).

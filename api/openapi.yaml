@@ -109,6 +109,17 @@ paths:
                 type: array
                 items: { $ref: '#/components/schemas/RecipeRef' }
 
+  /recipes/{recipeId}:
+    parameters:
+      - $ref: '#/components/parameters/RecipeId'
+    get:
+      summary: Fetch one recipe ref
+      operationId: getRecipe
+      tags: [recipes]
+      responses:
+        '200': { description: a recipe ref, content: { application/json: { schema: { $ref: '#/components/schemas/RecipeRef' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /meals:
     post:
       summary: Record a served meal (optionally with reactions)
@@ -298,6 +309,132 @@ paths:
             schema: { $ref: '#/components/schemas/PlanningConstraintNew' }
       responses:
         '201': { description: constraint created, content: { application/json: { schema: { $ref: '#/components/schemas/PlanningConstraint' } } } }
+
+  /ingredients/search:
+    get:
+      summary: Search foods (SLV-backed, client-side name filter)
+      operationId: searchFood
+      tags: [ingredients]
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: name substring to match
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Ingredient' }
+
+  /ingredients/{ingredientId}/nutrition:
+    parameters:
+      - name: ingredientId
+        in: path
+        required: true
+        description: canonical ingredient id of the form slv-{nummer}
+        schema: { type: string }
+    get:
+      summary: Fetch nutrition for a canonical ingredient id
+      operationId: getIngredientNutrition
+      tags: [ingredients]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/IngredientNutrient' }
+
+  /ingredients/nutrition/{slvNummer}:
+    parameters:
+      - name: slvNummer
+        in: path
+        required: true
+        schema: { type: integer }
+    get:
+      summary: Fetch nutrition for an SLV nummer
+      operationId: lookupNutrition
+      tags: [ingredients]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/IngredientNutrient' }
+
+  /stores:
+    get:
+      summary: List all stores across retailers
+      operationId: listStores
+      tags: [stores]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Store' }
+
+  /stores/{storeID}/offers:
+    parameters:
+      - name: storeID
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      summary: List store product offers for a store
+      operationId: listStoreOffers
+      tags: [stores]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/StoreOffer' }
+
+  /products/search:
+    get:
+      summary: Search products (Matpriskollen)
+      operationId: searchProducts
+      tags: [products]
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/IngredientProduct' }
+
+  /products/by-gtin:
+    get:
+      summary: Search products by GTIN (Matpriskollen)
+      operationId: searchProductsByGTIN
+      tags: [products]
+      parameters:
+        - name: gtin
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/IngredientProduct' }
 
   /ingredient-mappings/{ingredient}:
     parameters:
@@ -553,6 +690,11 @@ components:
       in: path
       required: true
       schema: { type: string }
+    RecipeId:
+      name: recipeId
+      in: path
+      required: true
+      schema: { type: string }
     PlanId:
       name: planId
       in: path
@@ -619,8 +761,50 @@ components:
       type: object
       required: [id, display]
       properties:
-        id: { type: string, description: canonical id, e.g. cauliflower }
+        id: { type: string, description: canonical id, e.g. slv-12345 }
         display: { type: string, description: human-friendly name }
+        source: { type: string, description: upstream source (slv, dabas, matpriskollen) }
+        slv_nummer: { type: integer, description: SLV nummer when source is slv }
+        gtin: { type: string }
+        brand: { type: string }
+
+    IngredientNutrient:
+      type: object
+      required: [name, value, unit]
+      properties:
+        name: { type: string, description: nutrient name, e.g. Energi }
+        value: { type: number, format: double, description: value per 100 g edible portion }
+        unit: { type: string, description: unit, e.g. kJ, g, mg }
+
+    IngredientProduct:
+      type: object
+      required: [key, name]
+      properties:
+        key: { type: string }
+        gtin: { type: string }
+        name: { type: string }
+        brand: { type: string }
+        description: { type: string }
+        amount: { type: string }
+        image_url: { type: string }
+
+    Store:
+      type: object
+      required: [id, retailer_id, name]
+      properties:
+        id: { type: string }
+        retailer_id: { type: string }
+        name: { type: string }
+
+    StoreOffer:
+      type: object
+      required: [id, store_id, retailer_product_id, currently_carried, updated_at]
+      properties:
+        id: { type: integer, format: int64 }
+        store_id: { type: string }
+        retailer_product_id: { type: string }
+        currently_carried: { type: boolean }
+        updated_at: { type: string, format: date-time }
 
     IngredientMapping:
       type: object

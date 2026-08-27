@@ -6,9 +6,28 @@ import (
 	"github.com/androidand/spisordning/internal/dto"
 )
 
-// storesHandler handles /products routes.
+// storesHandler handles /stores and /products routes.
 type storesHandler struct {
 	svc dto.StoresService
+}
+
+func (h *storesHandler) listStores(w http.ResponseWriter, r *http.Request) {
+	out, err := h.svc.ListStores(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "list stores: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (h *storesHandler) listStoreOffers(w http.ResponseWriter, r *http.Request) {
+	storeID := r.PathValue("id")
+	out, err := h.svc.ListStoreOffers(r.Context(), storeID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "list store offers: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (h *storesHandler) searchProducts(w http.ResponseWriter, r *http.Request) {

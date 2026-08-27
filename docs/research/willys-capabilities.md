@@ -1,10 +1,10 @@
 # Willys client — capability map
 
 `PLAN.md`'s "Existing Willys Client" section asks for exactly this document before designing
-any retailer interface. Source: `~/dev/willys/willys-client` (TypeScript), read directly —
+any retailer interface. Source: `~/dev/store-clients/willys-client` (TypeScript), read directly —
 not inferred.
 
-Two related repos exist under `~/dev/willys/`:
+Two related repos exist under `~/dev/store-clients/`:
 
 - **`willys-client`** — the real, wired-in client + adapter (this document).
 - **`willys-mcp`** — an older, separate Next.js + MCP-server exploration (puppeteer auth,
@@ -39,7 +39,8 @@ GET    /health
 GET    /search
 GET    /products/:code
 GET    /campaigns
-POST   /resolve                       — core requirement→product resolution
+POST   /resolve                       — core requirement→product resolution; each resolution
+                                       now carries `priceValue`/`price` when the product has a price
 GET    /pins
 POST   /pins
 GET    /review/queue
@@ -53,7 +54,9 @@ POST   /shopping-lists/:id/to-cart    — explicit, separate cart-fill step
 `core.ts` (pure, unit-tested): Swedish display-volume parsing (`"500g"`/`"1,5 l"`/`"6-p"`),
 name/size-hint splitting, pin-aware resolution producing a `Resolution` with
 `matchType: 'pinned' | 'pinned-backup' | 'exact' | 'fuzzy' | 'none'`, `confidence`,
-`needsReview`, `quantityUncertain`. `REVIEW_THRESHOLD = 0.7`.
+`needsReview`, `quantityUncertain`, and — since the price-in-resolution change — `priceValue`
+(numeric SEK) + `price` (display string), both omitted when the product has no price (the
+no-match path returns `retailerProductId: null` with no price). `REVIEW_THRESHOLD = 0.7`.
 
 ## Bottom line
 

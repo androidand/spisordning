@@ -882,3 +882,73 @@ func TestFeasibility_AvailabilityFeasibleWithSubStillFeasible(t *testing.T) {
 		t.Errorf("candidate should be feasible when availability is feasible-with-substitution")
 	}
 }
+
+func TestRankSimple_NoEffortFiltering(t *testing.T) {
+	// A high-effort candidate should be feasible under RankSimple because
+	// KitchenEnergy is zeroed out.
+	candidates := []domain.Candidate{
+		{MealieRecipeID: "project", Title: "Projekt", Effort: domain.EffortHigh},
+		{MealieRecipeID: "quick", Title: "Snabb", Effort: domain.EffortLow},
+	}
+	ctx := baseCtx()
+	ctx.KitchenEnergy = domain.EffortLow // would normally block "project"
+	ranked := RankSimple(candidates, ctx)
+	// Both should be feasible since RankSimple zeros KitchenEnergy.
+	for _, sc := range ranked {
+		if !sc.Feasible {
+			t.Errorf("candidate %q should be feasible under RankSimple", sc.Candidate.MealieRecipeID)
+		}
+	}
+}
+
+func TestRankSimple_NoSchoolDedup(t *testing.T) {
+	// A candidate matching school lunch tags should NOT be penalized under
+	// RankSimple.
+	candidates := []domain.Candidate{
+		{MealieRecipeID: "fisk", Title: "Fisk", Tags: []string{"fisk"}},
+		{MealieRecipeID: "pasta", Title: "Pasta", Tags: []string{"pasta"}},
+	}
+	ctx := baseCtx()
+	ctx.SchoolLunchTags = []string{"fisk"} // would normally penalize "fisk"
+	ctx.Preferences = []domain.Preference{
+		{PersonID: "kid", Tag: "fisk", Sentiment: domain.Likes, Confidence: 1.0},
+	}
+	ranked := RankSimple(candidates, ctx)
+	// Fisk should be at the top (preference boost, no school dedup penalty).
+	if ranked[0].Candidate.MealieRecipeID != "fisk" {
+		t.Errorf("top candidate = %q, want fisk (no school dedup in RankSimple)", ranked[0].Candidate.MealieRecipeID)
+	}
+	// Verify the school dedup component is zero in the breakdown.
+	if ranked[0].Breakdown.SchoolDedup != 0 {
+		t.Errorf("SchoolDedup = %f, want 0", ranked[0].Breakdown.SchoolDedup)
+	}
+}
+
+func TestRankSimple_EffortComponentZero(t *testing.T) {
+	candidates := []domain.Candidate{
+		{MealieRecipeID: "high", Title: "High Effort", Effort: domain.EffortHigh},
+	}
+	ctx := baseCtx()
+	ranked := RankSimple(candidates, ctx)
+	if ranked[0].Breakdown.Effort != 0 {
+		t.Errorf("Effort = %f, want 0", ranked[0].Breakdown.Effort)
+	}
+}
+
+func TestSimpleWeights_DiffersFromDefault(t *testing.T) {
+	simple := SimpleWeights()
+	def := DefaultWeights()
+	if simple.Effort != 0 {
+		t.Errorf("SimpleWeights.Effort = %f, want 0", simple.Effort)
+	}
+	if simple.SchoolDedup != 0 {
+		t.Errorf("SimpleWeights.SchoolDedup = %f, want 0", simple.SchoolDedup)
+	}
+	// Other weights should match default.
+	if simple.Preference != def.Preference {
+		t.Errorf("SimpleWeights.Preference = %f, want %f", simple.Preference, def.Preference)
+	}
+	if simple.Repetition != def.Repetition {
+		t.Errorf("SimpleWeights.Repetition = %f, want %f", simple.Repetition, def.Repetition)
+	}
+}

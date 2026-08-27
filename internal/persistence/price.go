@@ -17,6 +17,17 @@ func (s *Store) CreateRetailer(ctx context.Context, r domain.Retailer) error {
 	return nil
 }
 
+// UpsertRetailer inserts a retailer or, if one with the same id already exists,
+// refreshes its name. Idempotent, so sync commands can call it unconditionally.
+func (s *Store) UpsertRetailer(ctx context.Context, r domain.Retailer) error {
+	const q = `INSERT INTO retailer (id, name) VALUES ($1, $2)
+		ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name`
+	if _, err := s.db.Exec(ctx, q, r.ID, r.Name); err != nil {
+		return fmt.Errorf("persistence: upsert retailer: %w", err)
+	}
+	return nil
+}
+
 // GetRetailer fetches one retailer by id.
 func (s *Store) GetRetailer(ctx context.Context, id string) (domain.Retailer, error) {
 	const q = `SELECT id, name, created_at FROM retailer WHERE id = $1`
@@ -71,6 +82,38 @@ func (s *Store) ListStores(ctx context.Context, retailerID string) ([]domain.Sto
 	rows, err := s.db.Query(ctx, q, retailerID)
 	if err != nil {
 		return nil, fmt.Errorf("persistence: list stores: %w", err)
+	}
+	defer rows.Close()
+	var out []domain.Store
+	for rows.Next() {
+		var st domain.Store
+		if err := rows.Scan(&st.ID, &st.RetailerID, &st.Name, &st.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, st)
+	}
+	return out, rows.Err()
+}
+
+// UpsertStore inserts a store or, if one with the same id already exists,
+// refreshes its name and retailer. Idempotent for sync commands.
+func (s *Store) UpsertStore(ctx context.Context, st domain.Store) error {
+	const q = `INSERT INTO store (id, retailer_id, name) VALUES ($1, $2, $3)
+		ON CONFLICT (id) DO UPDATE SET
+			retailer_id = EXCLUDED.retailer_id,
+			name = EXCLUDED.name`
+	if _, err := s.db.Exec(ctx, q, st.ID, st.RetailerID, st.Name); err != nil {
+		return fmt.Errorf("persistence: upsert store: %w", err)
+	}
+	return nil
+}
+
+// ListAllStores returns every store across all retailers, ordered by id.
+func (s *Store) ListAllStores(ctx context.Context) ([]domain.Store, error) {
+	const q = `SELECT id, retailer_id, name, created_at FROM store ORDER BY id`
+	rows, err := s.db.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("persistence: list all stores: %w", err)
 	}
 	defer rows.Close()
 	var out []domain.Store

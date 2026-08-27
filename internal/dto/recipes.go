@@ -17,4 +17,5 @@ type RecipeRefResponse struct {
 // RecipesService is the read surface the /recipes handler needs.
 type RecipesService interface {
 	ListRecipes(ctx context.Context) ([]RecipeRefResponse, error)
+	GetRecipe(ctx context.Context, id string) (RecipeRefResponse, error)
 }

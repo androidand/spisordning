@@ -17,11 +17,18 @@ type fakePlanner struct {
 	calls    int
 	lastDate time.Time
 	lastDays int
-	dinners  []mcptools.PlannedDinner
+	dinners  []mcptools.PlannedSlot
 	err      error
 }
 
-func (f *fakePlanner) PlanDinners(_ context.Context, date time.Time, days int) ([]mcptools.PlannedDinner, error) {
+func (f *fakePlanner) PlanDinners(_ context.Context, date time.Time, days int) ([]mcptools.PlannedSlot, error) {
+	f.calls++
+	f.lastDate = date
+	f.lastDays = days
+	return f.dinners, f.err
+}
+
+func (f *fakePlanner) PlanSlots(_ context.Context, date time.Time, days int, _ []string) ([]mcptools.PlannedSlot, error) {
 	f.calls++
 	f.lastDate = date
 	f.lastDays = days
@@ -97,9 +104,9 @@ func structured[T any](t *testing.T, res *mcp.CallToolResult) T {
 // ---- tests ----
 
 func TestListRecipeCandidates(t *testing.T) {
-	planner := &fakePlanner{dinners: []mcptools.PlannedDinner{
-		{Date: "2026-08-20", Recipe: "r1", Title: "Pasta", Score: 0.9},
-		{Date: "2026-08-21", Recipe: "r2", Title: "Curry", Score: 0.7},
+	planner := &fakePlanner{dinners: []mcptools.PlannedSlot{
+		{Date: "2026-08-20", Slot: "dinner", Recipe: "r1", Title: "Pasta", Score: 0.9},
+		{Date: "2026-08-21", Slot: "dinner", Recipe: "r2", Title: "Curry", Score: 0.7},
 	}}
 	cs := connectServer(t, mcptools.Dependencies{Planner: planner})
 
@@ -113,7 +120,7 @@ func TestListRecipeCandidates(t *testing.T) {
 	if res.IsError {
 		t.Fatalf("unexpected tool error: %+v", res)
 	}
-	got := structured[[]mcptools.PlannedDinner](t, res)
+	got := structured[[]mcptools.PlannedSlot](t, res)
 	if len(got) != 2 || got[0].Recipe != "r1" || got[1].Title != "Curry" {
 		t.Fatalf("unexpected dinners: %+v", got)
 	}
@@ -129,7 +136,7 @@ func TestListRecipeCandidates(t *testing.T) {
 }
 
 func TestListRecipeCandidates_Defaults(t *testing.T) {
-	planner := &fakePlanner{dinners: []mcptools.PlannedDinner{{Date: "2026-08-20", Recipe: "r1", Title: "X", Score: 1}}}
+	planner := &fakePlanner{dinners: []mcptools.PlannedSlot{{Date: "2026-08-20", Slot: "dinner", Recipe: "r1", Title: "X", Score: 1}}}
 	cs := connectServer(t, mcptools.Dependencies{Planner: planner})
 
 	if _, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "list_recipe_candidates"}); err != nil {

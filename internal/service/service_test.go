@@ -3,12 +3,16 @@ package service_test
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/androidand/spisordning/internal/domain"
 	"github.com/androidand/spisordning/internal/dto"
 	"github.com/androidand/spisordning/internal/ingredients"
+	"github.com/androidand/spisordning/internal/mealie"
 	"github.com/androidand/spisordning/internal/persistence"
 	"github.com/androidand/spisordning/internal/service"
 	"github.com/jackc/pgx/v5"
@@ -23,6 +27,8 @@ type fakeStore struct {
 	plans     map[int64]persistence.MealPlan
 	lots      []persistence.InventoryLot
 	locations map[string]persistence.InventoryLocation
+	stores    []domain.Store
+	offers    []domain.StoreProductOffer
 }
 
 func (f *fakeStore) CreatePerson(ctx context.Context, p persistence.Person) error {
@@ -54,6 +60,18 @@ func (f *fakeStore) ListPreferences(ctx context.Context, personID string) ([]per
 	}
 	return out, nil
 }
+func (f *fakeStore) ListAllStores(ctx context.Context) ([]domain.Store, error) {
+	return f.stores, nil
+}
+func (f *fakeStore) ListStoreProductOffers(ctx context.Context, storeID string) ([]domain.StoreProductOffer, error) {
+	out := make([]domain.StoreProductOffer, 0, len(f.offers))
+	for _, o := range f.offers {
+		if o.StoreID == storeID {
+			out = append(out, o)
+		}
+	}
+	return out, nil
+}
 func (f *fakeStore) RecordObservation(ctx context.Context, o persistence.PreferenceObservation) error { return nil }
 func (f *fakeStore) ListRecipeRefs(ctx context.Context) ([]persistence.RecipeRef, error) {
 	out := make([]persistence.RecipeRef, 0, len(f.recipes))
@@ -63,7 +81,22 @@ func (f *fakeStore) ListRecipeRefs(ctx context.Context) ([]persistence.RecipeRef
 	return out, nil
 }
 func (f *fakeStore) GetRecipeRef(ctx context.Context, id string) (persistence.RecipeRef, error) {
-	return persistence.RecipeRef{}, nil
+	for _, r := range f.recipes {
+		if r.MealieRecipeID == id {
+			return r, nil
+		}
+	}
+	return persistence.RecipeRef{}, pgx.ErrNoRows
+}
+func (f *fakeStore) UpsertRecipeRef(ctx context.Context, r persistence.RecipeRef) error {
+	for i, existing := range f.recipes {
+		if existing.MealieRecipeID == r.MealieRecipeID {
+			f.recipes[i] = r
+			return nil
+		}
+	}
+	f.recipes = append(f.recipes, r)
+	return nil
 }
 func (f *fakeStore) CreateMealEvent(ctx context.Context, mealieRecipeID string, servedOn time.Time, planID *int64, planSlotDate *time.Time) (int64, error) {
 	return 1, nil
@@ -264,7 +297,7 @@ func TestRecipesList(t *testing.T) {
 	f := &fakeStore{recipes: []persistence.RecipeRef{
 		{MealieRecipeID: "r1", Title: "Pasta", Tags: []string{"italian"}, Effort: 1, LastSyncedAt: time.Now()},
 	}}
-	svc := service.NewRecipes(f)
+	svc := service.NewRecipes(f, nil)
 	out, err := svc.ListRecipes(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -274,6 +307,69 @@ func TestRecipesList(t *testing.T) {
 	}
 	if out[0].Title != "Pasta" {
 		t.Fatalf("expected Pasta, got %s", out[0].Title)
+	}
+}
+
+func TestRecipesGet(t *testing.T) {
+	f := &fakeStore{recipes: []persistence.RecipeRef{
+		{MealieRecipeID: "r1", Title: "Pasta", Tags: []string{"italian"}, Effort: 1, LastSyncedAt: time.Now()},
+	}}
+	svc := service.NewRecipes(f, nil)
+
+	out, err := svc.GetRecipe(context.Background(), "r1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Title != "Pasta" || out.Effort != 1 {
+		t.Fatalf("unexpected recipe: %+v", out)
+	}
+
+	if _, err := svc.GetRecipe(context.Background(), "missing"); !errors.Is(err, dto.ErrNotFound) {
+		t.Fatalf("expected dto.ErrNotFound, got %v", err)
+	}
+}
+
+func TestRecipesSync(t *testing.T) {
+	fakeMealie := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/recipes":
+			w.Write([]byte(`{"page":1,"perPage":50,"total":1,"items":[
+				{"id":"r-pasta","slug":"pasta","name":"Pasta Bolognese"}]}`))
+		case "/api/recipes/pasta":
+			w.Write([]byte(`{"id":"r-pasta","slug":"pasta","name":"Pasta Bolognese","totalTime":"20 min",
+				"tags":[{"name":"pasta"}],
+				"recipeIngredient":[{"quantity":400,"unit":{"name":"g"},"food":{"id":"f1","name":"köttfärs"}}]}`))
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	t.Cleanup(fakeMealie.Close)
+
+	f := &fakeStore{}
+	svc := service.NewRecipes(f, mealie.New(fakeMealie.URL, "tok"))
+	n, err := svc.SyncFromMealie(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("expected 1 synced ref, got %d", n)
+	}
+	if len(f.recipes) != 1 || f.recipes[0].MealieRecipeID != "r-pasta" {
+		t.Fatalf("expected r-pasta upserted, got %+v", f.recipes)
+	}
+
+	if _, err := svc.SyncFromMealie(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.recipes) != 1 {
+		t.Fatalf("expected idempotent upsert, got %d refs", len(f.recipes))
+	}
+}
+
+func TestRecipesSyncNoClient(t *testing.T) {
+	svc := service.NewRecipes(&fakeStore{}, nil)
+	if _, err := svc.SyncFromMealie(context.Background()); err == nil {
+		t.Fatal("expected error when mealie client is nil")
 	}
 }
 
@@ -297,7 +393,7 @@ func TestPlanningList(t *testing.T) {
 	f := &fakeStore{plans: map[int64]persistence.MealPlan{
 		1: {ID: 1, WeekStart: weekStart, Status: "draft", CreatedAt: time.Now()},
 	}}
-	svc := service.NewPlanning(f)
+	svc := service.NewPlanning(f, nil)
 	out, err := svc.ListPlans(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -341,7 +437,7 @@ func TestPlanningGet(t *testing.T) {
 	f := &fakeStore{plans: map[int64]persistence.MealPlan{
 		1: {ID: 1, WeekStart: weekStart, Status: "approved", CreatedAt: time.Now()},
 	}}
-	svc := service.NewPlanning(f)
+	svc := service.NewPlanning(f, nil)
 	out, err := svc.GetPlan(context.Background(), 1)
 	if err != nil {
 		t.Fatal(err)
@@ -356,7 +452,7 @@ func TestPlanningUpdate(t *testing.T) {
 	f := &fakeStore{plans: map[int64]persistence.MealPlan{
 		1: {ID: 1, WeekStart: weekStart, Status: "draft", CreatedAt: time.Now()},
 	}}
-	svc := service.NewPlanning(f)
+	svc := service.NewPlanning(f, nil)
 	out, err := svc.UpdatePlan(context.Background(), 1, dto.MealPlanUpdate{Status: "approved"})
 	if err != nil {
 		t.Fatal(err)
@@ -368,7 +464,7 @@ func TestPlanningUpdate(t *testing.T) {
 
 func TestPlanningCreate(t *testing.T) {
 	f := &fakeStore{plans: make(map[int64]persistence.MealPlan)}
-	svc := service.NewPlanning(f)
+	svc := service.NewPlanning(f, nil)
 	out, err := svc.CreatePlan(context.Background(), "2025-01-13")
 	if err != nil {
 		t.Fatal(err)
@@ -440,5 +536,84 @@ func TestIngredientsGetMapping(t *testing.T) {
 	}
 	if out.IngredientID != "cauliflower" {
 		t.Fatalf("expected cauliflower, got %s", out.IngredientID)
+	}
+}
+
+func TestIngredientsNutritionByID(t *testing.T) {
+	fakeSLV := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/livsmedel/12345/naringsvarden" {
+			w.Write([]byte(`[{"namn":"Energi","varde":100,"enhet":"kJ"},{"namn":"Protein","varde":2.5,"enhet":"g"}]`))
+			return
+		}
+		w.WriteHeader(404)
+	}))
+	t.Cleanup(fakeSLV.Close)
+
+	svc := service.NewIngredients(&fakeStore{}, ingredients.NewLivsmedelsverket(fakeSLV.URL), nil, nil)
+
+	out, err := svc.NutritionByID(context.Background(), "slv-12345")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("expected 2 nutrients, got %d", len(out))
+	}
+	if out[0].Name != "Energi" || out[0].Value != 100 || out[0].Unit != "kJ" {
+		t.Fatalf("unexpected first nutrient: %+v", out[0])
+	}
+
+	if _, err := svc.NutritionByID(context.Background(), "cauliflower"); err == nil {
+		t.Fatal("expected error for non-slv ingredient id")
+	}
+	if _, err := svc.NutritionByID(context.Background(), "slv-notanumber"); err == nil {
+		t.Fatal("expected error for malformed slv id")
+	}
+}
+
+func TestStoresListStores(t *testing.T) {
+	f := &fakeStore{stores: []domain.Store{
+		{ID: "s-1", RetailerID: "ica", Name: "ICA Lindhagen"},
+		{ID: "s-2", RetailerID: "willys", Name: "Willys Kungsholmen"},
+	}}
+	svc := service.NewStores(f, nil)
+
+	out, err := svc.ListStores(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("expected 2 stores, got %d", len(out))
+	}
+	if out[0].ID != "s-1" || out[0].RetailerID != "ica" || out[0].Name != "ICA Lindhagen" {
+		t.Fatalf("unexpected first store: %+v", out[0])
+	}
+}
+
+func TestStoresListStoreOffers(t *testing.T) {
+	f := &fakeStore{offers: []domain.StoreProductOffer{
+		{ID: 1, StoreID: "s-1", RetailerProductID: "rp-1", CurrentlyCarried: true},
+		{ID: 2, StoreID: "s-2", RetailerProductID: "rp-2", CurrentlyCarried: false},
+	}}
+	svc := service.NewStores(f, nil)
+
+	out, err := svc.ListStoreOffers(context.Background(), "s-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("expected 1 offer for s-1, got %d", len(out))
+	}
+	if out[0].ID != 1 || out[0].RetailerProductID != "rp-1" || !out[0].CurrentlyCarried {
+		t.Fatalf("unexpected offer: %+v", out[0])
+	}
+}
+
+func TestStoresSearchProductsNoClient(t *testing.T) {
+	svc := service.NewStores(&fakeStore{}, nil)
+	if _, err := svc.SearchProducts(context.Background(), "mjölk"); err == nil {
+		t.Fatal("expected error when MPK client is nil")
+	}
+	if _, err := svc.SearchProductsByGTIN(context.Background(), "123"); err == nil {
+		t.Fatal("expected error when MPK client is nil")
 	}
 }

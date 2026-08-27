@@ -165,6 +165,60 @@ func TestShoppingListItem_LabelOnly(t *testing.T) {
 	_ = item
 }
 
+func TestShoppingListWithItems_Atomic(t *testing.T) {
+	s := skipWithoutDB(t)
+	ctx := context.Background()
+	truncateTables(t, ctx, s, "shopping_list_item", "shopping_list")
+
+	milk := "Mjölk"
+	bread := "Bröd"
+	listID, itemIDs, err := s.CreateShoppingListWithItems(ctx,
+		ShoppingList{Name: "Vecka 31", Status: "active"},
+		[]ShoppingListItem{
+			{Label: &milk, Quantity: 1, Unit: "L"},
+			{Label: &bread, Quantity: 2, Unit: "st"},
+		})
+	if err != nil {
+		t.Fatalf("CreateShoppingListWithItems: %v", err)
+	}
+	if len(itemIDs) != 2 {
+		t.Fatalf("expected 2 item ids, got %d", len(itemIDs))
+	}
+	items, err := s.ListShoppingListItems(ctx, listID)
+	if err != nil {
+		t.Fatalf("ListShoppingListItems: %v", err)
+	}
+	if len(items) != 2 {
+		t.Errorf("expected 2 items, got %d", len(items))
+	}
+}
+
+func TestShoppingListWithItems_RollsBackOnBadItem(t *testing.T) {
+	s := skipWithoutDB(t)
+	ctx := context.Background()
+	truncateTables(t, ctx, s, "shopping_list_item", "shopping_list")
+
+	milk := "Mjölk"
+	// The second item has no requirement, ingredient, or label → violates the
+	// CHECK constraint, so the whole transaction (list + items) must roll back.
+	_, _, err := s.CreateShoppingListWithItems(ctx,
+		ShoppingList{Name: "Doomed", Status: "active"},
+		[]ShoppingListItem{
+			{Label: &milk, Quantity: 1, Unit: "L"},
+			{Quantity: 1, Unit: "L"},
+		})
+	if err == nil {
+		t.Fatal("expected an error for the all-NULL item")
+	}
+	alls, err := s.ListShoppingLists(ctx)
+	if err != nil {
+		t.Fatalf("ListShoppingLists: %v", err)
+	}
+	if len(alls) != 0 {
+		t.Errorf("expected no lists after rollback, got %d: %+v", len(alls), alls)
+	}
+}
+
 func TestRetailerListBinding_CreateAndGet(t *testing.T) {
 	s := skipWithoutDB(t)
 	ctx := context.Background()

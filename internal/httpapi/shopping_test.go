@@ -32,6 +32,23 @@ func (f *fakeShoppingListSvc) CreateShoppingList(_ context.Context, in ShoppingL
 	return ShoppingListResponse{ID: 1, Name: in.Name, Status: "active", CreatedAt: time.Now()}, nil
 }
 
+func (f *fakeShoppingListSvc) CreateFromChecklist(_ context.Context, in ShoppingListFromChecklistInput) (ShoppingListFromChecklistResponse, error) {
+	if f.err != nil {
+		return ShoppingListFromChecklistResponse{}, f.err
+	}
+	items := make([]ShoppingListItemResponse, 0, len(in.Items))
+	for i, it := range in.Items {
+		items = append(items, ShoppingListItemResponse{
+			ID: i + 1, ShoppingListID: 1, Label: &it.Label,
+			Quantity: it.Quantity, Unit: it.Unit, Checked: false, AddedAt: time.Now(),
+		})
+	}
+	return ShoppingListFromChecklistResponse{
+		ShoppingListResponse: ShoppingListResponse{ID: 1, Name: in.Name, Status: "active", CreatedAt: time.Now()},
+		Items:                items,
+	}, nil
+}
+
 func (f *fakeShoppingListSvc) GetShoppingList(_ context.Context, listID int64) (ShoppingListResponse, error) {
 	if f.err != nil {
 		return ShoppingListResponse{}, f.err
@@ -81,6 +98,57 @@ func TestCreateShoppingList_MissingName(t *testing.T) {
 	svc := &fakeShoppingListSvc{}
 	mux := newMux(t, Dependencies{ShoppingLists: svc})
 	rec := doPost(t, mux, "/shopping-lists", `{}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestCreateShoppingListFromChecklist_HappyPath(t *testing.T) {
+	svc := &fakeShoppingListSvc{}
+	mux := newMux(t, Dependencies{ShoppingLists: svc})
+	body := `{"name":"Köp Mat Andreas","items":[{"label":"Mjölk","quantity":1,"unit":"liter"},{"label":"Ägg","quantity":6,"unit":"st"}]}`
+	rec := doPost(t, mux, "/shopping-lists/from-checklist", body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 (body: %s)", rec.Code, rec.Body.String())
+	}
+	var got ShoppingListFromChecklistResponse
+	mustJSON(t, rec.Body.Bytes(), &got)
+	if got.ID != 1 || got.Name != "Köp Mat Andreas" || got.Status != "active" {
+		t.Fatalf("unexpected list: %+v", got.ShoppingListResponse)
+	}
+	if len(got.Items) != 2 {
+		t.Fatalf("want 2 items, got %d", len(got.Items))
+	}
+	if got.Items[0].Label == nil || *got.Items[0].Label != "Mjölk" || got.Items[0].Quantity != 1 || got.Items[0].Unit != "liter" {
+		t.Fatalf("unexpected first item: %+v", got.Items[0])
+	}
+	if got.Items[1].Label == nil || *got.Items[1].Label != "Ägg" || got.Items[1].Quantity != 6 {
+		t.Fatalf("unexpected second item: %+v", got.Items[1])
+	}
+}
+
+func TestCreateShoppingListFromChecklist_MissingName(t *testing.T) {
+	svc := &fakeShoppingListSvc{}
+	mux := newMux(t, Dependencies{ShoppingLists: svc})
+	rec := doPost(t, mux, "/shopping-lists/from-checklist", `{"items":[{"label":"Mjölk","quantity":1,"unit":"liter"}]}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestCreateShoppingListFromChecklist_EmptyItems(t *testing.T) {
+	svc := &fakeShoppingListSvc{}
+	mux := newMux(t, Dependencies{ShoppingLists: svc})
+	rec := doPost(t, mux, "/shopping-lists/from-checklist", `{"name":"Tomt"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestCreateShoppingListFromChecklist_InvalidItemQuantity(t *testing.T) {
+	svc := &fakeShoppingListSvc{}
+	mux := newMux(t, Dependencies{ShoppingLists: svc})
+	rec := doPost(t, mux, "/shopping-lists/from-checklist", `{"name":"X","items":[{"label":"Mjölk","quantity":0,"unit":"liter"}]}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
 	}

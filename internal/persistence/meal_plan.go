@@ -120,6 +120,7 @@ type MealPlanCandidate struct {
 	ID             int64
 	PlanID         int64
 	SlotDate       time.Time
+	SlotKind       string // 'dinner' | 'breakfast' | 'snack'
 	MealieRecipeID string
 	Score          float64
 	Breakdown      map[string]float64 // JSONB; nil-safe
@@ -133,19 +134,22 @@ func (s *Store) InsertCandidate(ctx context.Context, c MealPlanCandidate) error 
 	if breakdown == nil {
 		breakdown = map[string]float64{}
 	}
+	if c.SlotKind == "" {
+		c.SlotKind = "dinner"
+	}
 	const q = `INSERT INTO meal_plan_candidate
-		(plan_id, slot_date, mealie_recipe_id, score, breakdown, feasible, rank)
-		VALUES ($1,$2,$3,$4,$5,$6,$7)`
-	if _, err := s.db.Exec(ctx, q, c.PlanID, c.SlotDate, c.MealieRecipeID, c.Score, breakdown, c.Feasible, c.Rank); err != nil {
+		(plan_id, slot_date, slot_kind, mealie_recipe_id, score, breakdown, feasible, rank)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`
+	if _, err := s.db.Exec(ctx, q, c.PlanID, c.SlotDate, c.SlotKind, c.MealieRecipeID, c.Score, breakdown, c.Feasible, c.Rank); err != nil {
 		return fmt.Errorf("persistence: insert candidate: %w", err)
 	}
 	return nil
 }
 
-// ListCandidates returns a plan's candidates ordered by (slot_date, rank).
+// ListCandidates returns a plan's candidates ordered by (slot_date, slot_kind, rank).
 func (s *Store) ListCandidates(ctx context.Context, planID int64) ([]MealPlanCandidate, error) {
-	const q = `SELECT id, plan_id, slot_date, mealie_recipe_id, score, breakdown, feasible, rank
-		FROM meal_plan_candidate WHERE plan_id = $1 ORDER BY slot_date, rank`
+	const q = `SELECT id, plan_id, slot_date, slot_kind, mealie_recipe_id, score, breakdown, feasible, rank
+		FROM meal_plan_candidate WHERE plan_id = $1 ORDER BY slot_date, slot_kind, rank`
 	rows, err := s.db.Query(ctx, q, planID)
 	if err != nil {
 		return nil, fmt.Errorf("persistence: list candidates: %w", err)
@@ -155,7 +159,7 @@ func (s *Store) ListCandidates(ctx context.Context, planID int64) ([]MealPlanCan
 	for rows.Next() {
 		var c MealPlanCandidate
 		var breakdown map[string]float64
-		if err := rows.Scan(&c.ID, &c.PlanID, &c.SlotDate, &c.MealieRecipeID, &c.Score, &breakdown, &c.Feasible, &c.Rank); err != nil {
+		if err := rows.Scan(&c.ID, &c.PlanID, &c.SlotDate, &c.SlotKind, &c.MealieRecipeID, &c.Score, &breakdown, &c.Feasible, &c.Rank); err != nil {
 			return nil, err
 		}
 		c.Breakdown = breakdown
@@ -168,25 +172,29 @@ func (s *Store) ListCandidates(ctx context.Context, planID int64) ([]MealPlanCan
 type MealPlanDecision struct {
 	PlanID         int64
 	SlotDate       time.Time
+	SlotKind       string // 'dinner' | 'breakfast' | 'snack'
 	MealieRecipeID string
 	DecidedAt      time.Time
 }
 
 // SetDecision upserts the chosen recipe for a plan/slot.
 func (s *Store) SetDecision(ctx context.Context, d MealPlanDecision) error {
-	const q = `INSERT INTO meal_plan_decision (plan_id, slot_date, mealie_recipe_id)
-		VALUES ($1, $2, $3)
-		ON CONFLICT (plan_id, slot_date) DO UPDATE SET mealie_recipe_id = EXCLUDED.mealie_recipe_id`
-	if _, err := s.db.Exec(ctx, q, d.PlanID, d.SlotDate, d.MealieRecipeID); err != nil {
+	if d.SlotKind == "" {
+		d.SlotKind = "dinner"
+	}
+	const q = `INSERT INTO meal_plan_decision (plan_id, slot_date, slot_kind, mealie_recipe_id)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (plan_id, slot_date, slot_kind) DO UPDATE SET mealie_recipe_id = EXCLUDED.mealie_recipe_id`
+	if _, err := s.db.Exec(ctx, q, d.PlanID, d.SlotDate, d.SlotKind, d.MealieRecipeID); err != nil {
 		return fmt.Errorf("persistence: set decision: %w", err)
 	}
 	return nil
 }
 
-// ListDecisions returns a plan's decisions ordered by slot_date.
+// ListDecisions returns a plan's decisions ordered by (slot_date, slot_kind).
 func (s *Store) ListDecisions(ctx context.Context, planID int64) ([]MealPlanDecision, error) {
-	const q = `SELECT plan_id, slot_date, mealie_recipe_id, decided_at
-		FROM meal_plan_decision WHERE plan_id = $1 ORDER BY slot_date`
+	const q = `SELECT plan_id, slot_date, slot_kind, mealie_recipe_id, decided_at
+		FROM meal_plan_decision WHERE plan_id = $1 ORDER BY slot_date, slot_kind`
 	rows, err := s.db.Query(ctx, q, planID)
 	if err != nil {
 		return nil, fmt.Errorf("persistence: list decisions: %w", err)
@@ -195,7 +203,7 @@ func (s *Store) ListDecisions(ctx context.Context, planID int64) ([]MealPlanDeci
 	var out []MealPlanDecision
 	for rows.Next() {
 		var d MealPlanDecision
-		if err := rows.Scan(&d.PlanID, &d.SlotDate, &d.MealieRecipeID, &d.DecidedAt); err != nil {
+		if err := rows.Scan(&d.PlanID, &d.SlotDate, &d.SlotKind, &d.MealieRecipeID, &d.DecidedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, d)

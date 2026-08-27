@@ -24,11 +24,12 @@ const Version = "0.1.0"
 
 // ---- Tool output (structured content) ----
 
-// PlannedDinner is one planned dinner for a date, produced by the
+// PlannedSlot is one planned meal for a date and slot kind, produced by the
 // application-layer weekly planner.
-type PlannedDinner struct {
+type PlannedSlot struct {
 	Date   string  `json:"date"`
-	Recipe string  `json:"recipe"` // Mealie recipe id
+	Slot   string  `json:"slot"` // "dinner" | "breakfast" | "snack"
+	Recipe string  `json:"recipe"` // Mealie recipe id (empty for fallback snacks)
 	Title  string  `json:"title"`
 	Score  float64 `json:"score"`
 }
@@ -59,6 +60,9 @@ type ListCandidatesInput struct {
 	Date string `json:"date,omitempty"`
 	// Days is how many consecutive days to plan starting at Date. <=0 means 1.
 	Days int `json:"days,omitempty"`
+	// Slots is the set of slot kinds to plan. Empty means dinner only
+	// (backward compatible). Valid values: "dinner", "breakfast", "snack".
+	Slots []string `json:"slots,omitempty"`
 }
 
 // RecordReactionInput is the input for the record_meal_reaction tool.
@@ -71,6 +75,8 @@ type RecordReactionInput struct {
 	PersonID string `json:"person_id"`
 	// Sentiment is -2 (hates) .. 2 (loves).
 	Sentiment int `json:"sentiment"`
+	// Slot is the slot kind the meal belongs to. Defaults to "dinner" when omitted.
+	Slot string `json:"slot,omitempty"`
 }
 
 // GetRequirementsInput is the input for the get_shopping_requirements tool.
@@ -81,11 +87,14 @@ type GetRequirementsInput struct {
 
 // ---- Service interfaces (implemented by the composition root) ----
 
-// PlannerService plans dinners for a date range. The composition root implements
+// PlannerService plans meals for a date range. The composition root implements
 // it by loading the household and recipe candidates from persistence and
 // delegating to the application-layer planner.
 type PlannerService interface {
-	PlanDinners(ctx context.Context, date time.Time, days int) ([]PlannedDinner, error)
+	// PlanDinners plans dinners (backward compatible, dinner-only).
+	PlanDinners(ctx context.Context, date time.Time, days int) ([]PlannedSlot, error)
+	// PlanSlots plans the requested slot kinds for a date range.
+	PlanSlots(ctx context.Context, date time.Time, days int, slots []string) ([]PlannedSlot, error)
 }
 
 // MealReactionService records a household member's reaction to a served meal.
@@ -104,6 +113,9 @@ type Dependencies struct {
 	Planner      PlannerService
 	Reactions    MealReactionService
 	Requirements RequirementsService
+	ShoppingList ShoppingListService
+	Compare      PriceComparisonService
+	Wishlist     WishlistService
 }
 
 // RegisterTools adds the initial tool set to s. Each tool calls exactly one
@@ -112,30 +124,48 @@ func RegisterTools(s *mcp.Server, deps Dependencies) {
 	if deps.Planner != nil {
 		mcp.AddTool(s, &mcp.Tool{
 			Name:        "list_recipe_candidates",
-			Description: "Plan the best dinner candidate for a given day (and optionally the following days) using the household's recipes, people, and preferences.",
+			Description: "Plan the best meal candidate(s) for a given day (and optionally the following days) using the household's recipes, people, and preferences. By default plans dinner only; pass slots=[\"dinner\",\"breakfast\",\"snack\"] to plan multiple slot kinds.",
 		}, listCandidatesHandler(deps.Planner))
 	}
 	if deps.Reactions != nil {
 		mcp.AddTool(s, &mcp.Tool{
 			Name:        "record_meal_reaction",
-			Description: "Record a household member's reaction (sentiment -2..2) to a meal that was served on a given date.",
+			Description: "Record a household member's reaction (sentiment -2..2) to a meal that was served on a given date. Optionally specify the slot kind (dinner, breakfast, snack); defaults to dinner.",
 		}, recordReactionHandler(deps.Reactions))
 	}
 	if deps.Requirements != nil {
 		mcp.AddTool(s, &mcp.Tool{
 			Name:        "get_shopping_requirements",
-			Description: "Aggregate a set of recipes into canonical, retailer-independent shopping requirements (ingredient + amount per line).",
+			Description: "Return the canonical shopping requirements (ingredient + amount per line) for the given recipe ids, so they can be sent to a retailer adapter for product resolution.",
 		}, requirementsHandler(deps.Requirements))
+	}
+	if deps.ShoppingList != nil {
+		mcp.AddTool(s, &mcp.Tool{
+			Name:        "create_shopping_list",
+			Description: "Create a new spisordning shopping list from a set of canonical shopping requirements (ingredient + amount per line). Returns the new list id.",
+		}, createShoppingListHandler(deps.ShoppingList))
+	}
+	if deps.Compare != nil {
+		mcp.AddTool(s, &mcp.Tool{
+			Name:        "compare_shopping_prices",
+			Description: "Compare the price of a set of shopping requirements across retailers (Willys and ICA). Returns per-item each retailer's product + price, the cheapest, and per-retailer availability. A stale or unavailable retailer degrades to available:false instead of failing the call.",
+		}, comparePricesHandler(deps.Compare))
+	}
+	if deps.Wishlist != nil {
+		mcp.AddTool(s, &mcp.Tool{
+			Name:        "push_shopping_wishlist",
+			Description: "Push a chosen set of resolved products to a named retailer's (willys or ica) wishlist. Stops at the wishlist — it never fills a cart, checks out, or books a delivery slot. Optionally binds the wishlist to an existing spisordning shopping list.",
+		}, pushWishlistHandler(deps.Wishlist))
 	}
 }
 
 // ---- Tool handlers ----
 
-// listCandidatesHandler plans dinners for the requested day(s). On success it
+// listCandidatesHandler plans meals for the requested day(s). On success it
 // returns the structured result and lets the SDK populate the text content; on
 // error it returns the error so the SDK reports it as an MCP tool-call error.
-func listCandidatesHandler(p PlannerService) mcp.ToolHandlerFor[ListCandidatesInput, []PlannedDinner] {
-	return func(ctx context.Context, _ *mcp.CallToolRequest, in ListCandidatesInput) (*mcp.CallToolResult, []PlannedDinner, error) {
+func listCandidatesHandler(p PlannerService) mcp.ToolHandlerFor[ListCandidatesInput, []PlannedSlot] {
+	return func(ctx context.Context, _ *mcp.CallToolRequest, in ListCandidatesInput) (*mcp.CallToolResult, []PlannedSlot, error) {
 		date, err := parseDate(in.Date)
 		if err != nil {
 			return nil, nil, err
@@ -144,11 +174,16 @@ func listCandidatesHandler(p PlannerService) mcp.ToolHandlerFor[ListCandidatesIn
 		if days <= 0 {
 			days = 1
 		}
-		dinners, err := p.PlanDinners(ctx, date, days)
+		var slots []PlannedSlot
+		if len(in.Slots) > 0 {
+			slots, err = p.PlanSlots(ctx, date, days, in.Slots)
+		} else {
+			slots, err = p.PlanDinners(ctx, date, days)
+		}
 		if err != nil {
 			return nil, nil, err
 		}
-		return nil, dinners, nil
+		return nil, slots, nil
 	}
 }
 
@@ -165,6 +200,10 @@ func recordReactionHandler(r MealReactionService) mcp.ToolHandlerFor[RecordReact
 		}
 		if in.Sentiment < -2 || in.Sentiment > 2 {
 			return nil, RecordReactionResult{}, fmt.Errorf("record_meal_reaction: sentiment must be in [-2, 2], got %d", in.Sentiment)
+		}
+		// Default slot to "dinner" when omitted.
+		if in.Slot == "" {
+			in.Slot = "dinner"
 		}
 		res, err := r.RecordReaction(ctx, in)
 		if err != nil {

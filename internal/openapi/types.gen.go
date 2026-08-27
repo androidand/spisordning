@@ -198,6 +198,24 @@ type Health struct {
 // HealthStatus defines model for Health.Status.
 type HealthStatus string
 
+// Ingredient defines model for Ingredient.
+type Ingredient struct {
+	Brand *string `json:"brand,omitempty"`
+
+	// Display human-friendly name
+	Display string  `json:"display"`
+	Gtin    *string `json:"gtin,omitempty"`
+
+	// Id canonical id
+	Id string `json:"id"`
+
+	// SlvNummer SLV nummer when source is slv
+	SlvNummer *int `json:"slv_nummer,omitempty"`
+
+	// Source upstream source (slv
+	Source *string `json:"source,omitempty"`
+}
+
 // IngredientMapping defines model for IngredientMapping.
 type IngredientMapping struct {
 	ExternalId *string `json:"external_id,omitempty"`
@@ -215,6 +233,29 @@ type IngredientMappingResolve struct {
 	AcceptableForms *[]string `json:"acceptable_forms,omitempty"`
 	IngredientId    string    `json:"ingredient_id"`
 	PreferredForm   *string   `json:"preferred_form,omitempty"`
+}
+
+// IngredientNutrient defines model for IngredientNutrient.
+type IngredientNutrient struct {
+	// Name nutrient name
+	Name string `json:"name"`
+
+	// Unit unit
+	Unit string `json:"unit"`
+
+	// Value value per 100 g edible portion
+	Value float64 `json:"value"`
+}
+
+// IngredientProduct defines model for IngredientProduct.
+type IngredientProduct struct {
+	Amount      *string `json:"amount,omitempty"`
+	Brand       *string `json:"brand,omitempty"`
+	Description *string `json:"description,omitempty"`
+	Gtin        *string `json:"gtin,omitempty"`
+	ImageUrl    *string `json:"image_url,omitempty"`
+	Key         string  `json:"key"`
+	Name        string  `json:"name"`
 }
 
 // MealEvent defines model for MealEvent.
@@ -498,6 +539,22 @@ type ShoppingRequirement struct {
 	Unit            string   `json:"unit"`
 }
 
+// Store defines model for Store.
+type Store struct {
+	Id         string `json:"id"`
+	Name       string `json:"name"`
+	RetailerId string `json:"retailer_id"`
+}
+
+// StoreOffer defines model for StoreOffer.
+type StoreOffer struct {
+	CurrentlyCarried  bool      `json:"currently_carried"`
+	Id                int64     `json:"id"`
+	RetailerProductId string    `json:"retailer_product_id"`
+	StoreId           string    `json:"store_id"`
+	UpdatedAt         time.Time `json:"updated_at"`
+}
+
 // TonightView Tonight's meal: the recipe + any reactions recorded so far
 type TonightView struct {
 	// Reactions reactions already recorded for today's meal event
@@ -517,6 +574,9 @@ type PersonId = string
 // PlanId defines model for PlanId.
 type PlanId = int
 
+// RecipeId defines model for RecipeId.
+type RecipeId = string
+
 // ShoppingListId defines model for ShoppingListId.
 type ShoppingListId = int
 
@@ -528,6 +588,13 @@ type Conflict = Error
 
 // NotFound defines model for NotFound.
 type NotFound = Error
+
+// SearchFoodParams defines parameters for SearchFood.
+type SearchFoodParams struct {
+	// Q name substring to match
+	Q     string `form:"q" json:"q"`
+	Limit *int   `form:"limit,omitempty" json:"limit,omitempty"`
+}
 
 // ListOrdersParams defines parameters for ListOrders.
 type ListOrdersParams struct {
@@ -542,6 +609,16 @@ type SetDecisionsJSONBody = []MealPlanDecision
 type ListPreferencesParams struct {
 	// PersonId filter to one person
 	PersonId *string `form:"personId,omitempty" json:"personId,omitempty"`
+}
+
+// SearchProductsByGTINParams defines parameters for SearchProductsByGTIN.
+type SearchProductsByGTINParams struct {
+	Gtin string `form:"gtin" json:"gtin"`
+}
+
+// SearchProductsParams defines parameters for SearchProducts.
+type SearchProductsParams struct {
+	Q string `form:"q" json:"q"`
 }
 
 // ToggleShoppingListItemJSONBody defines parameters for ToggleShoppingListItem.

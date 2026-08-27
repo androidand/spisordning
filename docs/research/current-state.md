@@ -18,21 +18,32 @@ internal/
   architecturetest/     layer-boundary guard (TestLayeredArchitecture via `go list -deps`)
   domain/               core types (Person, Preference, Candidate, Ingredient,
                         ShoppingRequirement, …)
-  httpapi/              HTTP handlers + wiring (health.go, people.go, helpers.go, tests)
+   httpapi/              HTTP handlers + wiring (health.go, people.go, shopping.go,
+                        helpers.go, tests) — shopping.go adds the shopping-list endpoints incl.
+                        POST /shopping-lists/from-checklist (Apple Notes ingestion)
   httpclient/           shared JSON-over-HTTP transport used by every backend client
   llm/                  AI provider abstraction (Provider interface); Olla (Client) is the
                         primary OpenAI-compatible implementation
   mealie/client.go       read-only Mealie sync client (real, tested)
-  mcptools/              MCP tool adapters (list_recipe_candidates, record_meal_reaction,
-                        get_shopping_requirements); thin layer over the application layer
+   mcptools/              MCP tool adapters (list_recipe_candidates, record_meal_reaction,
+                        get_shopping_requirements, create_shopping_list,
+                        compare_shopping_prices, push_shopping_wishlist); thin layer over the
+                        application layer — the three shopping tools stop at the retailer wishlist
+                        (no cart/checkout/payment)
   persistence/          pgx-v5 Postgres repositories (people, recipes, meals, meal_plan)
                         + Config/FromEnv/New/NewStore; integration-tested
-  planning/              requirements.go, staples.go, week.go (PlanWeek planner loop)
-  retailer/client.go     Go-side client for the willys-adapter HTTP service
+   planning/              requirements.go, staples.go, week.go (PlanWeek planner loop),
+                         snacks.go (snack/breakfast tag filters, fallback snacks, PlanSimpleSlot,
+                         PlanWeekAllSlots)
+   retailer/client.go     Go-side client for the willys-adapter HTTP service; Resolution now
+                          carries PriceValue/Price (price-in-resolution)
+   retailer/compare.go    cross-retailer price comparison (Compare resolves a set of
+                          requirements against Willys + ICA, reports per-item cheapest +
+                          availability; a stale retailer degrades to available:false)
   scoring/scoring.go     deterministic candidate scorer
   skolmaten/client.go    school-lunch client
-migrations/0001-0013      Postgres schema (0001 first-slice … 0013 price intelligence) —
-                          applied by docker-compose; Go persistence wired for all (see below)
+migrations/0001-0014      Postgres schema (0001 first-slice … 0014 meal plan slots) —
+                           applied by docker-compose; Go persistence wired for all (see below)
 api/openapi.yaml          design-first OpenAPI 3.0.3 contract; server code generated from this
 openspec/                 see below
 ```
@@ -84,16 +95,26 @@ of this restructuring (see `openspec/changes/archive/` for their new archive ent
 ## The retailer adapter lives in a sibling repo
 
 `willys-adapter` (the HTTP service spisordning's `internal/retailer` talks to) is **not** in
-this repo — its code is in `~/dev/willys/willys-client/apps/willys-adapter`, alongside the
+this repo — its code is in `~/dev/store-clients/willys-client/apps/willys-adapter`, alongside the
 TypeScript `willys-client` it wraps. `docker-compose.yml` builds it from that sibling repo's
-`Dockerfile.adapter`. That repo has its **own** `openspec/` with three changes
+`Dockerfile.adapter`. That repo has its **own** `openspec/` with changes
 (`add-adapter-cache-layer`, `ensure-active-store`, archived `2026-07-17-migrate-api-v1`) — check
 it before assuming spisordning's OpenSpec state is the complete picture for anything
 retailer-related.
 
-A second, unrelated sibling repo, `~/dev/willys/willys-mcp`, exists (older Next.js + MCP-server
-exploration with its own puppeteer auth and SQLite caching). It is not wired into spisordning
-and should not be confused with the adapter that is.
+The sibling now lives inside a larger `~/dev/store-clients/` workspace (a `go.work` + shared
+`openspec/` holding many retailer clients: `willys-client`, `ica-client`, `hemkop-client`,
+`dabas-client`, `axfood-client`, etc.). A second, unrelated repo, `~/dev/store-clients/willys-mcp`,
+exists there too (older Next.js + MCP-server exploration with its own puppeteer auth and SQLite
+caching). It is not wired into spisordning and should not be confused with the adapter that is.
+
+`expose-shopping-price-and-notes-bridge` also added a cross-retailer Apple Notes path: a stub at
+`~/dev/store-clients/willys-client/apps/notes-sync/spisordning-bridge.ts`
+(`npm run notes:spisordning[:apply]`) reuses the existing `notes.ts` osascript reader + `core.ts`
+checklist parser and POSTs to spisordning's `POST /shopping-lists/from-checklist` (default
+`http://localhost:8080`). It is dry-run by default and deployment-gated — activate it (point
+`SPISORDNING_URL` at the real host, pass `--apply`) once `deploy-food-brain-to-proxmox` lands. The
+existing Willys-only `bridge.ts` flow is untouched.
 
 See `docs/research/willys-capabilities.md` for the full capability map.
 
@@ -141,10 +162,13 @@ extend it:
 - `0013_price_intelligence.sql` — `retailer`, `store`, `retailer_product`,
   `store_product_offer`, `price_observation`, `current_store_product_price` view
   (implement-price-intelligence).
+- `0014_meal_plan_slots.sql` — adds `slot_kind` column (`dinner`|`breakfast`|`snack`,
+  default `dinner`) to `meal_plan_candidate` and `meal_plan_decision`, and
+  `meal_plan_slot_kind` to `meal_event` (complete-live-meal-planning).
 
 All migrations are applied by docker-compose's Postgres. Go persistence is wired for all
-new tables (pantry, meal-history, price). The shopping/order tables (0006–0007) remain
-unwritten in Go — tracked in `implement-shopping-and-commerce`.
+new tables (pantry, meal-history, price, meal-plan slots). The shopping/order tables
+(0006–0007) remain unwritten in Go — tracked in `implement-shopping-and-commerce`.
 
 ## CI / Docker
 
@@ -167,12 +191,19 @@ binary alongside `cmd/food-brain` (`implement-mcp-server`, completed 2026-08-22)
 - **Protocol**: MCP 2026-07-28, stateless — no `initialize` handshake, no
   `Mcp-Session-Id` header. Streamable HTTP (POST /mcp) and stdio transports.
 - **SDK**: `github.com/modelcontextprotocol/go-sdk` v1.7.0.
-- **Tools**: `list_recipes`, `record_reaction`, `get_tonight_meal`, `list_people`.
-  All call `internal/httpapi` service interfaces; never persistence or SQL directly
-  (enforced by the same architecture test used by `establish-enforced-go-architecture`).
+- **Tools**: `list_recipe_candidates` (full-day planning: dinner + breakfast + snack slots),
+  `record_meal_reaction` (with optional `slot` field, defaults to dinner),
+  `get_shopping_requirements`, plus the shopping trio added by
+  `expose-shopping-price-and-notes-bridge`: `create_shopping_list` (persist a list from
+  requirements), `compare_shopping_prices` (cross-retailer price comparison via
+  `internal/retailer.Compare`), and `push_shopping_wishlist` (push chosen resolutions to a
+  retailer's wishlist — the terminal safe step; no cart/checkout/payment). All call
+  `internal/mcptools` service interfaces; never persistence or SQL directly (enforced by the same
+  architecture test used by `establish-enforced-go-architecture`).
 - **Binary**: `cmd/mcp-server/main.go` — wired via `storeAdapter` (same pattern as
-  `cmd/food-brain/adapters.go`). Dockerfile at `Dockerfile.mcp`; compose service in
-  `docker-compose.yml` on port 8401.
+  `cmd/food-brain/adapters.go`). Built by the main `Dockerfile` (which ships both
+  `food-brain` and `mcp-server`); the compose `mcp-server` service runs it via an
+  `entrypoint` override on port 8081.
 - **ADR**: `docs/adr/mcp-protocol-2026-07-28-and-go-sdk.md`.
 
 The MCP server is the infrastructure that makes "AI SHALL call application-layer tools.
