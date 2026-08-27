@@ -58,8 +58,27 @@ to know where to find the resulting credential and how to detect it's stale (reu
 `expose-shopping-price-and-notes-bridge` D3's 401-detection finding). Alternative considered: a full
 `internal/auth` package with pluggable strategies — rejected as premature; one real case (ICA) and
 one hypothetical (a future Hemköp elevated tier, if it ever needs one) doesn't justify a strategy
-framework yet. Revisit if a third tiered retailer shows up. **Not yet implemented** — task group 1
-(config) landed first; this is next.
+framework yet. Revisit if a third tiered retailer shows up. **Done (task group 2)** — see
+`internal/retailer/auth.go`; scope corrected from `internal/icaretailer` (confirmed dead code, zero
+consumers) to `internal/retailer` (what's actually used).
+
+**D2a — Where the manual elevated login actually runs, once `ica-adapter` deploys to Proxmox
+(decided 2026-08-28).** The Playwright-driven login opens a real, visible browser window — verified
+by reading `ecom-session.ts` directly — which cannot run on a headless Proxmox LXC. Decision: the
+login stays Mac-side (where a display exists); the resulting cookie file gets manually synced to
+wherever the Proxmox-deployed `ica-adapter` runs. This needed one small cross-repo change, now
+done: `IcaClientOptions.cookieCachePath` (new, `store-clients/ica-client/src/index.ts`) plumbed
+through to `EcomAuth`, and `ica-adapter/server.ts` reading `ICA_ELEVATED_CREDENTIAL_PATH` — the
+same env var name `Config.ICAElevatedCredentialPath` (D2/task 2.3) already documented on the Go
+side, now actually meaningful on the TS side too. The sync step itself (copying the file from Mac
+to Proxmox) stays a manual, undocumented-as-automation step — see
+`docs/infrastructure/ica-elevated-auth.md` for the full writeup and the two alternatives considered
+(keeping `ica-adapter` Mac-resident like `willys-adapter`; a remote-viewable headless browser via
+Xvfb+VNC) and why they were rejected. **Cross-repo note**: the `store-clients` half of this (three
+files: `src/index.ts`, `apps/ica-adapter/server.ts`) is implemented and verified (runtime
+construction check + full existing test suite, no regressions) but is sitting **uncommitted** in
+that sibling repo — this session's git-worktree isolation blocks committing to any repo other than
+this one. Needs a manual commit there before this decision is fully landed.
 
 **D3 — SSE ships for plan/resolve progress; WebSockets are explicitly deferred, not built
 speculatively.** `internal/httpapi` gains `GET /plans/{id}/progress` (or similar) streaming
