@@ -2,8 +2,27 @@ package persistence
 
 import (
 	"context"
+	"encoding/json"
+	"reflect"
 	"testing"
 )
+
+// jsonEqual compares two JSON byte strings semantically rather than
+// byte-for-byte — Postgres's JSONB column re-serializes with its own
+// canonical whitespace (e.g. spaces after ":"/","), so an exact string
+// comparison against what was uploaded is the wrong check even when the data
+// round-trips correctly.
+func jsonEqual(t *testing.T, a, b []byte) bool {
+	t.Helper()
+	var av, bv any
+	if err := json.Unmarshal(a, &av); err != nil {
+		t.Fatalf("jsonEqual: unmarshal a: %v (a=%s)", err, a)
+	}
+	if err := json.Unmarshal(b, &bv); err != nil {
+		t.Fatalf("jsonEqual: unmarshal b: %v (b=%s)", err, b)
+	}
+	return reflect.DeepEqual(av, bv)
+}
 
 func TestRetailerCredential_UploadThenGet(t *testing.T) {
 	s := skipWithoutDB(t)
@@ -34,8 +53,8 @@ func TestRetailerCredential_UploadThenGet(t *testing.T) {
 	if cred.Tier != "elevated" {
 		t.Errorf("Tier = %q, want elevated", cred.Tier)
 	}
-	if string(cred.Payload) != string(payload) {
-		t.Errorf("Payload = %s, want %s", cred.Payload, payload)
+	if !jsonEqual(t, cred.Payload, payload) {
+		t.Errorf("Payload = %s, want (semantically) %s", cred.Payload, payload)
 	}
 	if cred.UploadedAt.IsZero() {
 		t.Error("UploadedAt should be set")
@@ -58,7 +77,7 @@ func TestRetailerCredential_UploadOverwritesPrevious(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("GetRetailerCredential: found=%v err=%v", found, err)
 	}
-	if string(cred.Payload) != `"new"` {
+	if !jsonEqual(t, cred.Payload, []byte(`"new"`)) {
 		t.Errorf("Payload = %s, want the overwritten value %q", cred.Payload, `"new"`)
 	}
 }
