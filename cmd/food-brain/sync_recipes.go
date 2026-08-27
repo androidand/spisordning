@@ -6,8 +6,8 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
 
+	"github.com/androidand/spisordning/internal/config"
 	"github.com/androidand/spisordning/internal/mealie"
 	"github.com/androidand/spisordning/internal/service"
 )
@@ -30,10 +30,11 @@ func runSync(args []string) error {
 }
 
 func runSyncRecipes(ctx context.Context) error {
-	mealieURL, mealieToken := os.Getenv("MEALIE_BASE_URL"), os.Getenv("MEALIE_API_TOKEN")
-	if mealieURL == "" || mealieToken == "" {
+	appCfg := config.Load()
+	if !appCfg.MealieEnabled() {
 		return fmt.Errorf("sync recipes: MEALIE_BASE_URL and MEALIE_API_TOKEN must be set")
 	}
+	mealieURL, mealieToken := appCfg.MealieBaseURL, appCfg.MealieAPIToken
 	store, err := openStore(ctx)
 	if err != nil {
 		return err

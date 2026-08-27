@@ -1,0 +1,94 @@
+## 1. Config layer
+
+- [x] 1.1 Create `internal/config` with a `Config` struct covering every env var currently read in
+      `cmd/food-brain/adapters.go` and `cmd/mcp-server/adapters.go` (`DATABASE_URL`, `MEALIE_BASE_URL`,
+      `MEALIE_API_TOKEN`, `SKOLMATEN_*`, `ADAPTER_URL`, `ICA_ADAPTER_URL`, `DABAS_ENABLED`,
+      `SLV_BASE_URL`, `MPK_ENABLED`, `OLLA_*`, `SPISORNING_ADDR`, `SPISORNING_MCP_ADDR`).
+      (Done: `internal/config/config.go`. Scope grew beyond the two `adapters.go` files listed —
+      a full grep found `os.Getenv` calls scattered across 7 files total
+      (`cmd/food-brain/{adapters,main,plan,sync_recipes,sync_nutrition,sync_offers,sync_prices}.go`
+      and `cmd/mcp-server/{adapters,main}.go`); all covered. `DATABASE_URL` deliberately excluded —
+      see 1.2's note, `internal/persistence.FromEnv` already owns DB config cleanly and duplicating
+      it would be two copies of the same parsing logic.)
+- [x] 1.2 `config.Load()` validates required-for-this-command combinations (e.g. `DATABASE_URL`
+      required for `serve`/`migrate`) and fails fast with a clear message naming the missing
+      variable, before any client constructor runs.
+      (Refined during implementation — see design.md D1: `Load()` never fails; it gathers values
+      with defaults, and each call site validates what it needs via helpers like
+      `Config.MealieEnabled()`/`Config.OllaEnabled()`, exactly mirroring the `!= ""` checks each
+      call site already had before this change. Centralizing validation in `Load()` would require
+      it to know every command's requirements — rejected as the wrong coupling. `DATABASE_URL`
+      validation stays entirely in `persistence.FromEnv`, unchanged.)
+- [x] 1.3 Unit tests: `Load()` with a full valid env, with required vars missing (asserts the
+      specific error), and with optional integrations unset (asserts they report disabled, not an
+      error).
+      (Done: `internal/config/config_test.go` — `TestLoad_Defaults`, `TestLoad_
+      OverridesAndOptionalIntegrations`, `TestLoad_PartialMealieIsNotEnabled`,
+      `TestEnvBool_ExplicitFalseStaysDisabled`. Uses `t.Setenv` for isolation.)
+- [x] 1.4 Migrate `cmd/food-brain/adapters.go` to build one `Config` and pass its fields into
+      existing client constructors — no constructor signatures change, only where their arguments
+      come from. `go build ./... && go test ./...` green.
+      (Done — and extended to every `os.Getenv` call site in the `food-brain` binary, not just
+      `adapters.go`: `main.go` (`SPISORNING_ADDR`), `plan.go` (Mealie/adapter-URLs/Skolmaten/Olla/
+      school-flag-default), `sync_recipes.go`, `sync_nutrition.go`, `sync_offers.go`,
+      `sync_prices.go`. Two now-dead helper functions removed (`envDefault` in `main.go`, `envOr`
+      in `plan.go`) once nothing referenced them.)
+- [x] 1.5 Migrate `cmd/mcp-server/adapters.go` the same way.
+      (Done — `main.go` (`SPISORNING_MCP_ADDR`, adapter URLs) and `adapters.go` (Skolmaten) both
+      migrated; dead `envDefault` helper removed from `main.go`; unused `"os"` import removed from
+      `adapters.go` once its only use was gone.)
+- [x] 1.6 Confirm `internal/architecturetest` passes with `internal/config` added — it should be
+      importable by both composition roots and by any layer that needs config values, without
+      creating a new forbidden edge.
+      (Done: added a `Config` layer to `internal/architecturetest/checker.go` with two new rules —
+      "config must import only domain and external" and "only cmd may import config" (clients/
+      services/httpapi take plain constructor args instead, per design.md's actual pattern:
+      `internal/config` has zero non-stdlib imports and is consumed only by `cmd/food-brain` and
+      `cmd/mcp-server`). `go build ./... && go vet ./... && go test ./...` — 455 passed, 26
+      packages, architecture test green.)
+
+## 2. Retailer auth tiers
+
+- [ ] 2.1 Add an `AuthTier` type (`AuthBasic`/`AuthElevated`) to `internal/retailer`.
+- [ ] 2.2 Mark ICA's operations: `Resolve` = basic, `CreateShoppingList` = elevated (per
+      `expose-shopping-price-and-notes-bridge` D3's finding that anonymous ecom search is never
+      stale but the OAuth2 wishlist-push session is).
+- [ ] 2.3 Add the elevated-credential file-path field to `Config` (task 1.1); wire it into
+      `internal/icaretailer`'s construction instead of any independent env read.
+- [ ] 2.4 Surface elevated-auth staleness as a distinct, typed condition (reusing the 401-detection
+      approach from `expose-shopping-price-and-notes-bridge` D3) rather than a generic error.
+- [ ] 2.5 Unit tests: a basic-tier call proceeds without the elevated credential present; an
+      elevated-tier call with a missing/stale credential reports the typed staleness condition.
+- [ ] 2.6 Document the manual elevated-login handoff (who runs the Playwright login, where the
+      resulting credential file goes) in `docs/infrastructure/` — today this has no documented
+      location at all.
+
+## 3. SSE progress streaming
+
+- [ ] 3.1 Add an SSE endpoint to `internal/httpapi` streaming progress for a running plan/resolve
+      operation (event per item as `cmd/food-brain/plan.go`'s resolve loop progresses).
+- [ ] 3.2 Confirm the existing synchronous plan endpoint is unaffected — SSE is additive.
+- [ ] 3.3 Integration test: drive a plan/resolve against a fake slow adapter and assert progress
+      events arrive incrementally, not all at once at the end.
+- [ ] 3.4 Sequence this after task 4 lands a real consumer (design.md's migration plan) — don't
+      finalize the event payload shape until the frontend's first slice needs it.
+
+## 4. Frontend first slice
+
+- [ ] 4.1 Scaffold `web/`: Vite + React + TypeScript, matching `~/dev/tengil/web-ui`'s stack
+      (React 18, TanStack Query) for toolchain consistency across the household's homelab projects.
+- [ ] 4.2 Generate a TS client from `api/openapi.yaml` (mirroring how `internal/openapi` is
+      generated for Go) rather than hand-writing request/response types.
+- [ ] 4.3 Build the one read-only view: current week's dinner plan + its shopping list, calling the
+      real REST API against a running `food-brain serve` instance — no mock data.
+- [ ] 4.4 Confirm no write action exists in this first slice (per the spec's explicit scope limit).
+- [ ] 4.5 Document how to run the frontend locally against a local `food-brain serve` (README in
+      `web/`).
+
+## 5. Verification & docs
+
+- [ ] 5.1 `go build ./... && go test ./... && go vet ./...` green, including the architecture-test
+      job, after all Go-side tasks (1–3) land.
+- [ ] 5.2 `web/` builds and runs against a local backend (manual check, task 4.3's acceptance).
+- [ ] 5.3 Update `docs/research/current-state.md` to reflect the new `internal/config`,
+      `AuthTier` concept, SSE endpoint, and `web/` frontend's existence.

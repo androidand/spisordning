@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/androidand/spisordning/internal/config"
 	"github.com/androidand/spisordning/internal/dto"
 	"github.com/androidand/spisordning/internal/httpapi"
 	"github.com/androidand/spisordning/internal/ingredients"
@@ -33,6 +34,7 @@ import (
 // environment variables are set; missing clients result in nil service entries.
 func buildDependencies() httpapi.Dependencies {
 	deps := httpapi.Dependencies{}
+	appCfg := config.Load()
 
 	cfg, err := persistence.FromEnv(os.Getenv)
 	if err != nil {
@@ -60,8 +62,8 @@ func buildDependencies() httpapi.Dependencies {
 	}
 
 	var mealieClient *mealie.Client
-	if mealieURL := os.Getenv("MEALIE_BASE_URL"); mealieURL != "" && os.Getenv("MEALIE_API_TOKEN") != "" {
-		mealieClient = mealie.New(mealieURL, os.Getenv("MEALIE_API_TOKEN"))
+	if appCfg.MealieEnabled() {
+		mealieClient = mealie.New(appCfg.MealieBaseURL, appCfg.MealieAPIToken)
 	}
 	deps.People = service.NewPeople(store)
 	deps.Preferences = service.NewPreferences(store)
@@ -71,15 +73,15 @@ func buildDependencies() httpapi.Dependencies {
 
 	// External clients are optional — only wired when configured.
 	var slv *ingredients.Client
-	if slvURL := os.Getenv("SLV_BASE_URL"); slvURL != "" {
-		slv = ingredients.NewLivsmedelsverket(slvURL)
+	if appCfg.SLVBaseURL != "" {
+		slv = ingredients.NewLivsmedelsverket(appCfg.SLVBaseURL)
 	}
 	var dabas *ingredients.DabasClient
-	if os.Getenv("DABAS_ENABLED") != "" {
+	if appCfg.DabasEnabled {
 		dabas = ingredients.NewDabas()
 	}
 	var mpk *ingredients.MPKClient
-	if os.Getenv("MPK_ENABLED") != "" {
+	if appCfg.MPKEnabled {
 		mpk = ingredients.NewMatpriskollen()
 	}
 	deps.Ingredients = service.NewIngredients(store, slv, dabas, mpk)
@@ -617,7 +619,7 @@ func (a storeAdapter) DeleteShoppingListItem(ctx context.Context, listID, itemID
 }
 
 func (a storeAdapter) PushShoppingList(ctx context.Context, listID int64, retailer string) (httpapi.RetailerListBindingResponse, error) {
-	if _, err := PushShoppingList(ctx, a.db, listID, envOr("ADAPTER_URL", "http://localhost:8402"), retailer); err != nil {
+	if _, err := PushShoppingList(ctx, a.db, listID, config.Load().WillysAdapterURL, retailer); err != nil {
 		return httpapi.RetailerListBindingResponse{}, err
 	}
 	binding, err := a.db.GetRetailerListBinding(ctx, listID, retailer)

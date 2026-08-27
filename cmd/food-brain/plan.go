@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/androidand/spisordning/internal/ambient"
+	"github.com/androidand/spisordning/internal/config"
 	"github.com/androidand/spisordning/internal/domain"
 	"github.com/androidand/spisordning/internal/llm"
 	"github.com/androidand/spisordning/internal/mealie"
@@ -78,12 +79,13 @@ func RunPlan(ctx context.Context, in RunPlanInput) (RunPlanResult, error) {
 	if err != nil {
 		return RunPlanResult{}, err
 	}
-	mealieURL, mealieToken := os.Getenv("MEALIE_BASE_URL"), os.Getenv("MEALIE_API_TOKEN")
-	if mealieURL == "" || mealieToken == "" {
+	appCfg := config.Load()
+	if !appCfg.MealieEnabled() {
 		return RunPlanResult{}, fmt.Errorf("MEALIE_BASE_URL and MEALIE_API_TOKEN must be set")
 	}
-	adapterURL := envOr("ADAPTER_URL", "http://localhost:8402")
-	icaAdapterURL := envOr("ICA_ADAPTER_URL", "http://localhost:8403")
+	mealieURL, mealieToken := appCfg.MealieBaseURL, appCfg.MealieAPIToken
+	adapterURL := appCfg.WillysAdapterURL
+	icaAdapterURL := appCfg.ICAAdapterURL
 	kind := retailer.RetailerKind(in.Retailer)
 
 	year, week := nextISOWeek(time.Now())
@@ -96,7 +98,7 @@ func RunPlan(ctx context.Context, in RunPlanInput) (RunPlanResult, error) {
 
 	schoolTags := map[string][]string{} // date -> tags
 	if in.School != "" {
-		sk := skolmaten.New(envOr("SKOLMATEN_BASE_URL", "http://192.168.1.120:8787"), os.Getenv("SKOLMATEN_CLIENT_TOKEN"))
+		sk := skolmaten.New(appCfg.SkolmatenBaseURL, appCfg.SkolmatenClientToken)
 		menu, err := sk.WeekMenu(ctx, in.School, year, week)
 		if err != nil {
 			// Non-fatal: continue without school dedup.
@@ -107,8 +109,8 @@ func RunPlan(ctx context.Context, in RunPlanInput) (RunPlanResult, error) {
 	}
 
 	var olla llm.Provider
-	if base := os.Getenv("OLLA_OPENAI_BASE_URL"); base != "" && os.Getenv("OLLA_MODEL") != "" {
-		olla = llm.New(base, os.Getenv("OLLA_MODEL"))
+	if appCfg.OllaEnabled() {
+		olla = llm.New(appCfg.OllaBaseURL, appCfg.OllaModel)
 	}
 
 	// ── Orchestrate via the planning service (tasks 7.2/7.4) ──────────────────
@@ -325,7 +327,7 @@ func RunPlan(ctx context.Context, in RunPlanInput) (RunPlanResult, error) {
 func runPlan(args []string) error {
 	fs := flag.NewFlagSet("plan", flag.ExitOnError)
 	family := fs.String("family", "family.json", "path to the family config JSON")
-	school := fs.String("school", os.Getenv("SKOLMATEN_SCHOOL"), "skolmaten school slug (empty = skip school dedup)")
+	school := fs.String("school", config.Load().SkolmatenSchool, "skolmaten school slug (empty = skip school dedup)")
 	days := fs.Int("days", 7, "number of dinners to plan, starting Monday")
 	weekStr := fs.String("week", "", "ISO week to plan, e.g. 2026-W31 (default: next week)")
 	createWishlist := fs.Bool("create-wishlist", false, "resolve products and create the wishlist (default: dry-run print)")
@@ -368,13 +370,6 @@ func loadFamily(path string) (*familyConfig, error) {
 		return nil, fmt.Errorf("family config has no people")
 	}
 	return &fam, nil
-}
-
-func envOr(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
 }
 
 // nextISOWeek returns the ISO year/week of the week after t's.

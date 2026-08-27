@@ -14,6 +14,7 @@
 //	client       internal/mealie, internal/skolmaten, internal/retailer,
 //	             internal/icaretailer, internal/llm, internal/httpclient,
 //	             internal/recipeimport, internal/matpriskollen, internal/ingredients
+//	config       internal/config                          — env-based config, cmd-only
 //	persistence  internal/persistence                      — Postgres repos
 //	httpapi      internal/httpapi                          — HTTP handlers
 //	mcptools     internal/mcptools                         — MCP tool adapters (no persistence)
@@ -45,6 +46,7 @@ const (
 	External    Layer = "external"
 	Service     Layer = "service"
 	Contract    Layer = "contract"
+	Config      Layer = "config"
 	Unknown     Layer = "unknown"
 )
 
@@ -71,6 +73,7 @@ var layerPrefixes = []prefix{
 		"internal/matpriskollen",
 		"internal/ingredients",
 	}},
+	{Config, []string{"internal/config"}},
 	{Persistence, []string{"internal/persistence"}},
 	{HTTPAPI, []string{"internal/httpapi"}},
 	{MCPTools, []string{"internal/mcptools"}},
@@ -126,6 +129,12 @@ var rules = []rule{
 	}},
 	{"persistence must import only domain and external packages", func(f, t Layer) bool {
 		return f == Persistence && t != Domain && t != External && t != Test
+	}},
+	{"config must import only domain and external packages", func(f, t Layer) bool {
+		return f == Config && t != Domain && t != External && t != Test
+	}},
+	{"only cmd may import config — clients/services/httpapi take plain constructor args instead", func(f, t Layer) bool {
+		return t == Config && f != Cmd && f != Test
 	}},
 	{"httpapi must not import persistence or clients", func(f, t Layer) bool {
 		return f == HTTPAPI && (t == Persistence || t == Client)

@@ -25,6 +25,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/androidand/spisordning/internal/config"
 	"github.com/androidand/spisordning/internal/mcptools"
 	"github.com/androidand/spisordning/internal/persistence"
 )
@@ -47,7 +48,7 @@ func main() {
 		return
 	}
 
-	addr := envDefault("SPISORNING_MCP_ADDR", ":8081")
+	addr := config.Load().MCPAddr
 	httpServer := &http.Server{Addr: addr, Handler: newMCPHandler(server)}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -85,10 +86,11 @@ func buildMCPDeps(logger *slog.Logger) mcptools.Dependencies {
 		return deps
 	}
 
+	appCfg := config.Load()
 	adapter := mcpStoreAdapter{
 		db:        store,
-		willysURL: envDefault("ADAPTER_URL", "http://localhost:8402"),
-		icaURL:    envDefault("ICA_ADAPTER_URL", "http://localhost:8403"),
+		willysURL: appCfg.WillysAdapterURL,
+		icaURL:    appCfg.ICAAdapterURL,
 	}
 	deps.Planner = adapter
 	deps.Reactions = adapter
@@ -121,11 +123,4 @@ func newMCPHandler(server *mcp.Server) http.Handler {
 		return server
 	}, &mcp.StreamableHTTPOptions{Stateless: true}))
 	return mux
-}
-
-func envDefault(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
 }

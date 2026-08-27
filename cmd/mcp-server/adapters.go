@@ -9,9 +9,9 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
 	"time"
 
+	"github.com/androidand/spisordning/internal/config"
 	"github.com/androidand/spisordning/internal/domain"
 	"github.com/androidand/spisordning/internal/mcptools"
 	"github.com/androidand/spisordning/internal/persistence"
@@ -307,16 +307,12 @@ func (a mcpStoreAdapter) loadEnergyFor(ctx context.Context) (func(time.Time) dom
 // unset, it returns a no-op closure (no school dedup). Errors from the
 // skolmaten service are non-fatal: the planner continues without school tags.
 func (a mcpStoreAdapter) loadSchoolTagsFor(ctx context.Context, date time.Time) (func(time.Time) []string, error) {
-	school := os.Getenv("SKOLMATEN_SCHOOL")
+	appCfg := config.Load()
+	school := appCfg.SkolmatenSchool
 	if school == "" {
 		return func(time.Time) []string { return nil }, nil
 	}
-	baseURL := os.Getenv("SKOLMATEN_BASE_URL")
-	if baseURL == "" {
-		baseURL = "http://192.168.1.120:8787"
-	}
-	token := os.Getenv("SKOLMATEN_CLIENT_TOKEN")
-	sk := skolmaten.New(baseURL, token)
+	sk := skolmaten.New(appCfg.SkolmatenBaseURL, appCfg.SkolmatenClientToken)
 
 	year, week := date.AddDate(0, 0, 7).ISOWeek()
 	menu, err := sk.WeekMenu(ctx, school, year, week)

@@ -8,9 +8,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strconv"
 
+	"github.com/androidand/spisordning/internal/config"
 	"github.com/androidand/spisordning/internal/ingredients"
 )
 
@@ -19,11 +19,11 @@ func runSyncNutrition(args []string) error {
 		return fmt.Errorf("usage: food-brain sync nutrition <slv-nummer> [slv-nummer...]")
 	}
 
-	slvURL := os.Getenv("SLV_BASE_URL")
-	if slvURL == "" {
+	appCfg := config.Load()
+	if appCfg.SLVBaseURL == "" {
 		return fmt.Errorf("sync nutrition: SLV_BASE_URL must be set")
 	}
-	slv := ingredients.NewLivsmedelsverket(slvURL)
+	slv := ingredients.NewLivsmedelsverket(appCfg.SLVBaseURL)
 
 	ctx := context.Background()
 	out := make(map[string][]ingredients.Nutrient, len(args))

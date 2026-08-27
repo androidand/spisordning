@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/androidand/spisordning/internal/config"
 	"github.com/androidand/spisordning/internal/httpapi"
 )
 
@@ -47,7 +48,7 @@ func main() {
 			os.Exit(1)
 		}
 	case "serve":
-		addr := envDefault("SPISORNING_ADDR", ":8080")
+		addr := config.Load().HTTPAddr
 		deps := buildDependencies()
 		if err := httpapi.Serve(addr, deps); err != nil {
 			fmt.Fprintln(os.Stderr, "❌", err)
@@ -79,11 +80,4 @@ func main() {
 		fmt.Fprintf(os.Stderr, "unknown command %q (want: demo, plan, serve, tonight, ingredients, sync-offers, sync, migrate)\n", cmd)
 		os.Exit(2)
 	}
-}
-
-func envDefault(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
 }

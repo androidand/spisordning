@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/androidand/spisordning/internal/config"
 	"github.com/androidand/spisordning/internal/domain"
 	"github.com/androidand/spisordning/internal/retailer"
 )
@@ -37,7 +38,8 @@ func runSyncPrices(args []string) error {
 	}
 
 	kind := retailer.RetailerKind(*retailerFlag)
-	rc, err := retailer.NewFromKind(kind, envOr("ADAPTER_URL", "http://localhost:8402"), envOr("ICA_ADAPTER_URL", "http://localhost:8403"))
+	appCfg := config.Load()
+	rc, err := retailer.NewFromKind(kind, appCfg.WillysAdapterURL, appCfg.ICAAdapterURL)
 	if err != nil {
 		return fmt.Errorf("sync prices: %w", err)
 	}
