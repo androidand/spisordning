@@ -2,6 +2,7 @@ package mealie
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -124,6 +125,72 @@ func TestSyncRecipes_ParsesUnstructuredIngredientsViaMealieParser(t *testing.T) 
 	}
 	if ings[1].FoodName != "lök" {
 		t.Errorf("second ingredient food not parsed: %+v", ings[1])
+	}
+}
+
+// TestSyncRecipes_IsolatesBadNoteOnBatchParserFailure reproduces a real bug
+// found against the live Mealie instance: the brute parser 500s on at least
+// one input shape (a note containing a comma, e.g. "Ris, 4 portioner"), and
+// batching a recipe's notes in one parser call meant that single bad note
+// discarded every ingredient in the recipe, not just the unparseable one.
+// The fix retries one note at a time when the batch fails, so a bad note is
+// isolated instead of poisoning the whole recipe.
+func TestSyncRecipes_IsolatesBadNoteOnBatchParserFailure(t *testing.T) {
+	var batchCalls, singleCalls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/recipes":
+			w.Write([]byte(`{"page":1,"perPage":50,"total":1,"items":[
+				{"id":"r1","slug":"korvstroganoff","name":"Korvstroganoff"}]}`))
+		case "/api/recipes/korvstroganoff":
+			w.Write([]byte(`{
+				"id":"r1","slug":"korvstroganoff","name":"Korvstroganoff","totalTime":"30 minutes",
+				"tags":[],
+				"recipeIngredient":[
+					{"quantity":0,"note":"550 g falukorv"},
+					{"quantity":0,"note":"Ris, 4 portioner"}
+				]}`))
+		case "/api/parser/ingredients":
+			var body struct {
+				Ingredients []string `json:"ingredients"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if len(body.Ingredients) > 1 {
+				batchCalls++
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			singleCalls++
+			if body.Ingredients[0] == "Ris, 4 portioner" {
+				w.WriteHeader(http.StatusInternalServerError) // still fails alone, like the real bug
+				return
+			}
+			w.Write([]byte(`[{"ingredient":{"quantity":550,"unit":{"name":"g"},"food":{"name":"falukorv"}}}]`))
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	defer srv.Close()
+
+	refs, err := New(srv.URL, "tok").SyncRecipes(context.Background())
+	if err != nil {
+		t.Fatalf("SyncRecipes: %v", err)
+	}
+	if batchCalls != 1 {
+		t.Fatalf("expected 1 batch attempt, got %d", batchCalls)
+	}
+	if singleCalls != 2 {
+		t.Fatalf("expected a per-note retry for both lines after the batch failed, got %d", singleCalls)
+	}
+	ings := refs[0].Ingredients
+	if len(ings) != 2 {
+		t.Fatalf("expected 2 ingredients, got %d", len(ings))
+	}
+	if ings[0].FoodName != "falukorv" || ings[0].Quantity != 550 || ings[0].Unit != "g" {
+		t.Errorf("good note should still parse via the per-note fallback: %+v", ings[0])
+	}
+	if ings[1].FoodName != "" {
+		t.Errorf("bad note should stay unparsed (not crash or fabricate data): %+v", ings[1])
 	}
 }
 

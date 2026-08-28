@@ -44,6 +44,8 @@ type Store interface {
 	InsertShoppingRequirement(ctx context.Context, r persistence.ShoppingRequirement) error
 	ListShoppingRequirements(ctx context.Context, planID int64) ([]persistence.ShoppingRequirement, error)
 	UpsertIngredientMapping(ctx context.Context, m persistence.IngredientMapping) error
+	UpsertIngredient(ctx context.Context, i persistence.Ingredient) error
+	AddRecipeIngredient(ctx context.Context, ri persistence.RecipeIngredient) error
 	BeginTx(ctx context.Context) (pgx.Tx, error)
 	CreateInventoryLocation(ctx context.Context, l persistence.InventoryLocation) error
 	GetInventoryLocation(ctx context.Context, id string) (persistence.InventoryLocation, error)
@@ -201,8 +203,39 @@ func (s *Recipes) SyncFromMealie(ctx context.Context) (int, error) {
 		if err := s.db.UpsertRecipeRef(ctx, rr); err != nil {
 			return 0, fmt.Errorf("service: sync recipes: upsert %s: %w", ref.MealieRecipeID, err)
 		}
+		if err := s.syncIngredients(ctx, ref); err != nil {
+			return 0, fmt.Errorf("service: sync recipes: ingredients for %s: %w", ref.MealieRecipeID, err)
+		}
 	}
 	return len(refs), nil
+}
+
+// syncIngredients persists ref's ingredient lines as canonical ingredients and
+// recipe_ingredient rows, so ShoppingRequirements (and everything downstream —
+// price comparison, wishlist push) has something to resolve. A line whose
+// FoodName is still empty after mealie.Client's structured-field-then-brute-
+// parser fallback carries nothing usable and is skipped rather than persisted
+// as a blank ingredient.
+func (s *Recipes) syncIngredients(ctx context.Context, ref mealie.RecipeRef) error {
+	for _, line := range ref.Ingredients {
+		if line.FoodName == "" {
+			continue
+		}
+		id := domain.CanonicalIngredientID(line.FoodName)
+		if err := s.db.UpsertIngredient(ctx, persistence.Ingredient{ID: id, Display: line.FoodName}); err != nil {
+			return fmt.Errorf("upsert ingredient %q: %w", id, err)
+		}
+		ri := persistence.RecipeIngredient{
+			MealieRecipeID: ref.MealieRecipeID,
+			IngredientID:   id,
+			Quantity:       line.Quantity,
+			Unit:           line.Unit,
+		}
+		if err := s.db.AddRecipeIngredient(ctx, ri); err != nil {
+			return fmt.Errorf("add recipe_ingredient %q: %w", id, err)
+		}
+	}
+	return nil
 }
 
 // Meals implements the MealsService interface defined in dto.

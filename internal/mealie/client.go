@@ -156,9 +156,30 @@ func (c *Client) fetchRecipe(ctx context.Context, slug string) (*RecipeRef, erro
 	return &ref, nil
 }
 
+type parsedIngredient struct {
+	Ingredient struct {
+		Quantity float64 `json:"quantity"`
+		Unit     *struct {
+			Name string `json:"name"`
+		} `json:"unit"`
+		Food *struct {
+			Name string `json:"name"`
+		} `json:"food"`
+	} `json:"ingredient"`
+}
+
 // parseUnstructured fills in FoodName/Unit/Quantity for ingredient lines that
 // Mealie left as raw notes, using Mealie's brute parser. Best-effort: parser
-// failures leave the lines as-is (they get skipped downstream, same as before).
+// failures leave the affected line(s) as-is (skipped downstream, same as
+// before).
+//
+// Mealie's brute parser 500s on at least one real input shape (a note
+// containing a comma, e.g. "Ris, 4 portioner" — reproduced directly against
+// the live parser endpoint). Batching all of a recipe's notes in one call
+// means a single bad note previously discarded every ingredient in that
+// recipe, not just the unparseable one. So: try the whole batch first (one
+// request, the common case), and only fall back to parsing notes one at a
+// time — isolating a bad note to just that line — when the batch call fails.
 func (c *Client) parseUnstructured(ctx context.Context, lines []IngredientLine) {
 	type target struct{ idx int }
 	var notes []string
@@ -173,37 +194,48 @@ func (c *Client) parseUnstructured(ctx context.Context, lines []IngredientLine) 
 		return
 	}
 
-	raw, err := c.postRaw(ctx, "/api/parser/ingredients", map[string]any{"parser": "brute", "ingredients": notes})
-	if err != nil {
-		return // parser unavailable; leave lines unstructured
-	}
-
-	var parsed []struct {
-		Ingredient struct {
-			Quantity float64 `json:"quantity"`
-			Unit     *struct {
-				Name string `json:"name"`
-			} `json:"unit"`
-			Food *struct {
-				Name string `json:"name"`
-			} `json:"food"`
-		} `json:"ingredient"`
-	}
-	if err := json.Unmarshal(raw, &parsed); err != nil || len(parsed) != len(targets) {
+	if parsed, ok := c.parseNotes(ctx, notes); ok && len(parsed) == len(targets) {
+		for n, p := range parsed {
+			applyParsed(&lines[targets[n].idx], p)
+		}
 		return
 	}
-	for n, p := range parsed {
-		i := targets[n].idx
-		if p.Ingredient.Food != nil && p.Ingredient.Food.Name != "" {
-			lines[i].FoodName = p.Ingredient.Food.Name
+
+	// Batch failed (or returned a mismatched count) — isolate the bad note(s)
+	// by retrying one at a time instead of losing the whole recipe's ingredients.
+	for n, note := range notes {
+		parsed, ok := c.parseNotes(ctx, []string{note})
+		if !ok || len(parsed) != 1 {
+			continue
 		}
-		if p.Ingredient.Unit != nil {
-			lines[i].Unit = p.Ingredient.Unit.Name
-		}
-		if p.Ingredient.Quantity > 0 {
-			lines[i].Quantity = p.Ingredient.Quantity
-		}
+		applyParsed(&lines[targets[n].idx], parsed[0])
 	}
+}
+
+func applyParsed(line *IngredientLine, p parsedIngredient) {
+	if p.Ingredient.Food != nil && p.Ingredient.Food.Name != "" {
+		line.FoodName = p.Ingredient.Food.Name
+	}
+	if p.Ingredient.Unit != nil {
+		line.Unit = p.Ingredient.Unit.Name
+	}
+	if p.Ingredient.Quantity > 0 {
+		line.Quantity = p.Ingredient.Quantity
+	}
+}
+
+// parseNotes calls Mealie's brute ingredient parser for notes. ok is false on
+// any transport/decode failure — callers fall back accordingly.
+func (c *Client) parseNotes(ctx context.Context, notes []string) ([]parsedIngredient, bool) {
+	raw, err := c.postRaw(ctx, "/api/parser/ingredients", map[string]any{"parser": "brute", "ingredients": notes})
+	if err != nil {
+		return nil, false
+	}
+	var parsed []parsedIngredient
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return nil, false
+	}
+	return parsed, true
 }
 
 // effortFromTotalTime maps Mealie's free-text totalTime to an effort class.
