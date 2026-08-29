@@ -254,5 +254,5 @@
 
 ## 12. Documentation
 
-- [ ] 12.1 Update `docs/infrastructure/deployment-and-access.md` if needed
-- [ ] 12.2 Add architecture diagram to `docs/architecture.md`
+- [x] 12.1 Update `docs/infrastructure/deployment-and-access.md` if needed
+- [x] 12.2 Add architecture diagram to `docs/architecture.md`
