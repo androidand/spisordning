@@ -312,7 +312,46 @@
       checked false). Full round-trip: Apple Note → osascript reader → checklist parser →
       `POST /shopping-lists/from-checklist` → `shopping_list` + items in spisordning.
 
-## 7. Verification & docs
+## 7. Apple Notes outbound sync (write status back — completes the loop)
+
+Task 6 covers Notes → spisordning (inbound, stubbed pending deployment). This group adds the
+other direction: once spisordning has resolved an item (priced, added to a retailer wishlist),
+reflect that back onto the household's actual "Köp Mat Andreas" note, so the note stays the
+single place Andreas looks at, not something that drifts out of sync with what's already ordered.
+
+**Hard constraint driving the design**: Apple Notes has no push/webhook API — only osascript
+polling from the Mac notes-sync already uses inbound. So this can't be event-driven; it has to be
+spisordning (via the same Mac-local `notes-sync` bridge) periodically re-reading the note,
+diffing against its own resolved-item state, and rewriting only what it owns.
+
+**Conservative rule (non-negotiable)**: spisordning may only ever check off / annotate a checklist
+item it itself resolved in a prior sync (matched by the same normalized label it ingested). It
+must never rewrite, reorder, or delete text it did not write, and never touches an item it cannot
+confidently match back to one it ingested — if the note was hand-edited between syncs in a way
+that breaks the match, skip that item and leave it alone rather than guess. This avoids ever
+destroying something Andreas typed by hand.
+
+- [ ] 8.1 Design the match key: how an outbound "this item is resolved" write finds the right
+      checklist line again after a round trip (normalized label + originating `shopping_list_id`
+      stored in spisordning, not fuzzy text matching against the live note each time).
+- [ ] 8.2 Design what "resolved" means for the write-back: at minimum, checked off once pushed to
+      a retailer wishlist (`push_shopping_wishlist` already has this event) — decide whether price
+      gets appended as an annotation (e.g. "- Mjölk (29,90 kr, Willys)") or left off to keep the
+      note clean; this is Andreas's call, ask rather than assume.
+- [ ] 8.3 Add a spisordning-side endpoint (or extend the existing shopping-list item update path)
+      that returns "items resolved since last sync" for a given list, so the Mac-side bridge has
+      something cheap to poll instead of re-diffing the whole list every run.
+- [ ] 8.4 Extend `apps/notes-sync/spisordning-bridge.ts` (sibling `willys-client` repo) with the
+      write-back half: poll the new endpoint, then use `notes.ts`'s existing osascript writer (or
+      add one, matching its established pattern) to check off just the matched lines.
+- [ ] 8.5 Verify round-trip on a real note: manually add a throwaway item, run inbound sync, push
+      it through the shopping pipeline to a wishlist, run outbound sync, confirm only that one line
+      changed and nothing else in the note moved.
+- [ ] 8.6 Document the polling cadence and manual-trigger command in
+      `docs/infrastructure/deployment-and-access.md` or wherever the Mac-local bridge scripts are
+      already documented.
+
+## 8. Verification & docs
 
 - [x] 7.1 `go build ./... && go test ./... && go vet ./...` green.
 
