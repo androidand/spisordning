@@ -10,6 +10,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -139,6 +140,10 @@ func buildDependencies() httpapi.Dependencies {
 			hemkopURL: cfg.HemkopAdapterURL,
 		}
 	}
+
+	// Retailer credentials (ICA elevated-auth credential upload) are stored via
+	// the same storeAdapter; the credential methods live on storeAdapter below.
+	deps.RetailerCredentials = adapters
 	return deps
 }
 
@@ -884,6 +889,27 @@ func (a storeAdapter) ListOrderItems(ctx context.Context, orderID int64) ([]http
 	return out, nil
 }
 
+func (a storeAdapter) UploadRetailerCredential(ctx context.Context, retailer string, payload json.RawMessage) (httpapi.RetailerCredentialResponse, error) {
+	if err := a.db.UpsertRetailerCredential(ctx, retailer, payload); err != nil {
+		return httpapi.RetailerCredentialResponse{}, fmt.Errorf("upload retailer credential: %w", err)
+	}
+	return a.GetRetailerCredential(ctx, retailer)
+}
+
+func (a storeAdapter) GetRetailerCredential(ctx context.Context, retailer string) (httpapi.RetailerCredentialResponse, error) {
+	cred, found, err := a.db.GetRetailerCredential(ctx, retailer)
+	if err != nil {
+		return httpapi.RetailerCredentialResponse{}, fmt.Errorf("get retailer credential: %w", err)
+	}
+	if !found {
+		return httpapi.RetailerCredentialResponse{}, httpapi.ErrNotFound
+	}
+	return httpapi.RetailerCredentialResponse{
+		Retailer:   cred.Retailer,
+		Payload:    json.RawMessage(cred.Payload),
+		UploadedAt: cred.UploadedAt,
+	}, nil
+}
 
 // newPersonID generates a 16-char hex id from crypto/rand (stdlib only — no new dep).
 func newPersonID() (string, error) {

@@ -17,6 +17,7 @@ import (
 	"github.com/androidand/spisordning/internal/persistence"
 	"github.com/androidand/spisordning/internal/planning"
 	"github.com/androidand/spisordning/internal/retailer"
+	"github.com/androidand/spisordning/internal/service"
 	"github.com/androidand/spisordning/internal/skolmaten"
 )
 
@@ -29,6 +30,10 @@ type mcpStoreAdapter struct {
 	icaURL    string
 	hemkopURL string
 	cfg       config.Config
+	// recipes is nil when Mealie isn't configured; StructureRecipe reports
+	// that as an error rather than nil-dereferencing, same degrade-gracefully
+	// pattern as the rest of buildMCPDeps.
+	recipes *service.Recipes
 }
 
 // PlanDinners loads the household and recipe candidates, then delegates to the
@@ -221,6 +226,30 @@ func (a mcpStoreAdapter) ShoppingRequirements(ctx context.Context, recipeIDs []s
 			Unit:            r.Unit,
 			AcceptableForms: r.AcceptableForms,
 			PreferredForm:   r.PreferredForm,
+		})
+	}
+	return out, nil
+}
+
+// StructureRecipe turns freeform recipe text into a real Mealie recipe via the
+// application layer, and maps the result onto the mcptools DTO.
+func (a mcpStoreAdapter) StructureRecipe(ctx context.Context, rawText string) (mcptools.StructureRecipeResult, error) {
+	if a.recipes == nil {
+		return mcptools.StructureRecipeResult{}, fmt.Errorf("structure_recipe: no Mealie instance configured")
+	}
+	res, err := a.recipes.StructureFromText(ctx, rawText)
+	if err != nil {
+		return mcptools.StructureRecipeResult{}, err
+	}
+	out := mcptools.StructureRecipeResult{
+		RecipeID:      res.RecipeID,
+		Title:         res.Title,
+		Instructions:  res.Instructions,
+		LowConfidence: res.LowConfidence,
+	}
+	for _, ing := range res.Ingredients {
+		out.Ingredients = append(out.Ingredients, mcptools.StructuredIngredientResult{
+			Note: ing.Note, FoodName: ing.FoodName, Quantity: ing.Quantity, Unit: ing.Unit,
 		})
 	}
 	return out, nil

@@ -70,6 +70,16 @@ type Config struct {
 	// Empty when unset; the manual login step itself stays on the ica-adapter
 	// (TS) side. See design.md D2.
 	ICAAuthFile string
+	// ICAElevatedCredentialPath is where ica-adapter's manually-refreshed
+	// elevated (OAuth2 mobile session) credential is expected to live on disk —
+	// see internal/retailer's AuthTier doc comment. Go never reads this file's
+	// contents (ica-adapter owns the session entirely); the path exists so a
+	// future health check can report the credential's age, and so the manual
+	// refresh handoff has one documented, discoverable location instead of
+	// none (see docs/infrastructure/ica-elevated-auth.md). The 401/403
+	// staleness detection in internal/retailer works independently of this —
+	// it reads the adapter's live HTTP response, not this file.
+	ICAElevatedCredentialPath string
 
 	// ── Skolmaten (school meals) ──────────────────────────────────────────
 	SkolmatenBaseURL     string
@@ -111,10 +121,11 @@ func Load() Config {
 		DabasEnabled: os.Getenv("DABAS_ENABLED") != "",
 		MPKEnabled:   os.Getenv("MPK_ENABLED") != "",
 
-		AdapterURL:       envOr("ADAPTER_URL", "http://localhost:8402"),
-		ICAAdapterURL:    envOr("ICA_ADAPTER_URL", "http://localhost:8403"),
-		HemkopAdapterURL: envOr("HEMKOP_ADAPTER_URL", "http://localhost:8404"),
-		ICAAuthFile:      os.Getenv("ICA_AUTH_FILE"),
+		AdapterURL:                envOr("ADAPTER_URL", "http://localhost:8402"),
+		ICAAdapterURL:             envOr("ICA_ADAPTER_URL", "http://localhost:8403"),
+		HemkopAdapterURL:          envOr("HEMKOP_ADAPTER_URL", "http://localhost:8404"),
+		ICAAuthFile:               os.Getenv("ICA_AUTH_FILE"),
+		ICAElevatedCredentialPath: os.Getenv("ICA_ELEVATED_CREDENTIAL_PATH"),
 
 		SkolmatenBaseURL:     os.Getenv("SKOLMATEN_BASE_URL"),
 		SkolmatenClientToken: os.Getenv("SKOLMATEN_CLIENT_TOKEN"),

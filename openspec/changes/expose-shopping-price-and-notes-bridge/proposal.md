@@ -56,6 +56,12 @@ stale/unavailable) rather than block on it.
   retailer wishlist — stopping short of cart/checkout.
 - `apple-notes-ingestion`: a Mac-local bridge that reads the household's named Apple Note and
   submits its items to spisordning's shopping-list API as the source of a shopping list.
+- `apple-notes-outbound-sync` (task group 7, added 2026-08-29): the other half of the loop — once
+  spisordning resolves a note-sourced item (priced, pushed to a retailer wishlist), the same
+  Mac-local bridge writes that status back onto the actual checklist, checking off only the lines
+  it itself resolved. Apple Notes has no push API, so this is poll-based, not event-driven; the
+  match key is a normalized label tied to the originating `shopping_list_id`, and the bridge never
+  rewrites text it did not ingest itself, to avoid ever destroying a hand-edit.
 
 ### Modified Capabilities
 - `retailer-adapter` (merged in `openspec/specs/retailer-adapter/`): add price to the resolution

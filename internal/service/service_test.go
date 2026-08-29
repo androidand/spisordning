@@ -29,6 +29,7 @@ type fakeStore struct {
 	locations         map[string]persistence.InventoryLocation
 	stores            []domain.Store
 	offers            []domain.StoreProductOffer
+	ingredients       map[string]persistence.Ingredient
 	recipeIngredients []persistence.RecipeIngredient
 }
 
@@ -135,6 +136,23 @@ func (f *fakeStore) GetRecipeRef(ctx context.Context, id string) (persistence.Re
 		}
 	}
 	return persistence.RecipeRef{}, pgx.ErrNoRows
+}
+func (f *fakeStore) UpsertIngredient(ctx context.Context, i persistence.Ingredient) error {
+	if f.ingredients == nil {
+		f.ingredients = map[string]persistence.Ingredient{}
+	}
+	f.ingredients[i.ID] = i
+	return nil
+}
+func (f *fakeStore) AddRecipeIngredient(ctx context.Context, ri persistence.RecipeIngredient) error {
+	for i, existing := range f.recipeIngredients {
+		if existing.MealieRecipeID == ri.MealieRecipeID && existing.IngredientID == ri.IngredientID {
+			f.recipeIngredients[i] = ri
+			return nil
+		}
+	}
+	f.recipeIngredients = append(f.recipeIngredients, ri)
+	return nil
 }
 func (f *fakeStore) UpsertRecipeRef(ctx context.Context, r persistence.RecipeRef) error {
 	for i, existing := range f.recipes {
@@ -556,12 +574,63 @@ func TestRecipesSync(t *testing.T) {
 	if len(f.recipes) != 1 || f.recipes[0].MealieRecipeID != "r-pasta" {
 		t.Fatalf("expected r-pasta upserted, got %+v", f.recipes)
 	}
+	if len(f.recipeIngredients) != 1 {
+		t.Fatalf("expected 1 recipe_ingredient row, got %+v", f.recipeIngredients)
+	}
+	ri := f.recipeIngredients[0]
+	if ri.MealieRecipeID != "r-pasta" || ri.IngredientID != "köttfärs" || ri.Quantity != 400 || ri.Unit != "g" {
+		t.Fatalf("unexpected recipe_ingredient row: %+v", ri)
+	}
+	if ing, ok := f.ingredients["köttfärs"]; !ok || ing.Display != "köttfärs" {
+		t.Fatalf("expected canonical ingredient %q upserted, got %+v", "köttfärs", f.ingredients)
+	}
 
 	if _, err := svc.SyncFromMealie(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.recipes) != 1 {
 		t.Fatalf("expected idempotent upsert, got %d refs", len(f.recipes))
+	}
+	if len(f.recipeIngredients) != 1 {
+		t.Fatalf("expected idempotent ingredient upsert, got %d rows", len(f.recipeIngredients))
+	}
+}
+
+// TestRecipesSyncUnstructuredIngredients covers the shape our own recipe
+// imports actually produce: a bare "note" with no structured food/unit, which
+// mealie.Client.fetchRecipe resolves via Mealie's brute parser
+// (/api/parser/ingredients) before service.Recipes ever sees it. This is the
+// exact path that silently dropped ingredients before syncIngredients existed
+// — recipe_ingredient stayed empty for every recipe imported this way.
+func TestRecipesSyncUnstructuredIngredients(t *testing.T) {
+	fakeMealie := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/recipes" && r.Method == http.MethodGet:
+			w.Write([]byte(`{"page":1,"perPage":50,"total":1,"items":[
+				{"id":"r-stroganoff","slug":"korv-stroganoff","name":"Korv Stroganoff"}]}`))
+		case r.URL.Path == "/api/recipes/korv-stroganoff":
+			w.Write([]byte(`{"id":"r-stroganoff","slug":"korv-stroganoff","name":"Korv Stroganoff","totalTime":"20 min",
+				"tags":[{"name":"middag"}],
+				"recipeIngredient":[{"quantity":0,"note":"500 g falukorv","unit":null,"food":null}]}`))
+		case r.URL.Path == "/api/parser/ingredients" && r.Method == http.MethodPost:
+			w.Write([]byte(`[{"ingredient":{"quantity":500,"unit":{"name":"g"},"food":{"name":"falukorv"}}}]`))
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	t.Cleanup(fakeMealie.Close)
+
+	f := &fakeStore{}
+	svc := service.NewRecipes(f, mealie.New(fakeMealie.URL, "tok"))
+	if _, err := svc.SyncFromMealie(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.recipeIngredients) != 1 {
+		t.Fatalf("expected 1 recipe_ingredient row from the brute-parser fallback, got %+v", f.recipeIngredients)
+	}
+	ri := f.recipeIngredients[0]
+	if ri.IngredientID != "falukorv" || ri.Quantity != 500 || ri.Unit != "g" {
+		t.Fatalf("unexpected recipe_ingredient row: %+v", ri)
 	}
 }
 

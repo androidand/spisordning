@@ -48,6 +48,7 @@ var allConfigEnvVars = []string{
 	"GROCY_BASE_URL", "GROCY_API_KEY",
 	"SLV_BASE_URL", "DABAS_ENABLED", "MPK_ENABLED",
 	"ADAPTER_URL", "ICA_ADAPTER_URL", "HEMKOP_ADAPTER_URL", "ICA_AUTH_FILE",
+	"ICA_ELEVATED_CREDENTIAL_PATH",
 	"SKOLMATEN_BASE_URL", "SKOLMATEN_CLIENT_TOKEN", "SKOLMATEN_SCHOOL",
 	"OLLA_OPENAI_BASE_URL", "OLLA_MODEL",
 	"SPISORNING_ADDR", "SPISORNING_MCP_ADDR",
@@ -287,6 +288,27 @@ func TestLoad_ICAAuthFileUnset(t *testing.T) {
 	}
 	if cfg.HasICAAuth() {
 		t.Errorf("HasICAAuth = true, want false when ICA_AUTH_FILE is unset")
+	}
+}
+
+func TestLoad_ICAElevatedCredentialPath(t *testing.T) {
+	clearAllConfigEnv(t)
+	setEnv(t, map[string]string{
+		"ICA_ELEVATED_CREDENTIAL_PATH": "/etc/spisordning/ica-ecom-cookies.json",
+	})
+	cfg := Load()
+
+	if cfg.ICAElevatedCredentialPath != "/etc/spisordning/ica-ecom-cookies.json" {
+		t.Errorf("ICAElevatedCredentialPath = %q, want the configured path", cfg.ICAElevatedCredentialPath)
+	}
+}
+
+func TestLoad_ICAElevatedCredentialPathUnset(t *testing.T) {
+	clearAllConfigEnv(t)
+	cfg := Load()
+
+	if cfg.ICAElevatedCredentialPath != "" {
+		t.Errorf("ICAElevatedCredentialPath = %q, want empty when ICA_ELEVATED_CREDENTIAL_PATH is unset", cfg.ICAElevatedCredentialPath)
 	}
 }
 

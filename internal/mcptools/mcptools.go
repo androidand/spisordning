@@ -28,7 +28,7 @@ const Version = "0.1.0"
 // application-layer weekly planner.
 type PlannedSlot struct {
 	Date   string  `json:"date"`
-	Slot   string  `json:"slot"` // "dinner" | "breakfast" | "snack"
+	Slot   string  `json:"slot"`   // "dinner" | "breakfast" | "snack"
 	Recipe string  `json:"recipe"` // Mealie recipe id (empty for fallback snacks)
 	Title  string  `json:"title"`
 	Score  float64 `json:"score"`
@@ -110,12 +110,13 @@ type RequirementsService interface {
 // Dependencies carries the application-layer services the tools call. A nil
 // field means that tool is not registered.
 type Dependencies struct {
-	Planner      PlannerService
-	Reactions    MealReactionService
-	Requirements RequirementsService
-	ShoppingList ShoppingListService
-	Compare      PriceComparisonService
-	Wishlist     WishlistService
+	Planner           PlannerService
+	Reactions         MealReactionService
+	Requirements      RequirementsService
+	ShoppingList      ShoppingListService
+	Compare           PriceComparisonService
+	Wishlist          WishlistService
+	RecipeStructuring RecipeStructuringService
 }
 
 // RegisterTools adds the initial tool set to s. Each tool calls exactly one
@@ -156,6 +157,12 @@ func RegisterTools(s *mcp.Server, deps Dependencies) {
 			Name:        "push_shopping_wishlist",
 			Description: "Push a chosen set of resolved products to a named retailer's (willys or ica) wishlist. Stops at the wishlist — it never fills a cart, checks out, or books a delivery slot. Optionally binds the wishlist to an existing spisordning shopping list.",
 		}, pushWishlistHandler(deps.Wishlist))
+	}
+	if deps.RecipeStructuring != nil {
+		mcp.AddTool(s, &mcp.Tool{
+			Name:        "structure_recipe",
+			Description: "Turn a freeform pasted recipe (a title line, a loose ingredient list, and an optional \"Gör så här\"/\"Instruktioner\"-style steps block) into a real, structured Mealie recipe. Handles real home-cook shorthand: inconsistent quantities, brand asides, bare ingredients with no amount. Returns the created recipe plus which ingredient lines it wasn't confident about, so the caller can flag them rather than presenting a guess as fact.",
+		}, structureRecipeHandler(deps.RecipeStructuring))
 	}
 }
 

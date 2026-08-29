@@ -76,6 +76,7 @@ var layerPrefixes = []prefix{
 		"internal/matpriskollen",
 		"internal/ingredients",
 	}},
+	{Config, []string{"internal/config"}},
 	{Persistence, []string{"internal/persistence"}},
 	{HTTPAPI, []string{"internal/httpapi"}},
 	{MCPTools, []string{"internal/mcptools"}},
@@ -131,6 +132,12 @@ var rules = []rule{
 	}},
 	{"persistence must import only domain and external packages", func(f, t Layer) bool {
 		return f == Persistence && t != Domain && t != External && t != Test
+	}},
+	{"config must import only domain and external packages", func(f, t Layer) bool {
+		return f == Config && t != Domain && t != External && t != Test
+	}},
+	{"only cmd may import config — clients/services/httpapi take plain constructor args instead", func(f, t Layer) bool {
+		return t == Config && f != Cmd && f != Test
 	}},
 	{"httpapi must not import persistence or clients", func(f, t Layer) bool {
 		return f == HTTPAPI && (t == Persistence || t == Client)

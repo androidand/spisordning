@@ -63,6 +63,10 @@ type Dependencies struct {
 	// Grocy bridges a running Grocy instance (products, stock, shopping list).
 	// Backs the /grocy routes; degrades to 503 when not configured.
 	Grocy dto.GrocyService
+	// RetailerCredentials stores and retrieves retailer elevated-auth
+	// credentials (ICA OAuth2 session). Backs the /retailers/{retailer}/
+	// elevated-credential routes.
+	RetailerCredentials RetailerCredentialService
 }
 
 type peopleHandler struct {
@@ -252,6 +256,11 @@ func RegisterHandlers(mux *http.ServeMux, deps Dependencies) {
 		mux.HandleFunc("POST /recipe-families/{id}/variants/{variantId}/revisions", h.createRevision)
 		mux.HandleFunc("GET /recipe-families/{id}/variants/{variantId}/revisions/{revisionId}", h.getRevision)
 		mux.HandleFunc("POST /recipe-families/{id}/variants/{variantId}/default", h.setDefaultVariant)
+	}
+	if deps.RetailerCredentials != nil {
+		h := retailerCredentialHandler{svc: deps.RetailerCredentials}
+		mux.HandleFunc("POST /retailers/{retailer}/elevated-credential", h.upload)
+		mux.HandleFunc("GET /retailers/{retailer}/elevated-credential", h.get)
 	}
 }
 
