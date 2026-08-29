@@ -59,9 +59,9 @@ default).
   see `~/dev/tengil/docs/compose-packages.md`).
 - Reference stack definitions for this project live in the **tengil repo**, not here:
   `~/dev/tengil/openspec/changes/full-stack-compose-deploys/specs/spisordning/compose.yaml`
-  (Postgres + food-brain + willys-adapter — aspirational until food-brain has a published
-  image) and the reference-lab package manifests under `~/dev/tengil/packages/`
-  (`mealie-oci.yml` exists; `grocy-oci.yml`/`directus-oci.yml` are added as part of Epic H).
+  (Postgres + food-brain + willys-adapter) and the reference-lab package manifests under
+  `~/dev/tengil/packages/` (`mealie-oci.yml` exists; `grocy-oci.yml`/`directus-oci.yml` are
+  added as part of Epic H).
 
 ## GitHub / specsync
 
