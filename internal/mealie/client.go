@@ -52,6 +52,12 @@ type IngredientLine struct {
 	Quantity float64
 	Unit     string
 	Note     string
+	// Confidence is Mealie brute parser's own average confidence score for
+	// this line (0..1), populated only for lines that went through
+	// parseUnstructured (i.e. arrived with no FoodName). Zero for lines that
+	// were already structured on read, or that the parser failed to handle
+	// at all (batch and per-note retry both failed).
+	Confidence float64
 }
 
 // RecipeRef is the Food Brain's reference to a Mealie recipe: identity, the
@@ -163,6 +169,9 @@ func (c *Client) fetchRecipe(ctx context.Context, slug string) (*RecipeRef, erro
 }
 
 type parsedIngredient struct {
+	Confidence struct {
+		Average float64 `json:"average"`
+	} `json:"confidence"`
 	Ingredient struct {
 		Quantity float64 `json:"quantity"`
 		Unit     *struct {
@@ -228,6 +237,7 @@ func applyParsed(line *IngredientLine, p parsedIngredient) {
 	if p.Ingredient.Quantity > 0 {
 		line.Quantity = p.Ingredient.Quantity
 	}
+	line.Confidence = p.Confidence.Average
 }
 
 // parseNotes calls Mealie's brute ingredient parser for notes. ok is false on

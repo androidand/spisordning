@@ -54,28 +54,53 @@ working, not guessed:
 
 ## 2. Freeform text sectioning
 
-- [ ] 2.1 Implement a small sectioning function: title = first non-blank line; ingredients = lines
+- [x] 2.1 Implement a small sectioning function: title = first non-blank line; ingredients = lines
       after the title up to a "Gör så här"/"Instruktioner"-style marker (case-insensitive,
       configurable list of recognized markers); instructions = everything after the marker.
       Fall back to a blank-line heuristic (first blank-separated block after the title is
       ingredients, rest is instructions) when no marker line is found.
-- [ ] 2.2 Instruction-line grouping: collapse consecutive non-blank lines after the marker into
-      one step per originally-blank-line-separated paragraph (matches the worked example, where
-      "Grädda i mitten..." is its own step despite the blank line before it) — verify against the
-      worked example in proposal.md specifically, since that's the real shape this needs to handle.
-- [ ] 2.3 Unit tests against the worked example from proposal.md end to end: title
-      "Pasta och tacokyckling i ugn", 8 ingredient lines, 4 instruction steps (3 pre-blank-line +
-      the oven step after it).
+
+      ✅ Done 2026-08-29. `internal/service/recipe_structuring.go` `sectionRecipeText` +
+      `sectionMarkers` (whole-line, case/colon-insensitive match — "1 msk metod-ost" doesn't
+      falsely trigger on "method"). No-marker fallback: everything after the title becomes
+      ingredients, no instructions (best-effort, not a hard failure).
+- [x] 2.2 Instruction-line handling: one step per non-blank line after the marker; blank lines are
+      pure separators (skipped), not merged into or splitting a step. (Earlier draft of this task
+      proposed collapsing lines into blank-line-separated paragraphs — miscounted the worked
+      example while drafting; corrected 2026-08-29. One-line-per-step is also the more useful
+      shape for a step-by-step cooking view, and simpler to reason about.)
+
+      ✅ Done 2026-08-29, same function as 2.1.
+- [x] 2.3 Unit tests against the worked example from proposal.md end to end: title
+      "Pasta och tacokyckling i ugn", 8 ingredient lines, 5 instruction steps (one per non-blank
+      line: Koka pastan.../Strö över kycklingen.../Blanda såsen.../Strö över osten/Grädda i
+      mitten... — the blank line before "Grädda" is a separator only, not a step boundary).
+
+      ✅ Done 2026-08-29. `internal/service/recipe_structuring_test.go`
+      `TestSectionRecipeText_WorkedExample` (plus `_NoMarker`, `_MarkerCaseAndColonInsensitive`,
+      `_MarkerSubstringDoesNotTrigger` for the edge cases).
 
 ## 3. Ingredient confidence reporting
 
-- [ ] 3.1 Extend the ingredient-parsing path to carry forward Mealie's own per-line `confidence`
+- [x] 3.1 Extend the ingredient-parsing path to carry forward Mealie's own per-line `confidence`
       score (already present in `/api/parser/ingredients`'s response — see the raw response shape
       captured this session) rather than discarding it.
-- [ ] 3.2 Surface low-confidence lines (bare `"salt"`, the `"(eller något annat?)"` aside) in the
+
+      ✅ Done 2026-08-29. `internal/mealie/client.go`: `parsedIngredient` gains `Confidence.Average`;
+      `IngredientLine` gains a `Confidence float64` field, set by `applyParsed`. Since
+      `SetIngredients` mutates its `lines` argument's backing array in place (parseUnstructured
+      already worked this way), no signature change was needed for the confidence to reach the
+      caller.
+- [x] 3.2 Surface low-confidence lines (bare `"salt"`, the `"(eller något annat?)"` aside) in the
       tool's response as a `low_confidence: string[]` list, not silently — so a chat session can
       tell the user "I structured this but wasn't sure about: salladskrydda" instead of presenting
       a guess as fact.
+
+      ✅ Done 2026-08-29. `internal/service/recipe_structuring.go` `StructureFromText` builds
+      `StructuredRecipe.LowConfidence` from any line with `Confidence < 0.5` or an unresolved
+      `FoodName` (`lowConfidenceThreshold`). Verified in
+      `TestStructureFromText_WorkedExample`: salt/svartpeppar/the "(eller något annat?)" line are
+      flagged, the confidently-parsed pasta line is not.
 
 ## 4. MCP tool
 
