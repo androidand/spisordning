@@ -374,21 +374,24 @@ type namedThing struct {
 func (c *Client) SetIngredients(ctx context.Context, slug string, lines []IngredientLine) error {
 	c.parseUnstructured(ctx, lines)
 
+	// food/unit are ALWAYS written null, never a parsed name. Verified live
+	// against the real Mealie instance: {"food": {"name": "pasta"}} (a name
+	// with no id) 500s with "ValueError: Expected 'id' to be provided for
+	// food" — the same class of error as the referenceId corruption bug, just
+	// triggered by a different missing key. Mealie's food/unit are references
+	// into its own catalog, which requires a real id we don't have (the brute
+	// parser returns names, not catalog ids) — so unlike quantity (a plain
+	// number, safe to write directly), a resolved food/unit name can only be
+	// safely reported back to the caller (see Recipes.StructureFromText's
+	// FoodName/Unit fields on the returned lines), never written here.
 	patch := make([]recipeIngredientPatch, len(lines))
 	for i, l := range lines {
-		p := recipeIngredientPatch{
+		patch[i] = recipeIngredientPatch{
 			ReferenceID: uuid.NewString(),
 			Note:        l.Note,
 			Display:     l.Note,
 			Quantity:    l.Quantity,
 		}
-		if l.Unit != "" {
-			p.Unit = &namedThing{Name: l.Unit}
-		}
-		if l.FoodName != "" {
-			p.Food = &namedThing{Name: l.FoodName}
-		}
-		patch[i] = p
 	}
 
 	if _, err := c.patchRaw(ctx, "/api/recipes/"+slug, map[string]any{"recipeIngredient": patch}); err != nil {

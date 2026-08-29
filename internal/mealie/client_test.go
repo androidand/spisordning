@@ -222,22 +222,30 @@ func TestCreateRecipe_DecodesBareStringResponse(t *testing.T) {
 	}
 }
 
-// TestSetIngredients_AlwaysSendsReferenceIDAndCleanNulls guards the
-// corruption bug found and fixed manually earlier in the session that
-// produced this write path: PATCHing recipeIngredient with referenceId
-// omitted/null permanently corrupts the recipe (reference_id ends up NULL
-// server-side, and the recipe becomes unreadable via GET forever after). It
-// also guards the food/unit shape: a partial object like {"id": null} throws
-// a 500 (ValueError: Expected 'id' to be provided for food) — food/unit must
-// be either populated with a name, or clean null, never partial.
+// TestSetIngredients_AlwaysSendsReferenceIDAndCleanNulls guards two real
+// bugs found and fixed against the live Mealie instance:
+//  1. PATCHing recipeIngredient with referenceId omitted/null permanently
+//     corrupts the recipe (reference_id ends up NULL server-side, and the
+//     recipe becomes unreadable via GET forever after) — found while
+//     manually importing recipes earlier in the session.
+//  2. food/unit must ALWAYS be written clean null, never a parsed name —
+//     found live while verifying this exact write path (task group 5):
+//     {"food": {"name": "pasta"}} (a name with no catalog id) 500s with
+//     "ValueError: Expected 'id' to be provided for food", the same error
+//     class as bug 1 just triggered by a missing key rather than a null one.
+//     Mealie's food/unit are references into its own catalog (a real id we
+//     don't have — the brute parser returns names, not catalog ids), so a
+//     resolved name can only be reported back to the caller, never written.
 func TestSetIngredients_AlwaysSendsReferenceIDAndCleanNulls(t *testing.T) {
 	var patched []map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/api/parser/ingredients":
 			// Resolve "500 g falukorv" (whichever call it arrives in — batch or
-			// the per-note retry); everything else stays unresolved (food: null),
+			// the per-note retry); everything else stays unresolved,
 			// simulating a note the parser genuinely can't extract a food from.
+			// The resolved food/unit here must NOT end up in the PATCH body —
+			// only quantity may.
 			var body struct {
 				Ingredients []string `json:"ingredients"`
 			}
@@ -266,7 +274,7 @@ func TestSetIngredients_AlwaysSendsReferenceIDAndCleanNulls(t *testing.T) {
 	defer srv.Close()
 
 	lines := []IngredientLine{
-		{Note: "500 g falukorv"},   // unstructured, parser resolves it
+		{Note: "500 g falukorv"},   // unstructured, parser resolves it — but resolved values must not reach the PATCH
 		{Note: "Peppar", Unit: ""}, // parser gets no useful call target here in this test setup
 	}
 	if err := New(srv.URL, "tok").SetIngredients(context.Background(), "korvstroganoff", lines); err != nil {
@@ -280,18 +288,17 @@ func TestSetIngredients_AlwaysSendsReferenceIDAndCleanNulls(t *testing.T) {
 		if refID == "" {
 			t.Errorf("row %d: referenceId must never be empty (this is the corruption bug), got %+v", i, p)
 		}
-		if _, hasFood := p["food"]; !hasFood {
-			t.Errorf("row %d: food key must be present (even if null), got %+v", i, p)
+		if p["food"] != nil {
+			t.Errorf("row %d: food must always be null, even when the parser resolved a name (this is the live 500 bug), got %+v", i, p)
 		}
-		if _, hasUnit := p["unit"]; !hasUnit {
-			t.Errorf("row %d: unit key must be present (even if null), got %+v", i, p)
+		if p["unit"] != nil {
+			t.Errorf("row %d: unit must always be null, even when the parser resolved a name, got %+v", i, p)
 		}
 	}
-	if patched[0]["food"] == nil || patched[0]["food"].(map[string]any)["name"] != "falukorv" {
-		t.Errorf("expected the parser-resolved food name on row 0, got %+v", patched[0])
-	}
-	if patched[1]["food"] != nil {
-		t.Errorf("expected clean null food for the unresolved row, got %+v", patched[1])
+	// The parser's resolved quantity IS still safe to write (a plain number,
+	// not a catalog reference) — confirm it made it through for row 0.
+	if q, _ := patched[0]["quantity"].(float64); q != 500 {
+		t.Errorf("expected the parser-resolved quantity to still be written, got %+v", patched[0])
 	}
 }
 

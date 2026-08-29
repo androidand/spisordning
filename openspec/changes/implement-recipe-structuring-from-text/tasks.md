@@ -134,10 +134,35 @@ working, not guessed:
 
 ## 5. Verification
 
-- [ ] 5.1 `go build ./... && go test ./... && go vet ./...` green.
-- [ ] 5.2 Live-verify against the real Mealie instance using the exact worked example from
+- [x] 5.1 `go build ./... && go test ./... && go vet ./...` green.
+
+      ✅ Verified 2026-08-29. 477 tests, all packages, including `internal/architecturetest`
+      (confirms `internal/mcptools` still imports nothing from persistence/clients/httpapi/cmd —
+      the composition root stays the only bridge).
+- [x] 5.2 Live-verify against the real Mealie instance using the exact worked example from
       proposal.md: create the recipe via the new tool, then GET it back and confirm it reads
       cleanly (not corrupted — the same verification discipline used for this session's 7 manual
       imports) and that the ingredients/instructions match what was intended.
-- [ ] 5.3 Live-verify a line the parser handles badly on purpose (feed it something odd) to
+
+      ✅ Done 2026-08-29 — and this live pass earned its keep, catching a real bug section 1's
+      unit tests missed: `SetIngredients` was writing the parser-resolved `food`/`unit` as
+      `{"name": "..."}` (no catalog id), which 500s live with the same "Expected 'id' to be
+      provided for food" error class as the original referenceId corruption bug — just triggered
+      by a missing key instead of a null one. Fixed: `food`/`unit` are now ALWAYS written null;
+      the parsed name/unit/quantity only ever reach the caller via the tool's response, never
+      Mealie's structured fields. Section 1's tests were updated to assert this (previously they
+      asserted the *opposite*, now-known-wrong behavior). The recipe this created —
+      "Pasta och tacokyckling i ugn" (slug `pasta-och-tacokyckling-i-ugn`) — is a real recipe of
+      Andreas's, kept rather than deleted: 8 ingredients (all `referenceId` set, `food`/`unit`
+      clean null), 5 instructions, tagged `chat-import`, reads cleanly via GET.
+- [x] 5.3 Live-verify a line the parser handles badly on purpose (feed it something odd) to
       confirm the low-confidence reporting actually surfaces it rather than silently guessing.
+
+      ✅ Done 2026-08-29, and this also caught a real calibration bug: the live parser returns
+      exactly `0.5` average confidence for bare/unstructured lines (salt, svartpeppar, the
+      "(eller något annat?)" aside), but the threshold check used `<` — so the exact case this
+      feature exists to catch silently passed through unflagged. Fixed to `<=`. Rerun after the
+      fix correctly flagged 6 of 8 lines: the three fully bare ones, plus two where the parser
+      visibly mangled the food name (quantity/unit text leaking into `food_name`, e.g.
+      "fryst tacokyckling (Ica basic) 600g") — a genuinely useful catch neither task author nor
+      the synthetic unit tests anticipated, only surfaced by testing against the real parser.

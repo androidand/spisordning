@@ -9,12 +9,15 @@ import (
 	"github.com/androidand/spisordning/internal/mealie"
 )
 
-// lowConfidenceThreshold: a line whose Mealie brute-parser confidence falls
-// below this (or that never resolved a food name at all) gets surfaced to the
-// caller as low_confidence rather than presented as a fact. 0.5 is a
-// deliberately permissive cut — the goal is catching genuinely bad guesses
-// (a bare "salt" with no quantity, "eller något annat?" asides), not
-// second-guessing every imperfect parse.
+// lowConfidenceThreshold: a line whose Mealie brute-parser confidence is at
+// or below this (or that never resolved a food name at all) gets surfaced to
+// the caller as low_confidence rather than presented as a fact. Verified
+// against the live parser (task group 5): a bare single-word line with no
+// quantity/unit (salt, svartpeppar, the "(eller något annat?)" aside)
+// consistently scores exactly 0.5 average confidence, while a line with real
+// quantity+unit structure (e.g. "500g kokt pasta") scores 0.75+ — so the
+// threshold must be an inclusive <=, not <, or the bare-word case (the exact
+// thing this is meant to catch) slips through uncaught.
 const lowConfidenceThreshold = 0.5
 
 // chatImportTag distinguishes recipes created via StructureFromText from the
@@ -96,7 +99,7 @@ func (s *Recipes) StructureFromText(ctx context.Context, rawText string) (Struct
 		out.Ingredients = append(out.Ingredients, StructuredIngredient{
 			Note: l.Note, FoodName: l.FoodName, Quantity: l.Quantity, Unit: l.Unit,
 		})
-		if l.FoodName == "" || l.Confidence < lowConfidenceThreshold {
+		if l.FoodName == "" || l.Confidence <= lowConfidenceThreshold {
 			out.LowConfidence = append(out.LowConfidence, l.Note)
 		}
 	}
