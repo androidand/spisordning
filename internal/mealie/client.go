@@ -1,7 +1,11 @@
-// Package mealie is a read-only client for the Mealie REST API. Mealie is the
-// recipe source of truth; this package fetches recipes and normalizes them into
-// references the Food Brain stores (id + tags + ingredient lines + snapshot),
-// never authoritative copies.
+// Package mealie is mostly a read-only client for the Mealie REST API — Mealie
+// is the recipe source of truth, and this package fetches recipes and
+// normalizes them into references the Food Brain stores (id + tags +
+// ingredient lines + snapshot), never authoritative copies. The one deliberate
+// exception is CreateRecipe/SetIngredients/SetInstructions, added for
+// implement-recipe-structuring-from-text: turning a household member's
+// freeform pasted recipe into a real Mealie recipe requires writing one. It
+// stays narrowly scoped to recipe creation, not general Mealie mutation.
 package mealie
 
 import (
@@ -11,6 +15,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/androidand/spisordning/internal/domain"
 	"github.com/androidand/spisordning/internal/httpclient"
@@ -300,4 +306,112 @@ func (c *Client) postRaw(ctx context.Context, path string, payload any) (json.Ra
 		return nil, err
 	}
 	return raw, nil
+}
+
+func (c *Client) patchRaw(ctx context.Context, path string, payload any) (json.RawMessage, error) {
+	var raw json.RawMessage
+	if err := c.http.PatchJSON(ctx, path, payload, &raw, c.authHeaders); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+// CreateRecipe creates a new, empty Mealie recipe by name and returns its
+// slug. POST /api/recipes' response body is a bare JSON string (the slug),
+// not an object — verified against the live Mealie instance.
+func (c *Client) CreateRecipe(ctx context.Context, name string) (string, error) {
+	raw, err := c.postRaw(ctx, "/api/recipes", map[string]any{"name": name})
+	if err != nil {
+		return "", fmt.Errorf("mealie: create recipe %q: %w", name, err)
+	}
+	var slug string
+	if err := json.Unmarshal(raw, &slug); err != nil {
+		return "", fmt.Errorf("mealie: create recipe %q: decode slug: %w", name, err)
+	}
+	return slug, nil
+}
+
+// recipeIngredientPatch is the outgoing shape for one recipeIngredient entry.
+// Every field is always present (never a partially-populated object) because
+// PATCHing recipeIngredient with referenceId omitted/null permanently
+// corrupts the recipe server-side: reference_id ends up NULL, and the whole
+// recipe becomes unreadable via GET forever after. Found and fixed manually
+// earlier in the session that produced this client's write path; see
+// openspec/changes/implement-recipe-structuring-from-text/proposal.md.
+type recipeIngredientPatch struct {
+	ReferenceID      string      `json:"referenceId"`
+	Note             string      `json:"note"`
+	Display          string      `json:"display"`
+	Quantity         float64     `json:"quantity"`
+	Unit             *namedThing `json:"unit"`
+	Food             *namedThing `json:"food"`
+	Title            *string     `json:"title"`
+	OriginalText     *string     `json:"originalText"`
+	ReferencedRecipe *string     `json:"referencedRecipe"`
+}
+
+type namedThing struct {
+	Name string `json:"name"`
+}
+
+// SetIngredients replaces slug's recipeIngredient list. Each line is resolved
+// via Mealie's own brute parser (parseUnstructured's parseNotes, same
+// per-note-retry path used on the read side) before writing, so a recipe
+// created from freeform text gets structured food/unit/quantity wherever the
+// parser can manage it, and a clean unstructured note otherwise — never a
+// partial object, which Mealie rejects with a 500 for food (ValueError:
+// Expected 'id' to be provided for food).
+func (c *Client) SetIngredients(ctx context.Context, slug string, lines []IngredientLine) error {
+	c.parseUnstructured(ctx, lines)
+
+	patch := make([]recipeIngredientPatch, len(lines))
+	for i, l := range lines {
+		p := recipeIngredientPatch{
+			ReferenceID: uuid.NewString(),
+			Note:        l.Note,
+			Display:     l.Note,
+			Quantity:    l.Quantity,
+		}
+		if l.Unit != "" {
+			p.Unit = &namedThing{Name: l.Unit}
+		}
+		if l.FoodName != "" {
+			p.Food = &namedThing{Name: l.FoodName}
+		}
+		patch[i] = p
+	}
+
+	if _, err := c.patchRaw(ctx, "/api/recipes/"+slug, map[string]any{"recipeIngredient": patch}); err != nil {
+		return fmt.Errorf("mealie: set ingredients for %q: %w", slug, err)
+	}
+	return nil
+}
+
+// recipeInstructionPatch is the outgoing shape for one recipeInstructions
+// entry. PATCHing with just {"text": "..."} throws a 500 (TypeError) — Mealie
+// requires the full object shape, including a fresh id per step. Found and
+// fixed manually while importing recipes earlier in the session that produced
+// this client's write path.
+type recipeInstructionPatch struct {
+	ID                   string   `json:"id"`
+	Title                string   `json:"title"`
+	Summary              string   `json:"summary"`
+	Text                 string   `json:"text"`
+	IngredientReferences []string `json:"ingredientReferences"`
+}
+
+// SetInstructions replaces slug's recipeInstructions list, one entry per step.
+func (c *Client) SetInstructions(ctx context.Context, slug string, steps []string) error {
+	patch := make([]recipeInstructionPatch, len(steps))
+	for i, s := range steps {
+		patch[i] = recipeInstructionPatch{
+			ID:                   uuid.NewString(),
+			Text:                 s,
+			IngredientReferences: []string{},
+		}
+	}
+	if _, err := c.patchRaw(ctx, "/api/recipes/"+slug, map[string]any{"recipeInstructions": patch}); err != nil {
+		return fmt.Errorf("mealie: set instructions for %q: %w", slug, err)
+	}
+	return nil
 }

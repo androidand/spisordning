@@ -62,6 +62,36 @@ func TestPostJSON_RoundTripAccepts2xx(t *testing.T) {
 	}
 }
 
+func TestPatchJSON_RoundTrip(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/recipes/pasta" || r.Method != http.MethodPatch {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		if ct := r.Header.Get("Content-Type"); ct != "application/json" {
+			t.Errorf("content-type = %q, want application/json", ct)
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		_ = json.NewEncoder(w).Encode(map[string]string{"slug": "pasta"})
+	}))
+	defer srv.Close()
+
+	var out struct {
+		Slug string `json:"slug"`
+	}
+	err := New(srv.URL, "test", time.Second).PatchJSON(context.Background(), "/recipes/pasta",
+		map[string]any{"recipeIngredient": []string{"x"}}, &out, nil)
+	if err != nil {
+		t.Fatalf("PatchJSON: %v", err)
+	}
+	if out.Slug != "pasta" {
+		t.Errorf("round trip failed: out=%+v", out)
+	}
+	if ings, _ := body["recipeIngredient"].([]any); len(ings) != 1 {
+		t.Errorf("unexpected patched body: %v", body)
+	}
+}
+
 func TestNon2xx_SurfacesBackendError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)

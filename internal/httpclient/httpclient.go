@@ -83,6 +83,25 @@ func (c *Client) PostJSON(ctx context.Context, path string, body, out any, heade
 	return c.do(req, out)
 }
 
+// PatchJSON marshals body and PATCHes it to path, decoding a 2xx response body
+// into out. headers, when non-nil, is called with the request so a backend can
+// attach auth headers.
+func (c *Client) PatchJSON(ctx context.Context, path string, body, out any, headers func(*http.Request)) error {
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("%s: marshal %s payload: %w", c.prefix, path, err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, c.baseURL+path, bytes.NewReader(buf))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if headers != nil {
+		headers(req)
+	}
+	return c.do(req, out)
+}
+
 // do performs the request: transport errors are wrapped with the backend
 // prefix, non-2xx is an error (carrying the backend's {"error": "..."} body
 // when present), and a 2xx body is decoded into out.

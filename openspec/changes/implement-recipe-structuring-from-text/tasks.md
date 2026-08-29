@@ -19,20 +19,38 @@ working, not guessed:
   `{id: <fresh uuid>, title: "", summary: "", text: "<step>", ingredientReferences: []}` — the
   500-causing bug from earlier this session was posting `{text}` alone.
 
-- [ ] 1.1 Add `CreateRecipe(ctx, name string) (slug string, err error)` to `internal/mealie.Client`
+- [x] 1.1 Add `CreateRecipe(ctx, name string) (slug string, err error)` to `internal/mealie.Client`
       — `POST /api/recipes`, decode the bare-string response body (not a struct).
-- [ ] 1.2 Add `SetIngredients(ctx, slug string, lines []IngredientLine) error` — `PATCH
+
+      ✅ Done 2026-08-29. `internal/mealie/client.go` `CreateRecipe`.
+- [x] 1.2 Add `SetIngredients(ctx, slug string, lines []IngredientLine) error` — `PATCH
       /api/recipes/{slug}` with `{"recipeIngredient": [...]}` using the verified shape above.
       Reuses `parseNotes` (already added for the read-side fix) to resolve food/unit/quantity per
       line before writing, rather than a second parser call path.
-- [ ] 1.3 Add `SetInstructions(ctx, slug string, steps []string) error` — `PATCH
+
+      ✅ Done 2026-08-29. `internal/mealie/client.go` `SetIngredients` + `recipeIngredientPatch`.
+      Calls the existing `parseUnstructured` (which itself calls `parseNotes`) before building the
+      patch, so the write side gets the same batch-then-per-note-retry resilience as the read side.
+- [x] 1.3 Add `SetInstructions(ctx, slug string, steps []string) error` — `PATCH
       /api/recipes/{slug}` with `{"recipeInstructions": [...]}` using the verified shape above.
-- [ ] 1.4 Update the package doc comment on `internal/mealie/client.go` to note the scoped write
+
+      ✅ Done 2026-08-29. `internal/mealie/client.go` `SetInstructions` + `recipeInstructionPatch`.
+- [x] 1.4 Update the package doc comment on `internal/mealie/client.go` to note the scoped write
       exception and why (link back to this change).
-- [ ] 1.5 Unit tests against a fake Mealie HTTP server for all three methods, including a case
+
+      ✅ Done 2026-08-29.
+- [x] 1.5 Unit tests against a fake Mealie HTTP server for all three methods, including a case
       that reproduces the referenceId-corruption shape being avoided (assert the request body
       always carries a non-empty `referenceId`) and a case reproducing the instructions-500 bug
       (assert the request body always carries `id`/`title`/`summary`/`ingredientReferences`).
+
+      ✅ Done 2026-08-29. `internal/mealie/client_test.go`:
+      `TestCreateRecipe_DecodesBareStringResponse`,
+      `TestSetIngredients_AlwaysSendsReferenceIDAndCleanNulls`,
+      `TestSetInstructions_AlwaysSendsFullObjectShape`. Also added `PatchJSON` to
+      `internal/httpclient` (mirroring the existing `PostJSON`) since no PATCH verb existed yet,
+      with its own round-trip test. Full `go build ./... && go test ./...` green (471 tests, all
+      packages).
 
 ## 2. Freeform text sectioning
 

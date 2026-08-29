@@ -194,6 +194,149 @@ func TestSyncRecipes_IsolatesBadNoteOnBatchParserFailure(t *testing.T) {
 	}
 }
 
+func TestCreateRecipe_DecodesBareStringResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/recipes" || r.Method != http.MethodPost {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		var body struct {
+			Name string `json:"name"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body.Name != "Pasta och tacokyckling i ugn" {
+			t.Errorf("unexpected name in request: %q", body.Name)
+		}
+		w.WriteHeader(http.StatusCreated)
+		// Verified against the live Mealie instance: the response body is a bare
+		// JSON string (the slug), not an object.
+		_, _ = w.Write([]byte(`"pasta-och-tacokyckling-i-ugn"`))
+	}))
+	defer srv.Close()
+
+	slug, err := New(srv.URL, "tok").CreateRecipe(context.Background(), "Pasta och tacokyckling i ugn")
+	if err != nil {
+		t.Fatalf("CreateRecipe: %v", err)
+	}
+	if slug != "pasta-och-tacokyckling-i-ugn" {
+		t.Errorf("slug = %q, want %q", slug, "pasta-och-tacokyckling-i-ugn")
+	}
+}
+
+// TestSetIngredients_AlwaysSendsReferenceIDAndCleanNulls guards the
+// corruption bug found and fixed manually earlier in the session that
+// produced this write path: PATCHing recipeIngredient with referenceId
+// omitted/null permanently corrupts the recipe (reference_id ends up NULL
+// server-side, and the recipe becomes unreadable via GET forever after). It
+// also guards the food/unit shape: a partial object like {"id": null} throws
+// a 500 (ValueError: Expected 'id' to be provided for food) — food/unit must
+// be either populated with a name, or clean null, never partial.
+func TestSetIngredients_AlwaysSendsReferenceIDAndCleanNulls(t *testing.T) {
+	var patched []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/parser/ingredients":
+			// Resolve "500 g falukorv" (whichever call it arrives in — batch or
+			// the per-note retry); everything else stays unresolved (food: null),
+			// simulating a note the parser genuinely can't extract a food from.
+			var body struct {
+				Ingredients []string `json:"ingredients"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			results := make([]map[string]any, len(body.Ingredients))
+			for i, note := range body.Ingredients {
+				ing := map[string]any{"quantity": 0, "unit": nil, "food": nil}
+				if note == "500 g falukorv" {
+					ing = map[string]any{"quantity": 500, "unit": map[string]any{"name": "g"}, "food": map[string]any{"name": "falukorv"}}
+				}
+				results[i] = map[string]any{"ingredient": ing}
+			}
+			b, _ := json.Marshal(results)
+			w.Write(b)
+		case r.URL.Path == "/api/recipes/korvstroganoff" && r.Method == http.MethodPatch:
+			var body struct {
+				RecipeIngredient []map[string]any `json:"recipeIngredient"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			patched = body.RecipeIngredient
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	lines := []IngredientLine{
+		{Note: "500 g falukorv"},   // unstructured, parser resolves it
+		{Note: "Peppar", Unit: ""}, // parser gets no useful call target here in this test setup
+	}
+	if err := New(srv.URL, "tok").SetIngredients(context.Background(), "korvstroganoff", lines); err != nil {
+		t.Fatalf("SetIngredients: %v", err)
+	}
+	if len(patched) != 2 {
+		t.Fatalf("expected 2 patched ingredient rows, got %d", len(patched))
+	}
+	for i, p := range patched {
+		refID, _ := p["referenceId"].(string)
+		if refID == "" {
+			t.Errorf("row %d: referenceId must never be empty (this is the corruption bug), got %+v", i, p)
+		}
+		if _, hasFood := p["food"]; !hasFood {
+			t.Errorf("row %d: food key must be present (even if null), got %+v", i, p)
+		}
+		if _, hasUnit := p["unit"]; !hasUnit {
+			t.Errorf("row %d: unit key must be present (even if null), got %+v", i, p)
+		}
+	}
+	if patched[0]["food"] == nil || patched[0]["food"].(map[string]any)["name"] != "falukorv" {
+		t.Errorf("expected the parser-resolved food name on row 0, got %+v", patched[0])
+	}
+	if patched[1]["food"] != nil {
+		t.Errorf("expected clean null food for the unresolved row, got %+v", patched[1])
+	}
+}
+
+// TestSetInstructions_AlwaysSendsFullObjectShape guards the 500-causing bug
+// found while importing recipes earlier in the session that produced this
+// write path: PATCHing recipeInstructions with just {"text": "..."} throws a
+// TypeError — Mealie requires id/title/summary/ingredientReferences alongside
+// text on every entry.
+func TestSetInstructions_AlwaysSendsFullObjectShape(t *testing.T) {
+	var patched []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/recipes/pasta" || r.Method != http.MethodPatch {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		var body struct {
+			RecipeInstructions []map[string]any `json:"recipeInstructions"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		patched = body.RecipeInstructions
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	steps := []string{"Koka pastan", "Grädda i ugnen"}
+	if err := New(srv.URL, "tok").SetInstructions(context.Background(), "pasta", steps); err != nil {
+		t.Fatalf("SetInstructions: %v", err)
+	}
+	if len(patched) != 2 {
+		t.Fatalf("expected 2 patched instruction rows, got %d", len(patched))
+	}
+	for i, p := range patched {
+		for _, field := range []string{"id", "title", "summary", "text", "ingredientReferences"} {
+			if _, ok := p[field]; !ok {
+				t.Errorf("row %d: missing required field %q (this is the 500-causing shape), got %+v", i, field, p)
+			}
+		}
+		if id, _ := p["id"].(string); id == "" {
+			t.Errorf("row %d: id must never be empty, got %+v", i, p)
+		}
+	}
+	if patched[0]["text"] != "Koka pastan" || patched[1]["text"] != "Grädda i ugnen" {
+		t.Errorf("step text/order mismatch: %+v", patched)
+	}
+}
+
 func TestEffortFromTotalTime(t *testing.T) {
 	cases := []struct {
 		in   string
