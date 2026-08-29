@@ -14,13 +14,14 @@ New work must acknowledge and build on that slice, not silently re-derive it.
 
 ## Current state (read this before assuming something doesn't exist)
 
-- Go module (`go.mod`, stdlib-only, Go 1.26.1), CLI-only today (`cmd/food-brain`). No HTTP
-  server, no Dockerfile, no published image yet.
-- Postgres schema exists (`migrations/0001_init.sql`) and is applied by `docker-compose.yml`,
-  but nothing in the Go code writes to it yet — `food-brain plan` re-syncs Mealie in-memory
-  per run. Wiring persistence is open work (see `establish-household-and-catalog`).
+- Go module (`go.mod`, stdlib-only, Go 1.26.1) with both CLI (`cmd/food-brain`) and HTTP
+  server (`food-brain serve`). Dockerfile builds both `food-brain` and `mcp-server`; CI
+  publishes `ghcr.io/androidand/spisordning/food-brain` to GHCR on `main`.
+- Postgres schema exists (`db/migrations/`) and is applied by `docker-compose.yml` / the
+  one-shot `migrate` service. The Go code reads and writes to it via `internal/persistence`.
 - A read-only Mealie client (`internal/mealie`) is real and tested.
-- Grocy and Directus: **no code exists**. Both are pure research/reference targets per
+- Grocy: real, tested client/service/handler (`internal/grocy`, `internal/service/grocy.go`,
+  `internal/httpapi/grocy.go`). Directus: still no code — pure research/reference target per
   `PLAN.md`.
 - The retailer integration is further along than `PLAN.md` assumes: a sophisticated,
   **live-verified** resolution pipeline (household pins, a review-and-pick UI, promo-variant
@@ -67,13 +68,13 @@ duplicate an epic's scope in a new ad-hoc change without checking there first.
 
 ## Deployment
 
-Local dev: `docker-compose.yml` (Postgres + `willys-adapter`, built from the sibling
-`willys-client` repo). `food-brain` joins compose once it has an HTTP server.
+Local dev: `docker-compose.yml` (Postgres + `willys-adapter` + `food-brain` + `mcp-server`).
+`food-brain` exposes the HTTP API on port 8080; `mcp-server` exposes the MCP endpoint on 8081.
 
 Production/reference-lab target is **Tengil** (`~/dev/tengil`), not raw docker-compose — see
 `docs/infrastructure/deployment-and-access.md` for exact access details, and the tengil repo's
 `openspec/changes/full-stack-compose-deploys/specs/spisordning/compose.yaml` for the reference
-stack definition (currently aspirational until food-brain has a published image).
+stack definition.
 
 ## Skills
 
