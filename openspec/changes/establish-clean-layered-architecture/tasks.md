@@ -9,7 +9,7 @@
         - httpapi may import domain and service (but not persistence or client)
         - cmd may import everything
 
-      Verified: `Service` layer classifies `internal/service` + `internal/mcp`;
+      Verified: `Service` layer classifies `internal/service`;
       rules enforced for service→{httpapi,cmd} and httpapi→{persistence,client}
       (client rule added this pass; no existing violations). Deviation from the
       bullet list: service→persistence stays allowed by design — the proposal's
@@ -25,8 +25,9 @@
 
       Deviation: the DI contracts live in `internal/dto` (the contract layer)
       rather than `httpapi/services.go`. They are consumed by both
-      `httpapi.Dependencies` and `internal/mcp.NewServer`; placing them in
-      `internal/dto` keeps httpapi and mcp depending on contracts without
+      `httpapi.Dependencies` and the first-cut `internal/mcp` server (removed — see
+      §10); placing them in `internal/dto` keeps httpapi depending on contracts
+      without
       importing service implementations (the checker forbids httpapi→service).
       Eight interfaces: `PersonService`, `PreferencesService`,
       `RecipesService`, `MealsService`, `PantryService`, `PlanningService`,
@@ -230,13 +231,36 @@
 - [x] 10.1 Create `internal/mcp/` package with MCP v2 server
 
       `internal/mcp/server.go` on `modelcontextprotocol/go-sdk`.
+
+      Superseded: the dedicated `implement-mcp-server` change (ADR
+      `docs/adr/mcp-protocol-2026-07-28-and-go-sdk.md`) replaced this first-cut
+      server with the `internal/mcptools` adapter + `cmd/mcp-server` binary. The
+      orphaned `internal/mcp` package (imported nowhere, no tests) was removed in
+      that reconciliation, and `internal/architecturetest` no longer classifies it.
 - [x] 10.2 Wire the same service interfaces from `httpapi` into the MCP server
 
-      `NewServer` takes the same `dto.*Service` DI contracts that
-      `httpapi.Dependencies` uses.
-- [ ] 10.3 Expose tools: `plan_week`, `get_nutrition`, `search_products`,
+      `NewServer` took the same `dto.*Service` DI contracts that
+      `httpapi.Dependencies` uses. (Superseded — see 10.1: the production MCP
+      server is `internal/mcptools`, which defines its own tool-facing service
+      interfaces implemented by the `cmd/mcp-server` composition root.)
+- [x] 10.3 Expose tools: `plan_week`, `get_nutrition`, `search_products`,
       `get_store_offers`, `record_reaction`
-- [ ] 10.4 Add `food-brain mcp` CLI command
+
+      Superseded by `implement-mcp-server` / `internal/mcptools` — the names above
+      were a draft. The production tool surface (`mcptools.RegisterTools`) is:
+      `list_recipe_candidates`, `record_meal_reaction`,
+      `get_shopping_requirements`, `create_shopping_list`,
+      `compare_shopping_prices`, `push_shopping_wishlist`, `structure_recipe`.
+      The application-layer intent (planning, reaction recording, shopping) is met
+      by that richer set; nutrition / product-search / store-offer lookups are
+      served over the REST API and are not yet MCP tools (future work, not part of
+      this superseded change).
+- [x] 10.4 Add `food-brain mcp` CLI command
+
+      Superseded by ADR Decision 3 (`docs/adr/mcp-protocol-2026-07-28-and-go-sdk.md`):
+      the MCP server is a separate `cmd/mcp-server` binary (Streamable HTTP + stdio),
+      not a `food-brain` subcommand. The capability exists as the `mcp-server`
+      binary; no `food-brain mcp` subcommand is added.
 
 ## 11. Integration tests
 

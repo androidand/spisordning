@@ -9,7 +9,7 @@
 //	domain       internal/domain, internal/recipefamily, internal/scoring,
 //	             internal/openapi, internal/ambient, internal/availability
 //	application  internal/planning                                — use-case logic
-//	service      internal/service, internal/mcp                   — app services
+//	service      internal/service                          — app services
 //	contract     internal/dto                                     — shared DTOs + service interfaces
 //	config       internal/config                                  — runtime configuration
 //	client       internal/mealie, internal/skolmaten, internal/retailer,
@@ -61,7 +61,7 @@ var layerPrefixes = []prefix{
 	{Test, []string{"internal/architecturetest"}},
 	{Domain, []string{"internal/domain", "internal/recipefamily", "internal/scoring", "internal/openapi", "internal/ambient", "internal/availability"}},
 	{Application, []string{"internal/planning"}},
-	{Service, []string{"internal/service", "internal/mcp"}},
+	{Service, []string{"internal/service"}},
 	{Contract, []string{"internal/dto"}},
 	{Config, []string{"internal/config"}},
 	{Client, []string{
