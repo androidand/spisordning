@@ -2,17 +2,31 @@
 
 ## 1. Mealie write path
 
-- [ ] 1.1 Add `CreateRecipe(ctx, name string) (recipeID string, err error)` to
-      `internal/mealie.Client` — Mealie's create-by-name endpoint, returns the new (empty) recipe's
-      id/slug for the follow-up PATCH calls.
-- [ ] 1.2 Add `SetIngredients(ctx, recipeID string, lines []IngredientLine) error` — PATCHes
-      `recipeIngredient` using the verified-safe shape: fresh UUID `referenceId` per line, clean
-      `null` `food`/`unit` when unstructured, populated `food`/`unit`/`quantity` when the brute
-      parser resolved them. Reuses `parseNotes` (already added for the read-side fix) rather than
-      a second parser call path.
-- [ ] 1.3 Add `SetInstructions(ctx, recipeID string, steps []string) error` — PATCHes
-      `recipeInstructions` with the full required object shape (`id`, `title: ""`, `summary: ""`,
-      `text`, `ingredientReferences: []`) per step.
+Verified 2026-08-29 against the live Mealie instance end to end (create → patch ingredients →
+patch instructions → readback → delete a throwaway recipe) — every shape below is confirmed
+working, not guessed:
+
+- **`POST /api/recipes`** body `{"name": "<title>"}` → `201`, response body is a **bare JSON
+  string** (the new recipe's slug), not an object: `"scratch-test-delete-me-..."`.
+- **`GET /api/recipes/{slug}`** → the full recipe object, including its real `id` (UUID) —
+  needed because the create call only gives you the slug.
+- **`PATCH /api/recipes/{slug}`** (keyed by slug, not id) body `{"recipeIngredient": [...]}` →
+  `200`. Each entry: `{referenceId: <fresh uuid>, note, display, quantity: 0, unit: null,
+  food: null, title: null, originalText: null, referencedRecipe: null}` when unstructured, or
+  with `unit`/`food`/`quantity` populated when the brute parser resolved them — `referenceId`
+  must always be a fresh UUID (the corruption bug from earlier this session).
+- **`PATCH /api/recipes/{slug}`** body `{"recipeInstructions": [...]}` → `200`. Each entry:
+  `{id: <fresh uuid>, title: "", summary: "", text: "<step>", ingredientReferences: []}` — the
+  500-causing bug from earlier this session was posting `{text}` alone.
+
+- [ ] 1.1 Add `CreateRecipe(ctx, name string) (slug string, err error)` to `internal/mealie.Client`
+      — `POST /api/recipes`, decode the bare-string response body (not a struct).
+- [ ] 1.2 Add `SetIngredients(ctx, slug string, lines []IngredientLine) error` — `PATCH
+      /api/recipes/{slug}` with `{"recipeIngredient": [...]}` using the verified shape above.
+      Reuses `parseNotes` (already added for the read-side fix) to resolve food/unit/quantity per
+      line before writing, rather than a second parser call path.
+- [ ] 1.3 Add `SetInstructions(ctx, slug string, steps []string) error` — `PATCH
+      /api/recipes/{slug}` with `{"recipeInstructions": [...]}` using the verified shape above.
 - [ ] 1.4 Update the package doc comment on `internal/mealie/client.go` to note the scoped write
       exception and why (link back to this change).
 - [ ] 1.5 Unit tests against a fake Mealie HTTP server for all three methods, including a case
