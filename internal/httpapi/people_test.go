@@ -59,6 +59,23 @@ func (f *fakePersonSvc) CreatePerson(ctx context.Context, in dto.PersonInput) (d
 	return p, nil
 }
 
+func (f *fakePersonSvc) UpdatePerson(ctx context.Context, id string, in dto.PersonUpdate) (dto.PersonResponse, error) {
+	if f.err != nil {
+		return dto.PersonResponse{}, f.err
+	}
+	for i, p := range f.people {
+		if p.ID == id {
+			p.Name = in.Name
+			if in.Weight > 0 {
+				p.Weight = in.Weight
+			}
+			f.people[i] = p
+			return p, nil
+		}
+	}
+	return dto.PersonResponse{}, ErrNotFound
+}
+
 type errSentinel string
 
 func (e errSentinel) Error() string { return string(e) }

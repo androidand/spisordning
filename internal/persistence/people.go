@@ -26,6 +26,20 @@ func (s *Store) CreatePerson(ctx context.Context, p Person) error {
 	return nil
 }
 
+// UpdatePerson updates a person's name and weight. A zero weight leaves the
+// existing weight unchanged (weight must be > 0).
+func (s *Store) UpdatePerson(ctx context.Context, p Person) error {
+	const q = `UPDATE person SET name = $2, weight = CASE WHEN $3 > 0 THEN $3 ELSE weight END WHERE id = $1`
+	tag, err := s.db.Exec(ctx, q, p.ID, p.Name, p.Weight)
+	if err != nil {
+		return fmt.Errorf("persistence: update person: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
+}
+
 // GetPerson fetches one person by id.
 func (s *Store) GetPerson(ctx context.Context, id string) (Person, error) {
 	const q = `SELECT id, name, weight, created_at FROM person WHERE id = $1`

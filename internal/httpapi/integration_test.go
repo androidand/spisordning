@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -78,6 +79,7 @@ func newTestServer(t *testing.T, store *persistence.Store) *httptest.Server {
 		Meals:       adapter,
 		Pantry:      adapter,
 		Plans:       &testAdapter{db: store},
+		Inspiration: adapter,
 	})
 	return httptest.NewServer(mux)
 }
@@ -132,6 +134,16 @@ func (a dbAdapter) CreatePerson(ctx context.Context, in dto.PersonInput) (dto.Pe
 	return dto.PersonResponse{ID: p.ID, Name: p.Name, Weight: p.Weight, CreatedAt: p.CreatedAt}, nil
 }
 
+func (a dbAdapter) UpdatePerson(ctx context.Context, id string, in dto.PersonUpdate) (dto.PersonResponse, error) {
+	if err := a.store.UpdatePerson(ctx, persistence.Person{ID: id, Name: in.Name, Weight: in.Weight}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return dto.PersonResponse{}, fmt.Errorf("%w: person %s not found", dto.ErrNotFound, id)
+		}
+		return dto.PersonResponse{}, err
+	}
+	return a.GetPerson(ctx, id)
+}
+
 func (a dbAdapter) ListPreferences(ctx context.Context, personID string) ([]dto.PersonPreferenceResponse, error) {
 	prefs, err := a.store.ListPreferences(ctx, personID)
 	if err != nil {
@@ -145,6 +157,36 @@ func (a dbAdapter) ListPreferences(ctx context.Context, personID string) ([]dto.
 		})
 	}
 	return out, nil
+}
+
+func (a dbAdapter) SetPreference(ctx context.Context, in dto.SetPreferenceInput) (dto.PersonPreferenceResponse, error) {
+	if in.PersonID == "" || in.Tag == "" {
+		return dto.PersonPreferenceResponse{}, fmt.Errorf("%w: person_id and tag are required", dto.ErrInvalidPreference)
+	}
+	if in.Sentiment < -2 || in.Sentiment > 2 {
+		return dto.PersonPreferenceResponse{}, fmt.Errorf("%w: sentiment must be in [-2, 2]", dto.ErrInvalidPreference)
+	}
+	if in.Confidence < 0 || in.Confidence > 1 {
+		return dto.PersonPreferenceResponse{}, fmt.Errorf("%w: confidence must be in [0, 1]", dto.ErrInvalidPreference)
+	}
+	if err := a.store.UpsertPreference(ctx, persistence.PersonPreference{
+		PersonID: in.PersonID, Tag: in.Tag, Sentiment: in.Sentiment, Confidence: in.Confidence,
+	}); err != nil {
+		return dto.PersonPreferenceResponse{}, err
+	}
+	prefs, err := a.store.ListPreferences(ctx, in.PersonID)
+	if err != nil {
+		return dto.PersonPreferenceResponse{}, err
+	}
+	for _, p := range prefs {
+		if p.Tag == in.Tag {
+			return dto.PersonPreferenceResponse{
+				PersonID: p.PersonID, Tag: p.Tag, Sentiment: int(p.Sentiment),
+				Confidence: p.Confidence, UpdatedAt: p.UpdatedAt,
+			}, nil
+		}
+	}
+	return dto.PersonPreferenceResponse{}, fmt.Errorf("row not found after upsert")
 }
 
 func (a dbAdapter) ListRecipes(ctx context.Context) ([]dto.RecipeRefResponse, error) {
@@ -171,6 +213,68 @@ func (a dbAdapter) GetRecipe(ctx context.Context, id string) (dto.RecipeRefRespo
 		MealieRecipeID: r.MealieRecipeID, Title: r.Title, Tags: r.Tags,
 		Effort: r.Effort, LastSyncedAt: r.LastSyncedAt,
 	}, nil
+}
+
+func (a dbAdapter) Suggest(ctx context.Context) ([]dto.InspirationSuggestion, error) {
+	pantryIDs, err := a.store.ListPantryIngredientIDs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	pantrySet := make(map[string]bool, len(pantryIDs))
+	for _, id := range pantryIDs {
+		pantrySet[id] = true
+	}
+	refs, err := a.store.ListRecipeRefs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	refByID := make(map[string]persistence.RecipeRef, len(refs))
+	for _, r := range refs {
+		refByID[r.MealieRecipeID] = r
+	}
+	lines, err := a.store.ListAllRecipeIngredients(ctx)
+	if err != nil {
+		return nil, err
+	}
+	byRecipe := make(map[string][]string)
+	for _, line := range lines {
+		byRecipe[line.MealieRecipeID] = append(byRecipe[line.MealieRecipeID], line.IngredientID)
+	}
+	var out []dto.InspirationSuggestion
+	for recipeID, ingredientIDs := range byRecipe {
+		ref, ok := refByID[recipeID]
+		if !ok {
+			continue
+		}
+		matched := make([]string, 0, len(ingredientIDs))
+		missing := make([]string, 0, len(ingredientIDs))
+		for _, id := range ingredientIDs {
+			if pantrySet[id] {
+				matched = append(matched, id)
+			} else {
+				missing = append(missing, id)
+			}
+		}
+		if len(matched) == 0 {
+			continue
+		}
+		ratio := 0.0
+		if len(ingredientIDs) > 0 {
+			ratio = float64(len(matched)) / float64(len(ingredientIDs))
+		}
+		out = append(out, dto.InspirationSuggestion{
+			MealieRecipeID: recipeID, Title: ref.Title, Tags: ref.Tags,
+			Effort: int(ref.Effort), TotalIngredients: len(ingredientIDs),
+			MatchedIngredientIDs: matched, MissingIngredientIDs: missing, MatchRatio: ratio,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].MatchRatio != out[j].MatchRatio {
+			return out[i].MatchRatio > out[j].MatchRatio
+		}
+		return out[i].Title < out[j].Title
+	})
+	return out, nil
 }
 
 func (a dbAdapter) GetMeal(ctx context.Context, id int64) (dto.MealEventResponse, error) {
@@ -325,17 +429,41 @@ func (a dbAdapter) Consume(ctx context.Context, lotID int64, in dto.PantryConsum
 	return a.store.RecordConsume(ctx, lotID, in.Quantity, in.Estimated, in.Source)
 }
 
-func (a *testAdapter) GetTonight(ctx context.Context) (TonightView, error) {
+func (a dbAdapter) ListExpiring(ctx context.Context, within time.Duration) ([]dto.PantryLot, error) {
+	lots, err := a.store.ListExpiringLots(ctx, within)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]dto.PantryLot, 0, len(lots))
+	for _, l := range lots {
+		var bestBefore, openedAt time.Time
+		if l.BestBefore != nil {
+			bestBefore = *l.BestBefore
+		}
+		if l.OpenedAt != nil {
+			openedAt = *l.OpenedAt
+		}
+		out = append(out, dto.PantryLot{
+			ID: l.ID, IngredientID: l.IngredientID, ProductID: l.ProductID,
+			LocationID: l.LocationID, Quantity: l.Quantity, Unit: l.Unit,
+			Confidence: string(l.Confidence), BestBefore: bestBefore,
+			OpenedAt: openedAt, CreatedAt: l.CreatedAt, UpdatedAt: l.UpdatedAt,
+		})
+	}
+	return out, nil
+}
+
+func (a *testAdapter) GetTonight(ctx context.Context) (dto.TonightView, error) {
 	if a.db == nil {
-		return TonightView{}, ErrNoMealTonight
+		return dto.TonightView{}, dto.ErrNoMealTonight
 	}
 	// Use local midnight so "today" matches the household's timezone.
 	today := time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 0, 0, 0, 0, time.Local)
 	meal, err := a.db.GetTonightMeal(ctx, today)
 	if err != nil {
-		return TonightView{}, err
+		return dto.TonightView{}, err
 	}
-	out := TonightView{
+	out := dto.TonightView{
 		ServedOn: meal.ServedOn.Format("2006-01-02"),
 		Recipe: dto.RecipeRefResponse{
 			MealieRecipeID: meal.MealieRecipeID, Title: meal.RecipeTitle,
@@ -374,6 +502,10 @@ func (a *testAdapter) CreateReaction(ctx context.Context, in ReactionNew) (dto.M
 
 func (a *testAdapter) RunPlan(ctx context.Context, in PlanRunInput) (PlanRunResult, error) {
 	return PlanRunResult{Status: "accepted", Message: "not wired in integration test"}, nil
+}
+
+func (a *testAdapter) RunPlanWithProgress(ctx context.Context, in PlanRunInput, progress func(PlanProgress)) (PlanRunResult, error) {
+	return a.RunPlan(ctx, in)
 }
 
 func (a *testAdapter) ListPlans(ctx context.Context) ([]PlanResponse, error) {

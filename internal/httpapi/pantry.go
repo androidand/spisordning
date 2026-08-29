@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/androidand/spisordning/internal/dto"
 )
@@ -86,4 +87,25 @@ func (h *pantryHandler) consume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// listExpiring returns non-empty lots whose best_before is within ?within
+// (default 7 days, in hours). Already-expired lots (best_before in the past)
+// are always included.
+func (h *pantryHandler) listExpiring(w http.ResponseWriter, r *http.Request) {
+	within := 7 * 24 * time.Hour
+	if v := r.URL.Query().Get("withinHours"); v != "" {
+		hours, err := strconv.Atoi(v)
+		if err != nil || hours <= 0 {
+			writeJSON(w, http.StatusBadRequest, errorBody{Message: "query param 'withinHours' must be a positive integer"})
+			return
+		}
+		within = time.Duration(hours) * time.Hour
+	}
+	out, err := h.svc.ListExpiring(r.Context(), within)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "list expiring lots: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }

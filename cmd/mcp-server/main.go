@@ -25,6 +25,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/androidand/spisordning/internal/config"
 	"github.com/androidand/spisordning/internal/mcptools"
 	"github.com/androidand/spisordning/internal/persistence"
 )
@@ -47,7 +48,8 @@ func main() {
 		return
 	}
 
-	addr := envDefault("SPISORNING_MCP_ADDR", ":8081")
+	cfg := config.Load()
+	addr := cfg.SpisordningMCPAddr
 	httpServer := &http.Server{Addr: addr, Handler: newMCPHandler(server)}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -72,14 +74,16 @@ func main() {
 func buildMCPDeps(logger *slog.Logger) mcptools.Dependencies {
 	var deps mcptools.Dependencies
 
-	cfg, err := persistence.FromEnv(os.Getenv)
+	appCfg := config.Load()
+
+	pgCfg, err := persistence.FromEnv(os.Getenv)
 	if err != nil {
 		logger.Warn("no database configured (POSTGRES_PASSWORD/DATABASE_URL unset); registering no tools")
 		return deps
 	}
 
 	ctx := context.Background()
-	store, err := persistence.New(ctx, cfg)
+	store, err := persistence.New(ctx, pgCfg)
 	if err != nil {
 		logger.Warn("persistence unavailable; registering no tools", "error", err)
 		return deps
@@ -87,8 +91,10 @@ func buildMCPDeps(logger *slog.Logger) mcptools.Dependencies {
 
 	adapter := mcpStoreAdapter{
 		db:        store,
-		willysURL: envDefault("ADAPTER_URL", "http://localhost:8402"),
-		icaURL:    envDefault("ICA_ADAPTER_URL", "http://localhost:8403"),
+		willysURL: appCfg.AdapterURL,
+		icaURL:    appCfg.ICAAdapterURL,
+		hemkopURL: appCfg.HemkopAdapterURL,
+		cfg:       appCfg,
 	}
 	deps.Planner = adapter
 	deps.Reactions = adapter
@@ -123,9 +129,4 @@ func newMCPHandler(server *mcp.Server) http.Handler {
 	return mux
 }
 
-func envDefault(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
-}
+

@@ -43,6 +43,10 @@ type RunPlanInput struct {
 	// WriteTonight is a path to write the ambient week projection (task 5.2),
 	// e.g. tonight.json. Empty skips the write. Not yet exposed on the HTTP API.
 	WriteTonight string
+	// Progress, when non-nil, is called with (phase, message) as the run
+	// progresses. The SSE endpoint (POST /plans/run/stream) uses this to stream
+	// progress events. Nil for the CLI and the synchronous POST /plans/run.
+	Progress func(phase, message string)
 }
 
 // RunPlanResult carries the outcome of a plan run.
@@ -74,6 +78,16 @@ func RunPlan(ctx context.Context, in RunPlanInput) (RunPlanResult, error) {
 		in.Retailer = "willys"
 	}
 
+	// emit reports a progress phase to the optional Progress callback (SSE).
+	// No-op when Progress is nil (CLI and synchronous POST /plans/run).
+	// Note: "started" and "done" are emitted by the SSE handler (progress.go),
+	// not here — the handler's "done" carries the full result.
+	emit := func(phase, message string) {
+		if in.Progress != nil {
+			in.Progress(phase, message)
+		}
+	}
+
 	fam, err := loadFamily(in.Family)
 	if err != nil {
 		return RunPlanResult{}, err
@@ -84,6 +98,7 @@ func RunPlan(ctx context.Context, in RunPlanInput) (RunPlanResult, error) {
 	}
 	adapterURL := envOr("ADAPTER_URL", "http://localhost:8402")
 	icaAdapterURL := envOr("ICA_ADAPTER_URL", "http://localhost:8403")
+	hemkopAdapterURL := envOr("HEMKOP_ADAPTER_URL", "http://localhost:8404")
 	kind := retailer.RetailerKind(in.Retailer)
 
 	year, week := nextISOWeek(time.Now())
@@ -125,6 +140,7 @@ func RunPlan(ctx context.Context, in RunPlanInput) (RunPlanResult, error) {
 	}
 	planningSvc := service.NewPlanning(db, mealie.New(mealieURL, mealieToken))
 
+	emit("planning", "Planning week (syncing recipes, scoring candidates)")
 	pw, err := planningSvc.PlanWeek(ctx, service.PlanWeekInput{
 		WeekStart:   monday,
 		Days:        in.Days,
@@ -221,10 +237,11 @@ func RunPlan(ctx context.Context, in RunPlanInput) (RunPlanResult, error) {
 	}
 
 	// ── Resolve + wishlist via the adapter ────────────────────────────────────
-	rc, err := retailer.NewFromKind(kind, adapterURL, icaAdapterURL)
+	rc, err := retailer.NewFromKind(kind, adapterURL, icaAdapterURL, hemkopAdapterURL)
 	if err != nil {
 		return result, fmt.Errorf("retailer: %w", err)
 	}
+	rc.WithAuthFile(envOr("ICA_AUTH_FILE", ""))
 	terms := retailer.SearchTerms{}
 	for _, meal := range meals {
 		for _, line := range meal.Ingredients {
@@ -232,6 +249,7 @@ func RunPlan(ctx context.Context, in RunPlanInput) (RunPlanResult, error) {
 		}
 	}
 	fmt.Printf("\nResolving products via %s-adapter...\n", kind)
+	emit("resolving", fmt.Sprintf("Resolving %d product(s) via %s-adapter", len(reqs), kind))
 	resolutions, err := rc.ResolveRequirements(ctx, reqs, terms)
 	if err != nil {
 		return result, fmt.Errorf("resolve: %w", err)
@@ -303,6 +321,7 @@ func RunPlan(ctx context.Context, in RunPlanInput) (RunPlanResult, error) {
 	}
 
 	name := fmt.Sprintf("Vecka %d", week)
+	emit("wishlist", fmt.Sprintf("Creating wishlist %q with %d item(s)", name, len(items)))
 	created, err := rc.CreateShoppingList(ctx, name, items)
 	if err != nil {
 		return result, fmt.Errorf("create wishlist: %w", err)

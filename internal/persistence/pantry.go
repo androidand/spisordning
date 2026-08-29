@@ -153,6 +153,49 @@ func scanLots(rows pgx.Rows) ([]InventoryLot, error) {
 	return out, rows.Err()
 }
 
+// ListExpiringLots returns every non-empty lot whose best_before is set and
+// falls within [now, now+within] (i.e., already expired or expiring soon),
+// ordered by best_before ascending (most urgent first). Lots with no
+// best_before are excluded. This is the read behind the best-before
+// notification use case.
+func (s *Store) ListExpiringLots(ctx context.Context, within time.Duration) ([]InventoryLot, error) {
+	deadline := time.Now().Add(within)
+	const q = `SELECT id, ingredient_id, product_id, location_id, quantity, unit,
+		confidence, best_before, opened_at, created_at, updated_at
+		FROM inventory_lot
+		WHERE best_before IS NOT NULL
+			AND best_before <= $1
+			AND quantity > 0
+		ORDER BY best_before ASC`
+	rows, err := s.db.Query(ctx, q, deadline)
+	if err != nil {
+		return nil, fmt.Errorf("persistence: list expiring lots: %w", err)
+	}
+	return scanLots(rows)
+}
+
+// ListPantryIngredientIDs returns the distinct canonical ingredient ids that
+// currently have at least one non-empty lot (quantity > 0) in the pantry.
+// This is the read behind the "what can I make from my pantry" inspiration
+// use case.
+func (s *Store) ListPantryIngredientIDs(ctx context.Context) ([]string, error) {
+	const q = `SELECT DISTINCT ingredient_id FROM inventory_lot WHERE quantity > 0 ORDER BY ingredient_id`
+	rows, err := s.db.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("persistence: list pantry ingredient ids: %w", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 // GetInventoryLot fetches one lot by id.
 func (s *Store) GetInventoryLot(ctx context.Context, id int64) (InventoryLot, error) {
 	const q = `SELECT id, ingredient_id, product_id, location_id, quantity, unit, confidence,

@@ -190,6 +190,101 @@ func (s *Store) ListProductsForIngredient(ctx context.Context, ingredientID stri
 	return out, rows.Err()
 }
 
+// IngredientAlias mirrors migrations/000016_ingredient_alias.sql. It maps a
+// household's nickname for an ingredient to the canonical ingredient id.
+// HouseholdID is "" for a global alias (NULL in the DB).
+type IngredientAlias struct {
+	ID           int64
+	HouseholdID  string // "" = global
+	Alias        string
+	IngredientID string
+	CreatedAt    time.Time
+}
+
+// UpsertIngredientAlias inserts or re-asserts a nickname → canonical
+// ingredient mapping. The unique (household_id, alias) key makes this
+// idempotent: re-adding the same alias updates the ingredient it points at.
+func (s *Store) UpsertIngredientAlias(ctx context.Context, a IngredientAlias) error {
+	const q = `INSERT INTO ingredient_alias (household_id, alias, ingredient_id)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (household_id, alias) DO UPDATE SET ingredient_id = EXCLUDED.ingredient_id`
+	_, err := s.db.Exec(ctx, q, nullableText(a.HouseholdID), a.Alias, a.IngredientID)
+	if err != nil {
+		return fmt.Errorf("persistence: upsert ingredient_alias: %w", err)
+	}
+	return nil
+}
+
+// GetIngredientAlias fetches one alias by (household, alias). householdID ""
+// matches the global-alias row (NULL household_id).
+func (s *Store) GetIngredientAlias(ctx context.Context, householdID, alias string) (IngredientAlias, error) {
+	const q = `SELECT id, household_id, alias, ingredient_id, created_at
+		FROM ingredient_alias WHERE household_id IS NOT DISTINCT FROM $1 AND alias = $2`
+	var a IngredientAlias
+	err := s.db.QueryRow(ctx, q, nullableText(householdID), alias).
+		Scan(&a.ID, &a.HouseholdID, &a.Alias, &a.IngredientID, &a.CreatedAt)
+	if err != nil {
+		return IngredientAlias{}, fmt.Errorf("persistence: get ingredient_alias: %w", err)
+	}
+	return a, nil
+}
+
+// ListIngredientAliases returns every alias for a household, including global
+// aliases (household_id IS NULL). householdID "" returns only global aliases.
+func (s *Store) ListIngredientAliases(ctx context.Context, householdID string) ([]IngredientAlias, error) {
+	const q = `SELECT id, household_id, alias, ingredient_id, created_at
+		FROM ingredient_alias
+		WHERE household_id IS NULL OR household_id = $1
+		ORDER BY alias`
+	rows, err := s.db.Query(ctx, q, householdID)
+	if err != nil {
+		return nil, fmt.Errorf("persistence: list ingredient_alias: %w", err)
+	}
+	defer rows.Close()
+	var out []IngredientAlias
+	for rows.Next() {
+		var a IngredientAlias
+		var hh *string
+		if err := rows.Scan(&a.ID, &hh, &a.Alias, &a.IngredientID, &a.CreatedAt); err != nil {
+			return nil, err
+		}
+		if hh != nil {
+			a.HouseholdID = *hh
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// DeleteIngredientAlias removes one alias by (household, alias). householdID ""
+// targets the global-alias row.
+func (s *Store) DeleteIngredientAlias(ctx context.Context, householdID, alias string) error {
+	const q = `DELETE FROM ingredient_alias WHERE household_id IS NOT DISTINCT FROM $1 AND alias = $2`
+	if _, err := s.db.Exec(ctx, q, nullableText(householdID), alias); err != nil {
+		return fmt.Errorf("persistence: delete ingredient_alias: %w", err)
+	}
+	return nil
+}
+
+// ResolveIngredientAlias returns the canonical ingredient id for a nickname,
+// or "" when no alias matches. It checks the household's aliases first, then
+// global aliases.
+func (s *Store) ResolveIngredientAlias(ctx context.Context, householdID, alias string) (string, error) {
+	const q = `SELECT ingredient_id FROM ingredient_alias
+		WHERE alias = $2 AND (household_id = $1 OR household_id IS NULL)
+		ORDER BY (household_id IS NULL) ASC
+		LIMIT 1`
+	var ingredientID string
+	err := s.db.QueryRow(ctx, q, householdID, alias).Scan(&ingredientID)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return "", nil
+		}
+		return "", fmt.Errorf("persistence: resolve ingredient_alias: %w", err)
+	}
+	return ingredientID, nil
+}
+
 func nullableText(s string) *string {
 	if s == "" {
 		return nil

@@ -20,19 +20,38 @@ import (
 type RetailerKind string
 
 const (
-	RetailerWillys RetailerKind = "willys"
-	RetailerICA    RetailerKind = "ica"
+	RetailerWillys  RetailerKind = "willys"
+	RetailerICA     RetailerKind = "ica"
+	RetailerHemkop  RetailerKind = "hemkop"
 )
 
 // Client talks to a running retailer-adapter instance.
 type Client struct {
+	kind RetailerKind
 	http *httpclient.Client
+	// authFile is the path to the elevated-credential file for tiered
+	// retailers (ICA). It is set from Config (ICA_AUTH_FILE) at construction
+	// time, never read from the environment by the client itself. Empty for
+	// single-tier retailers and when no credential file is configured.
+	authFile string
 }
+
+// WithAuthFile sets the elevated-credential file path on the client. It is
+// meant to be called by the composition root with the value from
+// config.Config.ICAAuthFile, so the client never reads the environment
+// directly. It is a no-op for single-tier retailers.
+func (c *Client) WithAuthFile(path string) *Client {
+	c.authFile = path
+	return c
+}
+
+// AuthFile returns the elevated-credential file path, if set.
+func (c *Client) AuthFile() string { return c.authFile }
 
 // New returns a Client for the willys-adapter at baseURL
 // (e.g. "http://localhost:8402").
 func New(baseURL string) *Client {
-	return &Client{http: httpclient.New(baseURL, "adapter", 60*time.Second)}
+	return &Client{kind: RetailerWillys, http: httpclient.New(baseURL, "adapter", 60*time.Second)}
 }
 
 // NewICA returns a Client for the ica-adapter at baseURL
@@ -40,22 +59,33 @@ func New(baseURL string) *Client {
 // as willys-adapter (same /resolve, /shopping-lists, /pins, /review/queue
 // routes) but adds ICA-specific endpoints (/barcode, /bonus).
 func NewICA(baseURL string) *Client {
-	return &Client{http: httpclient.New(baseURL, "ica-adapter", 60*time.Second)}
+	return &Client{kind: RetailerICA, http: httpclient.New(baseURL, "ica-adapter", 60*time.Second)}
+}
+
+// NewHemkop returns a Client for the hemkop-adapter at baseURL
+// (e.g. "http://localhost:8404"). Hemköp and Willys share one SAP Commerce
+// (Axfood) backend, so the hemkop-adapter mirrors the willys-adapter's HTTP
+// shape (same /resolve, /shopping-lists, /pins, /review/queue routes).
+func NewHemkop(baseURL string) *Client {
+	return &Client{kind: RetailerHemkop, http: httpclient.New(baseURL, "hemkop-adapter", 60*time.Second)}
 }
 
 // NewFromKind returns a Client for the given retailerKind at the corresponding
 // baseURL. kind=WILLYS uses New (ADAPTER_URL); kind=ICA uses NewICA
-// (ICA_ADAPTER_URL). The returned client's error prefix ("adapter" or
-// "ica-adapter") matches the underlying HTTP client so failures stay
+// (ICA_ADAPTER_URL); kind=HEMKOP uses NewHemkop (HEMKOP_ADAPTER_URL). The
+// returned client's error prefix ("adapter", "ica-adapter", or
+// "hemkop-adapter") matches the underlying HTTP client so failures stay
 // attributable. Returns an error when kind is unknown.
-func NewFromKind(kind RetailerKind, willysURL, icaURL string) (*Client, error) {
+func NewFromKind(kind RetailerKind, willysURL, icaURL, hemkopURL string) (*Client, error) {
 	switch kind {
 	case RetailerWillys:
 		return New(willysURL), nil
 	case RetailerICA:
 		return NewICA(icaURL), nil
+	case RetailerHemkop:
+		return NewHemkop(hemkopURL), nil
 	default:
-		return nil, fmt.Errorf("retailer: unknown kind %q (want %q or %q)", kind, RetailerWillys, RetailerICA)
+		return nil, fmt.Errorf("retailer: unknown kind %q (want %q, %q, or %q)", kind, RetailerWillys, RetailerICA, RetailerHemkop)
 	}
 }
 

@@ -26,10 +26,15 @@ func runSyncOffers(args []string) error {
 
 	ctx := context.Background()
 	kind := retailer.RetailerKind(*retailerFlag)
-	rc, err := retailer.NewFromKind(kind, envOr("ADAPTER_URL", "http://localhost:8402"), envOr("ICA_ADAPTER_URL", "http://localhost:8403"))
+	rc, err := retailer.NewFromKind(kind,
+		envOr("ADAPTER_URL", "http://localhost:8402"),
+		envOr("ICA_ADAPTER_URL", "http://localhost:8403"),
+		envOr("HEMKOP_ADAPTER_URL", "http://localhost:8404"),
+	)
 	if err != nil {
 		return fmt.Errorf("sync-offers: %w", err)
 	}
+	rc.WithAuthFile(envOr("ICA_AUTH_FILE", ""))
 
 	fmt.Printf("Fetching offers from %s-adapter", kind)
 	if *storeID != "" {

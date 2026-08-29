@@ -141,6 +141,28 @@ func (s *Store) ListRecipeIngredients(ctx context.Context, mealieRecipeID string
 	return out, rows.Err()
 }
 
+// ListAllRecipeIngredients returns every recipe_ingredient row across all
+// recipes. This is the read behind the "what can I make from my pantry"
+// inspiration use case: the service joins it with the pantry's ingredient ids
+// to score each recipe by how much of it is already on hand.
+func (s *Store) ListAllRecipeIngredients(ctx context.Context) ([]RecipeIngredient, error) {
+	rows, err := s.db.Query(ctx, `SELECT mealie_recipe_id, ingredient_id, quantity, unit
+		FROM recipe_ingredient ORDER BY mealie_recipe_id, ingredient_id`)
+	if err != nil {
+		return nil, fmt.Errorf("persistence: list all recipe_ingredients: %w", err)
+	}
+	defer rows.Close()
+	var out []RecipeIngredient
+	for rows.Next() {
+		var ri RecipeIngredient
+		if err := rows.Scan(&ri.MealieRecipeID, &ri.IngredientID, &ri.Quantity, &ri.Unit); err != nil {
+			return nil, err
+		}
+		out = append(out, ri)
+	}
+	return out, rows.Err()
+}
+
 // IngredientMapping mirrors migrations/0001_init.sql ingredient_mapping.
 type IngredientMapping struct {
 	MealieFoodID string

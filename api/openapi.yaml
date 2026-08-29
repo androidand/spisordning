@@ -76,6 +76,19 @@ paths:
       responses:
         '200': { description: a person, content: { application/json: { schema: { $ref: '#/components/schemas/Person' } } } }
         '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      summary: Update a person's name and/or weight
+      operationId: updatePerson
+      tags: [people]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PersonUpdate' }
+      responses:
+        '200': { description: updated person, content: { application/json: { schema: { $ref: '#/components/schemas/Person' } } } }
+        '400': { description: name missing }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /preferences:
     get:
@@ -95,6 +108,22 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/PersonPreference' }
+    post:
+      summary: Set (upsert) a person's preference for a tag
+      operationId: setPreference
+      tags: [preferences]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PersonPreferenceNew' }
+      responses:
+        '201':
+          description: created or updated preference
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PersonPreference' }
+        '400': { description: missing fields or out-of-range sentiment/confidence }
 
   /recipes:
     get:
@@ -192,6 +221,29 @@ paths:
       responses:
         '202': { description: plan run accepted, content: { application/json: { schema: { $ref: '#/components/schemas/PlanRunResult' } } } }
         '500': { $ref: '#/components/responses/NotFound' }
+
+  /plans/run/stream:
+    post:
+      summary: Run the weekly planner, streaming progress as Server-Sent Events
+      description: >-
+        Runs the plan and streams `text/event-stream` progress events as each
+        phase completes (started, planning, resolving, wishlist, done). The
+        synchronous POST /plans/run is unaffected — this endpoint is additive.
+        The event payload shape is not finalized until the frontend's SSE
+        consumer needs it (task 3.4).
+      operationId: runPlanStream
+      tags: [plans]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlanRunInput' }
+      responses:
+        '200':
+          description: progress event stream
+          content:
+            text/event-stream:
+              schema: { $ref: '#/components/schemas/PlanProgress' }
 
   /plans/{planId}:
     parameters:
@@ -371,9 +423,18 @@ paths:
 
   /stores:
     get:
-      summary: List all stores across retailers
+      summary: List all stores across retailers, optionally ranked by distance from an origin
       operationId: listStores
       tags: [stores]
+      parameters:
+        - name: latitude
+          in: query
+          schema: { type: number }
+          description: origin latitude (WGS84); when set with longitude, stores are ranked nearest-first
+        - name: longitude
+          in: query
+          schema: { type: number }
+          description: origin longitude (WGS84)
       responses:
         '200':
           content:
@@ -381,6 +442,7 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/Store' }
+        '400': { description: latitude/longitude not a number }
 
   /stores/{storeID}/offers:
     parameters:
@@ -667,6 +729,469 @@ paths:
                 type: array
                 items: { $ref: '#/components/schemas/OrderItem' }
 
+  /recipe-families:
+    get:
+      summary: List recipe families (git-like dish hierarchy)
+      operationId: listRecipeFamilies
+      tags: [recipe-families]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/RecipeFamily' }
+    post:
+      summary: Create a recipe family
+      operationId: createRecipeFamily
+      tags: [recipe-families]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RecipeFamilyNew' }
+      responses:
+        '201':
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/RecipeFamily' } }
+
+  /recipe-families/{familyId}:
+    parameters:
+      - name: familyId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      summary: Fetch one recipe family
+      operationId: getRecipeFamily
+      tags: [recipe-families]
+      responses:
+        '200': { description: a family, content: { application/json: { schema: { $ref: '#/components/schemas/RecipeFamily' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /recipe-families/{familyId}/variants:
+    parameters:
+      - name: familyId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      summary: List variants of a family
+      operationId: listRecipeVariants
+      tags: [recipe-families]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/RecipeVariant' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      summary: Create a variant of a family
+      operationId: createRecipeVariant
+      tags: [recipe-families]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RecipeVariantNew' }
+      responses:
+        '201':
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/RecipeVariant' } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /recipe-families/{familyId}/variants/{variantId}/revisions:
+    parameters:
+      - name: familyId
+        in: path
+        required: true
+        schema: { type: string }
+      - name: variantId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      summary: List revisions of a variant (newest first)
+      operationId: listRecipeRevisions
+      tags: [recipe-families]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/RecipeRevision' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      summary: Create a revision of a variant (optionally derived from a parent)
+      operationId: createRecipeRevision
+      tags: [recipe-families]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RecipeRevisionNew' }
+      responses:
+        '201':
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/RecipeRevision' } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /recipe-families/{familyId}/variants/{variantId}/revisions/{revisionId}:
+    parameters:
+      - name: familyId
+        in: path
+        required: true
+        schema: { type: string }
+      - name: variantId
+        in: path
+        required: true
+        schema: { type: string }
+      - name: revisionId
+        in: path
+        required: true
+        schema: { type: integer }
+    get:
+      summary: Fetch one revision
+      operationId: getRecipeRevision
+      tags: [recipe-families]
+      responses:
+        '200': { description: a revision, content: { application/json: { schema: { $ref: '#/components/schemas/RecipeRevision' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /recipe-families/{familyId}/variants/{variantId}/default:
+    parameters:
+      - name: familyId
+        in: path
+        required: true
+        schema: { type: string }
+      - name: variantId
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      summary: Pin a variant as the family's default (expanded) variant
+      operationId: setRecipeFamilyDefaultVariant
+      tags: [recipe-families]
+      responses:
+        '200': { description: ok, content: { application/json: { schema: { type: object } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /recipes/{recipeId}/favorites:
+    parameters:
+      - $ref: '#/components/parameters/RecipeId'
+    get:
+      summary: List favorites for a recipe
+      operationId: listRecipeFavorites
+      tags: [favorites]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Favorite' }
+    post:
+      summary: Mark a recipe as a favorite (person- or household-scoped)
+      operationId: setRecipeFavorite
+      tags: [favorites]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FavoriteNew' }
+      responses:
+        '200': { description: ok, content: { application/json: { schema: { type: object } } } }
+    delete:
+      summary: Remove a favorite marker
+      operationId: unsetRecipeFavorite
+      tags: [favorites]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FavoriteNew' }
+      responses:
+        '200': { description: ok, content: { application/json: { schema: { type: object } } } }
+
+  /recipes/{recipeId}/rating:
+    parameters:
+      - $ref: '#/components/parameters/RecipeId'
+    get:
+      summary: Get the weighted average rating for a recipe
+      operationId: getRecipeRating
+      tags: [favorites]
+      responses:
+        '200': { description: a rating, content: { application/json: { schema: { $ref: '#/components/schemas/RecipeRating' } } } }
+
+  /prices:
+    get:
+      summary: Current prices per retailer product across stores (cheapest store computed)
+      operationId: listProductPrices
+      tags: [prices]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ProductPriceGroup' }
+
+  /grocy/status:
+    get:
+      summary: Report whether a Grocy instance is configured and reachable
+      operationId: grocyStatus
+      tags: [grocy]
+      responses:
+        '200':
+          description: grocy status
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GrocyStatus' }
+
+  /grocy/products:
+    get:
+      summary: List the Grocy product catalog
+      operationId: grocyListProducts
+      tags: [grocy]
+      responses:
+        '200':
+          description: grocy products
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/GrocyProduct' }
+        '502': { description: grocy unreachable }
+        '503': { description: grocy not configured }
+
+  /grocy/stock:
+    get:
+      summary: List current Grocy stock lots (zero-amount lots excluded)
+      operationId: grocyListStock
+      tags: [grocy]
+      responses:
+        '200':
+          description: grocy stock lots
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/GrocyStockEntry' }
+        '502': { description: grocy unreachable }
+        '503': { description: grocy not configured }
+
+  /grocy/shopping-list:
+    get:
+      summary: List the Grocy shopping list
+      operationId: grocyListShoppingList
+      tags: [grocy]
+      responses:
+        '200':
+          description: grocy shopping list
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/GrocyShoppingItem' }
+        '502': { description: grocy unreachable }
+        '503': { description: grocy not configured }
+
+  /grocy/stock/add:
+    post:
+      summary: Add stock to a Grocy product
+      operationId: grocyAddStock
+      tags: [grocy]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [product_id, amount]
+              properties:
+                product_id: { type: integer }
+                amount: { type: number }
+                best_before: { type: string, description: YYYY-MM-DD, optional }
+      responses:
+        '200': { description: ok }
+        '400': { description: invalid body }
+        '502': { description: grocy unreachable }
+        '503': { description: grocy not configured }
+
+  /grocy/stock/consume:
+    post:
+      summary: Consume stock from a Grocy product
+      operationId: grocyConsumeStock
+      tags: [grocy]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [product_id, amount]
+              properties:
+                product_id: { type: integer }
+                amount: { type: number }
+      responses:
+        '200': { description: ok }
+        '400': { description: invalid body }
+        '502': { description: grocy unreachable }
+        '503': { description: grocy not configured }
+
+  /grocy/shopping-list/items:
+    post:
+      summary: Add a line to the Grocy shopping list (free-text when product_id is 0)
+      operationId: grocyAddShoppingItem
+      tags: [grocy]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount]
+              properties:
+                product_id: { type: integer, description: 0 for a free-text item }
+                note: { type: string }
+                amount: { type: number }
+      responses:
+        '200': { description: ok }
+        '400': { description: invalid body }
+        '502': { description: grocy unreachable }
+        '503': { description: grocy not configured }
+
+  /inspiration:
+    get:
+      summary: Suggest recipes ranked by how much of them is already in the pantry
+      operationId: suggestInspiration
+      tags: [inspiration]
+      responses:
+        '200':
+          description: recipes ranked by pantry coverage (most-matched first)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/InspirationSuggestion' }
+
+  /ingredient-aliases:
+    get:
+      summary: List a household's ingredient nicknames (including global aliases)
+      operationId: listIngredientAliases
+      tags: [ingredients]
+      parameters:
+        - name: householdId
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/IngredientAlias' }
+    post:
+      summary: Add (or re-assert) a nickname → canonical ingredient mapping
+      operationId: createIngredientAlias
+      tags: [ingredients]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IngredientAliasNew' }
+      responses:
+        '201':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IngredientAlias' }
+        '400': { description: alias or ingredient_id missing }
+
+  /ingredient-aliases/resolve/{alias}:
+    parameters:
+      - name: alias
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      summary: Resolve a nickname to its canonical ingredient id
+      operationId: resolveIngredientAlias
+      tags: [ingredients]
+      parameters:
+        - name: householdId
+          in: query
+          schema: { type: string }
+        - name: alias
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ingredient_id: { type: string }
+
+  /ingredient-aliases/{alias}:
+    parameters:
+      - name: alias
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      summary: Remove a nickname mapping
+      operationId: deleteIngredientAlias
+      tags: [ingredients]
+      parameters:
+        - name: householdId
+          in: query
+          schema: { type: string }
+        - name: alias
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: deleted }
+
+  /widgets/dashboard:
+    get:
+      summary: Aggregate dashboard (tonight's meal, pantry summary, expiring items) in one round-trip
+      operationId: getDashboard
+      tags: [widgets]
+      parameters:
+        - name: householdId
+          in: query
+          schema: { type: string }
+          description: household to build the dashboard for
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Dashboard' }
+
+  /pantry/expiring:
+    get:
+      summary: Lots whose best_before is within the window (already expired or expiring soon)
+      operationId: listExpiringLots
+      tags: [pantry]
+      parameters:
+        - name: withinHours
+          in: query
+          schema: { type: integer }
+          description: window in hours (default 168 = 7 days)
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PantryLot' }
+
 components:
   parameters:
     ShoppingListId:
@@ -737,6 +1262,13 @@ components:
         name: { type: string }
         weight: { type: number, format: double, default: 1.0, minimum: 0, exclusiveMinimum: true }
 
+    PersonUpdate:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        weight: { type: number, format: double, minimum: 0, exclusiveMinimum: true, description: 0/omitted leaves the existing weight unchanged }
+
     PersonPreference:
       type: object
       required: [person_id, tag, sentiment, confidence, updated_at]
@@ -746,6 +1278,15 @@ components:
         sentiment: { type: integer, minimum: -2, maximum: 2, description: -2 (strongly dislike) to 2 (love) }
         confidence: { type: number, format: double, minimum: 0, maximum: 1 }
         updated_at: { type: string, format: date-time }
+
+    PersonPreferenceNew:
+      type: object
+      required: [person_id, tag, sentiment, confidence]
+      properties:
+        person_id: { type: string }
+        tag: { type: string }
+        sentiment: { type: integer, minimum: -2, maximum: 2, description: -2 (strongly dislike) to 2 (love) }
+        confidence: { type: number, format: double, minimum: 0, maximum: 1 }
 
     RecipeRef:
       type: object
@@ -794,7 +1335,134 @@ components:
       properties:
         id: { type: string }
         retailer_id: { type: string }
+        retailer_name: { type: string }
         name: { type: string }
+        latitude: { type: number, nullable: true }
+        longitude: { type: number, nullable: true }
+        # Great-circle distance from the request origin in kilometres; null when
+        # the store has no position or no origin was supplied.
+        distance_km: { type: number, nullable: true }
+
+    # ── Grocy (self-hosted inventory/recipe integration) ──────────────────────
+    GrocyStatus:
+      type: object
+      required: [configured, reachable]
+      properties:
+        configured: { type: boolean }
+        reachable: { type: boolean }
+        version: { type: string }
+        base_url: { type: string }
+
+    GrocyProduct:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        barcode: { type: string }
+        location_id: { type: integer }
+        qu_id_stock: { type: integer }
+        qu_id_purchase: { type: integer }
+        min_stock_amount: { type: number }
+
+    GrocyStockEntry:
+      type: object
+      required: [id, product_id, product_name, amount, qu_id, location_id]
+      properties:
+        id: { type: integer }
+        product_id: { type: integer }
+        product_name: { type: string }
+        amount: { type: number }
+        qu_id: { type: integer }
+        location_id: { type: integer }
+        best_before: { type: string, description: YYYY-MM-DD, empty when unset }
+
+    GrocyShoppingItem:
+      type: object
+      required: [id, product_id, note, amount, qu_id, done]
+      properties:
+        id: { type: integer }
+        product_id: { type: integer, description: 0 for a free-text item }
+        note: { type: string }
+        amount: { type: number }
+        qu_id: { type: integer }
+        done: { type: boolean }
+
+    # ── Inspiration (what can I make from my pantry) ──────────────────────────
+    InspirationSuggestion:
+      type: object
+      required: [mealie_recipe_id, title, tags, effort, total_ingredients, matched_ingredient_ids, missing_ingredient_ids, match_ratio]
+      properties:
+        mealie_recipe_id: { type: string }
+        title: { type: string }
+        tags:
+          type: array
+          items: { type: string }
+        effort: { type: integer, minimum: 1, maximum: 3 }
+        total_ingredients: { type: integer }
+        matched_ingredient_ids:
+          type: array
+          items: { type: string }
+          description: recipe ingredients already in the pantry
+        missing_ingredient_ids:
+          type: array
+          items: { type: string }
+          description: recipe ingredients still needed
+        match_ratio: { type: number, format: double, minimum: 0, maximum: 1, description: 1 = fully cookable from pantry }
+
+    # ── Ingredient aliases (household nicknames) ──────────────────────────────
+    IngredientAlias:
+      type: object
+      required: [id, alias, ingredient_id, created_at]
+      properties:
+        id: { type: integer, format: int64 }
+        household_id: { type: string, nullable: true, description: empty/null = global alias }
+        alias: { type: string, description: normalized nickname, e.g. 'potatis' }
+        ingredient_id: { type: string }
+        created_at: { type: string, format: date-time }
+
+    IngredientAliasNew:
+      type: object
+      required: [alias, ingredient_id]
+      properties:
+        household_id: { type: string, description: empty = global alias }
+        alias: { type: string }
+        ingredient_id: { type: string }
+
+    # ── Dashboard / widgets ───────────────────────────────────────────────────
+    Dashboard:
+      type: object
+      required: [pantry, expiring]
+      properties:
+        tonight: { $ref: '#/components/schemas/DashboardTonight' }
+        pantry: { $ref: '#/components/schemas/DashboardPantry' }
+        expiring:
+          type: array
+          items: { $ref: '#/components/schemas/DashboardExpiringLot' }
+
+    DashboardTonight:
+      type: object
+      required: [served_on, recipe]
+      properties:
+        served_on: { type: string }
+        recipe: { $ref: '#/components/schemas/RecipeRef' }
+
+    DashboardPantry:
+      type: object
+      required: [locations, lots, expiring]
+      properties:
+        locations: { type: integer }
+        lots: { type: integer }
+        expiring: { type: integer }
+
+    DashboardExpiringLot:
+      type: object
+      required: [ingredient_id, quantity, unit]
+      properties:
+        ingredient_id: { type: string }
+        quantity: { type: number }
+        unit: { type: string }
+        best_before: { type: string, format: date-time, nullable: true }
 
     StoreOffer:
       type: object
@@ -979,6 +1647,17 @@ components:
         status: { type: string, enum: [accepted, failed], description: "accepted = queued, failed = error" }
         message: { type: string, description: human-readable result summary }
         week_start: { type: string, format: date, nullable: true, description: "Monday of the planned week" }
+    PlanProgress:
+      type: object
+      required: [phase, message, at]
+      description: >-
+        One SSE progress event for a running plan (POST /plans/run/stream). The
+        payload shape is intentionally minimal and not finalized until the
+        frontend's SSE consumer needs it (task 3.4).
+      properties:
+        phase: { type: string, enum: [started, planning, resolving, wishlist, done], description: "the phase the run has reached" }
+        message: { type: string, description: human-readable progress detail }
+        at: { type: string, format: date-time, description: "when the phase was reached" }
     ShoppingList:
       type: object
       required: [id, name, status, created_at]
@@ -1083,4 +1762,144 @@ components:
         unit_price: { type: number, nullable: true }
         total_price: { type: number, nullable: true }
         substituted_for_item_id: { type: integer, nullable: true }
+
+    # ── Recipe family (git-like dish hierarchy) ──────────────────────────────
+    RecipeFamily:
+      type: object
+      required: [id, name, archived, created_at]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        default_variant_id: { type: string, nullable: true }
+        archived: { type: boolean }
+        created_at: { type: string, format: date-time }
+
+    RecipeFamilyNew:
+      type: object
+      required: [name]
+      properties:
+        id: { type: string, description: slug; derived from name when omitted }
+        name: { type: string }
+        description: { type: string }
+
+    RecipeVariant:
+      type: object
+      required: [id, family_id, title, archived, created_at]
+      properties:
+        id: { type: string }
+        family_id: { type: string }
+        title: { type: string }
+        source_attribution: { type: string, nullable: true }
+        archived: { type: boolean }
+        created_at: { type: string, format: date-time }
+
+    RecipeVariantNew:
+      type: object
+      required: [title]
+      properties:
+        id: { type: string, description: slug; derived from title when omitted }
+        title: { type: string }
+        source_attribution: { type: string }
+
+    RecipeRevision:
+      type: object
+      required: [id, variant_id, ingredients, steps, created_at]
+      properties:
+        id: { type: integer }
+        variant_id: { type: string }
+        servings: { type: integer, nullable: true }
+        description: { type: string, nullable: true }
+        ingredients:
+          type: array
+          items: { $ref: '#/components/schemas/RecipeIngredient' }
+        steps:
+          type: array
+          items: { type: string }
+        parents:
+          type: array
+          items: { type: integer }
+        created_at: { type: string, format: date-time }
+
+    RecipeRevisionNew:
+      type: object
+      required: [ingredients, steps]
+      properties:
+        servings: { type: integer }
+        description: { type: string }
+        ingredients:
+          type: array
+          items: { $ref: '#/components/schemas/RecipeIngredient' }
+        steps:
+          type: array
+          items: { type: string }
+        parent_revision_id: { type: integer, nullable: true, description: derive from this revision }
+
+    RecipeIngredient:
+      type: object
+      required: [ingredient_id, quantity, unit]
+      properties:
+        ingredient_id: { type: string }
+        quantity: { type: number }
+        unit: { type: string }
+        raw_text: { type: string }
+        acceptable_forms:
+          type: array
+          items: { type: string }
+        preferred_form: { type: string }
+
+    # ── Favorites / ratings ───────────────────────────────────────────────────
+    Favorite:
+      type: object
+      required: [id, mealie_recipe_id, created_at]
+      properties:
+        id: { type: integer }
+        person_id: { type: string, nullable: true }
+        household_id: { type: string, nullable: true }
+        mealie_recipe_id: { type: string }
+        created_at: { type: string, format: date-time }
+
+    FavoriteNew:
+      type: object
+      properties:
+        person_id: { type: string, description: set exactly one of person_id / household_id }
+        household_id: { type: string }
+
+    RecipeRating:
+      type: object
+      required: [mealie_recipe_id, average, review_count]
+      properties:
+        mealie_recipe_id: { type: string }
+        average: { type: number }
+        review_count: { type: integer }
+
+    # ── Price intelligence ────────────────────────────────────────────────────
+    ProductPriceGroup:
+      type: object
+      required: [retailer_product_id, retailer_id, prices]
+      properties:
+        retailer_product_id: { type: string }
+        product_id: { type: string, nullable: true }
+        display_name: { type: string, nullable: true }
+        retailer_id: { type: string }
+        retailer_name: { type: string }
+        prices:
+          type: array
+          items: { $ref: '#/components/schemas/StorePrice' }
+        cheapest: { $ref: '#/components/schemas/StorePrice' }
+
+    StorePrice:
+      type: object
+      required: [store_id, retailer_id, price_kind, price, observed_at, source]
+      properties:
+        store_id: { type: string }
+        store_name: { type: string }
+        retailer_id: { type: string }
+        retailer_name: { type: string }
+        price_kind: { type: string, enum: [regular, member, campaign] }
+        price: { type: number }
+        observed_at: { type: string, format: date-time }
+        source: { type: string }
+
+
 

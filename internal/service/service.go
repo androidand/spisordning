@@ -23,6 +23,7 @@ import (
 // making unit testing possible with a fake implementation.
 type Store interface {
 	CreatePerson(ctx context.Context, p persistence.Person) error
+	UpdatePerson(ctx context.Context, p persistence.Person) error
 	GetPerson(ctx context.Context, id string) (persistence.Person, error)
 	ListPeople(ctx context.Context) ([]persistence.Person, error)
 	UpsertPreference(ctx context.Context, p persistence.PersonPreference) error
@@ -56,8 +57,35 @@ type Store interface {
 	GetMealEvent(ctx context.Context, id int64) (persistence.MealEvent, error)
 	ListMealPlans(ctx context.Context) ([]persistence.MealPlan, error)
 	GetIngredientMapping(ctx context.Context, mealieFoodID string) (persistence.IngredientMapping, error)
+	UpsertIngredientAlias(ctx context.Context, a persistence.IngredientAlias) error
+	GetIngredientAlias(ctx context.Context, householdID, alias string) (persistence.IngredientAlias, error)
+	ListIngredientAliases(ctx context.Context, householdID string) ([]persistence.IngredientAlias, error)
+	DeleteIngredientAlias(ctx context.Context, householdID, alias string) error
+	ResolveIngredientAlias(ctx context.Context, householdID, alias string) (string, error)
 	ListAllStores(ctx context.Context) ([]domain.Store, error)
 	ListStoreProductOffers(ctx context.Context, storeID string) ([]domain.StoreProductOffer, error)
+	CreateRecipeFamily(ctx context.Context, f persistence.RecipeFamily) error
+	GetRecipeFamily(ctx context.Context, id string) (persistence.RecipeFamily, error)
+	ListRecipeFamilies(ctx context.Context) ([]persistence.RecipeFamily, error)
+	SetRecipeFamilyDefaultVariant(ctx context.Context, familyID, variantID string) error
+	CreateRecipeVariant(ctx context.Context, v persistence.RecipeVariant) error
+	GetRecipeVariant(ctx context.Context, id string) (persistence.RecipeVariant, error)
+	ListRecipeVariants(ctx context.Context, familyID string) ([]persistence.RecipeVariant, error)
+	CreateRecipeRevision(ctx context.Context, r persistence.RecipeRevision) (int64, error)
+	GetRecipeRevision(ctx context.Context, id int64) (persistence.RecipeRevision, error)
+	ListRecipeRevisions(ctx context.Context, variantID string) ([]persistence.RecipeRevision, error)
+	AddRecipeRevisionParent(ctx context.Context, child, parent int64) error
+	ListRecipeRevisionParents(ctx context.Context, revisionID int64) ([]int64, error)
+	UpsertFavorite(ctx context.Context, personID, householdID, mealieRecipeID string) error
+	DeleteFavorite(ctx context.Context, personID, householdID, mealieRecipeID string) error
+	ListFavoritesForRecipe(ctx context.Context, mealieRecipeID string) ([]persistence.Favorite, error)
+	GetRecipeRating(ctx context.Context, mealieRecipeID string) (persistence.RecipeRating, error)
+	ListRetailers(ctx context.Context) ([]domain.Retailer, error)
+	ListRetailerProducts(ctx context.Context, retailerID string) ([]domain.RetailerProduct, error)
+	ListCurrentPrices(ctx context.Context) ([]domain.CurrentStoreProductPrice, error)
+	ListExpiringLots(ctx context.Context, within time.Duration) ([]persistence.InventoryLot, error)
+	ListPantryIngredientIDs(ctx context.Context) ([]string, error)
+	ListAllRecipeIngredients(ctx context.Context) ([]persistence.RecipeIngredient, error)
 }
 
 // txConn is the minimal transaction surface the Meals service needs.
@@ -118,6 +146,19 @@ func (s *People) CreatePerson(ctx context.Context, in dto.PersonInput) (dto.Pers
 	}, nil
 }
 
+func (s *People) UpdatePerson(ctx context.Context, id string, in dto.PersonUpdate) (dto.PersonResponse, error) {
+	if in.Name == "" {
+		return dto.PersonResponse{}, fmt.Errorf("service: update person: name is required")
+	}
+	if err := s.db.UpdatePerson(ctx, persistence.Person{ID: id, Name: in.Name, Weight: in.Weight}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return dto.PersonResponse{}, fmt.Errorf("%w: person %s not found", dto.ErrNotFound, id)
+		}
+		return dto.PersonResponse{}, fmt.Errorf("service: update person: %w", err)
+	}
+	return s.GetPerson(ctx, id)
+}
+
 // Preferences implements the PreferencesService interface defined in dto.
 type Preferences struct{ db Store }
 
@@ -137,6 +178,38 @@ func (s *Preferences) ListPreferences(ctx context.Context, personID string) ([]d
 		})
 	}
 	return out, nil
+}
+
+// SetPreference validates and upserts a (person, tag) preference.
+func (s *Preferences) SetPreference(ctx context.Context, in dto.SetPreferenceInput) (dto.PersonPreferenceResponse, error) {
+	if in.PersonID == "" || in.Tag == "" {
+		return dto.PersonPreferenceResponse{}, fmt.Errorf("%w: person_id and tag are required", dto.ErrInvalidPreference)
+	}
+	if in.Sentiment < -2 || in.Sentiment > 2 {
+		return dto.PersonPreferenceResponse{}, fmt.Errorf("%w: sentiment must be in [-2, 2]", dto.ErrInvalidPreference)
+	}
+	if in.Confidence < 0 || in.Confidence > 1 {
+		return dto.PersonPreferenceResponse{}, fmt.Errorf("%w: confidence must be in [0, 1]", dto.ErrInvalidPreference)
+	}
+	if err := s.db.UpsertPreference(ctx, persistence.PersonPreference{
+		PersonID: in.PersonID, Tag: in.Tag, Sentiment: in.Sentiment, Confidence: in.Confidence,
+	}); err != nil {
+		return dto.PersonPreferenceResponse{}, fmt.Errorf("service: set preference: %w", err)
+	}
+	// Re-read to return the authoritative row (with the server-set updated_at).
+	prefs, err := s.db.ListPreferences(ctx, in.PersonID)
+	if err != nil {
+		return dto.PersonPreferenceResponse{}, fmt.Errorf("service: set preference: %w", err)
+	}
+	for _, p := range prefs {
+		if p.Tag == in.Tag {
+			return dto.PersonPreferenceResponse{
+				PersonID: p.PersonID, Tag: p.Tag, Sentiment: int(p.Sentiment),
+				Confidence: p.Confidence, UpdatedAt: p.UpdatedAt,
+			}, nil
+		}
+	}
+	return dto.PersonPreferenceResponse{}, fmt.Errorf("service: set preference: row not found after upsert")
 }
 
 // Recipes implements the RecipesService interface defined in dto.

@@ -22,6 +22,13 @@ type PersonInput struct {
 	Weight float64 `json:"weight"`
 }
 
+// PersonUpdate is the body for PATCH /people/{id} (openapi: components/schemas/PersonUpdate).
+// Name is required; Weight is optional (0 leaves the existing weight unchanged).
+type PersonUpdate struct {
+	Name   string  `json:"name"`
+	Weight float64 `json:"weight"`
+}
+
 // PersonService is the subset of the application surface the /people handlers
 // need. It is defined here (not imported from persistence) so the httpapi layer
 // stays dependency-free of the persistence layer — the architecture test forbids
@@ -31,4 +38,5 @@ type PersonService interface {
 	ListPeople(ctx context.Context) ([]PersonResponse, error)
 	GetPerson(ctx context.Context, id string) (PersonResponse, error)
 	CreatePerson(ctx context.Context, in PersonInput) (PersonResponse, error)
+	UpdatePerson(ctx context.Context, id string, in PersonUpdate) (PersonResponse, error)
 }

@@ -10,7 +10,7 @@ import (
 // RetailerOrder is the fixed order retailers appear in each ItemComparison's
 // Results. Keeping it a named var lets callers and tests rely on a stable
 // ordering.
-var RetailerOrder = []RetailerKind{RetailerWillys, RetailerICA}
+var RetailerOrder = []RetailerKind{RetailerWillys, RetailerICA, RetailerHemkop}
 
 // RetailerResult is one retailer's outcome for a single requirement.
 type RetailerResult struct {
@@ -60,7 +60,7 @@ func Compare(
 	ctx context.Context,
 	reqs []domain.ShoppingRequirement,
 	terms SearchTerms,
-	willysURL, icaURL string,
+	willysURL, icaURL, hemkopURL string,
 ) *Comparison {
 	// Resolve all requirements against each retailer in a single call, in
 	// parallel. A retailer whose call errors (e.g. a stale ICA session)
@@ -75,7 +75,7 @@ func Compare(
 		wg.Add(1)
 		go func(pos int, kind RetailerKind) {
 			defer wg.Done()
-			c, err := NewFromKind(kind, willysURL, icaURL)
+			c, err := NewFromKind(kind, willysURL, icaURL, hemkopURL)
 			if err != nil {
 				errByKind[pos] = err
 				return

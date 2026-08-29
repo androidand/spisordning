@@ -21,18 +21,31 @@ import (
 
 // fakeStore is a minimal in-memory Store for unit testing.
 type fakeStore struct {
-	people    map[string]persistence.Person
-	prefs     []persistence.PersonPreference
-	recipes   []persistence.RecipeRef
-	plans     map[int64]persistence.MealPlan
-	lots      []persistence.InventoryLot
-	locations map[string]persistence.InventoryLocation
-	stores    []domain.Store
-	offers    []domain.StoreProductOffer
+	people            map[string]persistence.Person
+	prefs             []persistence.PersonPreference
+	recipes           []persistence.RecipeRef
+	plans             map[int64]persistence.MealPlan
+	lots              []persistence.InventoryLot
+	locations         map[string]persistence.InventoryLocation
+	stores            []domain.Store
+	offers            []domain.StoreProductOffer
+	recipeIngredients []persistence.RecipeIngredient
 }
 
 func (f *fakeStore) CreatePerson(ctx context.Context, p persistence.Person) error {
 	f.people[p.ID] = p
+	return nil
+}
+func (f *fakeStore) UpdatePerson(ctx context.Context, p persistence.Person) error {
+	existing, ok := f.people[p.ID]
+	if !ok {
+		return pgx.ErrNoRows
+	}
+	if p.Weight > 0 {
+		existing.Weight = p.Weight
+	}
+	existing.Name = p.Name
+	f.people[p.ID] = existing
 	return nil
 }
 func (f *fakeStore) GetPerson(ctx context.Context, id string) (persistence.Person, error) {
@@ -49,7 +62,17 @@ func (f *fakeStore) ListPeople(ctx context.Context) ([]persistence.Person, error
 	}
 	return out, nil
 }
-func (f *fakeStore) UpsertPreference(ctx context.Context, p persistence.PersonPreference) error { return nil }
+func (f *fakeStore) UpsertPreference(ctx context.Context, p persistence.PersonPreference) error {
+	p.UpdatedAt = time.Now()
+	for i, existing := range f.prefs {
+		if existing.PersonID == p.PersonID && existing.Tag == p.Tag {
+			f.prefs[i] = p
+			return nil
+		}
+	}
+	f.prefs = append(f.prefs, p)
+	return nil
+}
 func (f *fakeStore) ListPreferences(ctx context.Context, personID string) ([]persistence.PersonPreference, error) {
 	out := make([]persistence.PersonPreference, 0, len(f.prefs))
 	for _, p := range f.prefs {
@@ -62,6 +85,31 @@ func (f *fakeStore) ListPreferences(ctx context.Context, personID string) ([]per
 }
 func (f *fakeStore) ListAllStores(ctx context.Context) ([]domain.Store, error) {
 	return f.stores, nil
+}
+func (f *fakeStore) ListPantryIngredientIDs(ctx context.Context) ([]string, error) {
+	seen := make(map[string]bool)
+	var out []string
+	for _, lot := range f.lots {
+		if lot.Quantity > 0 && !seen[lot.IngredientID] {
+			seen[lot.IngredientID] = true
+			out = append(out, lot.IngredientID)
+		}
+	}
+	return out, nil
+}
+func (f *fakeStore) ListAllRecipeIngredients(ctx context.Context) ([]persistence.RecipeIngredient, error) {
+	return f.recipeIngredients, nil
+}
+func (f *fakeStore) UpsertIngredientAlias(ctx context.Context, a persistence.IngredientAlias) error { return nil }
+func (f *fakeStore) GetIngredientAlias(ctx context.Context, householdID, alias string) (persistence.IngredientAlias, error) {
+	return persistence.IngredientAlias{}, pgx.ErrNoRows
+}
+func (f *fakeStore) ListIngredientAliases(ctx context.Context, householdID string) ([]persistence.IngredientAlias, error) {
+	return []persistence.IngredientAlias{}, nil
+}
+func (f *fakeStore) DeleteIngredientAlias(ctx context.Context, householdID, alias string) error { return nil }
+func (f *fakeStore) ResolveIngredientAlias(ctx context.Context, householdID, alias string) (string, error) {
+	return "", nil
 }
 func (f *fakeStore) ListStoreProductOffers(ctx context.Context, storeID string) ([]domain.StoreProductOffer, error) {
 	out := make([]domain.StoreProductOffer, 0, len(f.offers))
@@ -206,6 +254,65 @@ func (f *fakeStore) ListMealPlans(ctx context.Context) ([]persistence.MealPlan, 
 	}
 	return out, nil
 }
+func (f *fakeStore) CreateRecipeFamily(ctx context.Context, fam persistence.RecipeFamily) error { return nil }
+func (f *fakeStore) GetRecipeFamily(ctx context.Context, id string) (persistence.RecipeFamily, error) {
+	return persistence.RecipeFamily{}, pgx.ErrNoRows
+}
+func (f *fakeStore) ListRecipeFamilies(ctx context.Context) ([]persistence.RecipeFamily, error) {
+	return nil, nil
+}
+func (f *fakeStore) SetRecipeFamilyDefaultVariant(ctx context.Context, familyID, variantID string) error {
+	return nil
+}
+func (f *fakeStore) CreateRecipeVariant(ctx context.Context, v persistence.RecipeVariant) error { return nil }
+func (f *fakeStore) GetRecipeVariant(ctx context.Context, id string) (persistence.RecipeVariant, error) {
+	return persistence.RecipeVariant{}, pgx.ErrNoRows
+}
+func (f *fakeStore) ListRecipeVariants(ctx context.Context, familyID string) ([]persistence.RecipeVariant, error) {
+	return nil, nil
+}
+func (f *fakeStore) CreateRecipeRevision(ctx context.Context, r persistence.RecipeRevision) (int64, error) {
+	return 1, nil
+}
+func (f *fakeStore) GetRecipeRevision(ctx context.Context, id int64) (persistence.RecipeRevision, error) {
+	return persistence.RecipeRevision{}, pgx.ErrNoRows
+}
+func (f *fakeStore) ListRecipeRevisions(ctx context.Context, variantID string) ([]persistence.RecipeRevision, error) {
+	return nil, nil
+}
+func (f *fakeStore) AddRecipeRevisionParent(ctx context.Context, child, parent int64) error { return nil }
+func (f *fakeStore) ListRecipeRevisionParents(ctx context.Context, revisionID int64) ([]int64, error) {
+	return nil, nil
+}
+func (f *fakeStore) UpsertFavorite(ctx context.Context, personID, householdID, mealieRecipeID string) error {
+	return nil
+}
+func (f *fakeStore) DeleteFavorite(ctx context.Context, personID, householdID, mealieRecipeID string) error {
+	return nil
+}
+func (f *fakeStore) ListFavoritesForRecipe(ctx context.Context, mealieRecipeID string) ([]persistence.Favorite, error) {
+	return nil, nil
+}
+func (f *fakeStore) GetRecipeRating(ctx context.Context, mealieRecipeID string) (persistence.RecipeRating, error) {
+	return persistence.RecipeRating{MealieRecipeID: mealieRecipeID, Average: 4.2, ReviewCount: 3}, nil
+}
+func (f *fakeStore) ListRetailers(ctx context.Context) ([]domain.Retailer, error) {
+	return []domain.Retailer{{ID: "willys", Name: "Willys"}}, nil
+}
+func (f *fakeStore) ListRetailerProducts(ctx context.Context, retailerID string) ([]domain.RetailerProduct, error) {
+	return []domain.RetailerProduct{{ID: "rp-1", RetailerID: retailerID, ProductID: "prod-1", DisplayName: "Mjölk 3%"}}, nil
+}
+func (f *fakeStore) ListCurrentPrices(ctx context.Context) ([]domain.CurrentStoreProductPrice, error) {
+	return []domain.CurrentStoreProductPrice{
+		{OfferID: 1, StoreID: "s-1", RetailerProductID: "rp-1", PriceKind: domain.PriceKindRegular, Price: 19.9, ObservedAt: time.Now(), Source: "willys_adapter"},
+		{OfferID: 2, StoreID: "s-2", RetailerProductID: "rp-1", PriceKind: domain.PriceKindRegular, Price: 17.5, ObservedAt: time.Now(), Source: "willys_adapter"},
+	}, nil
+}
+func (f *fakeStore) ListExpiringLots(ctx context.Context, within time.Duration) ([]persistence.InventoryLot, error) {
+	return []persistence.InventoryLot{
+		{ID: 1, IngredientID: "mjolk", LocationID: "l-1", Quantity: 1, Unit: "L", Confidence: domain.ConfidenceExact, BestBefore: &[]time.Time{time.Now().Add(24 * time.Hour)}[0]},
+	}, nil
+}
 
 // fakeTx is a minimal no-op pgx.Tx for tests.
 type fakeTx struct{}
@@ -276,6 +383,38 @@ func TestPeopleCreate(t *testing.T) {
 	}
 }
 
+func TestPeopleUpdate(t *testing.T) {
+	f := &fakeStore{people: map[string]persistence.Person{
+		"p1": {ID: "p1", Name: "Old", Weight: 1.0, CreatedAt: time.Now()},
+	}}
+	svc := service.NewPeople(f)
+	out, err := svc.UpdatePerson(context.Background(), "p1", dto.PersonUpdate{Name: "New", Weight: 2.0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Name != "New" || out.Weight != 2.0 {
+		t.Fatalf("unexpected person: %+v", out)
+	}
+}
+
+func TestPeopleUpdate_NotFound(t *testing.T) {
+	f := &fakeStore{people: make(map[string]persistence.Person)}
+	svc := service.NewPeople(f)
+	_, err := svc.UpdatePerson(context.Background(), "missing", dto.PersonUpdate{Name: "New"})
+	if !errors.Is(err, dto.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestPeopleUpdate_RequiresName(t *testing.T) {
+	f := &fakeStore{people: make(map[string]persistence.Person)}
+	svc := service.NewPeople(f)
+	_, err := svc.UpdatePerson(context.Background(), "p1", dto.PersonUpdate{})
+	if err == nil {
+		t.Fatal("expected error for empty name")
+	}
+}
+
 func TestPreferencesList(t *testing.T) {
 	f := &fakeStore{prefs: []persistence.PersonPreference{
 		{PersonID: "p1", Tag: "spicy", Sentiment: 1, Confidence: 0.8, UpdatedAt: time.Now()},
@@ -290,6 +429,66 @@ func TestPreferencesList(t *testing.T) {
 	}
 	if out[0].Tag != "spicy" {
 		t.Fatalf("expected spicy, got %s", out[0].Tag)
+	}
+}
+
+func TestSetPreference_HappyPath(t *testing.T) {
+	f := &fakeStore{}
+	svc := service.NewPreferences(f)
+	out, err := svc.SetPreference(context.Background(), dto.SetPreferenceInput{
+		PersonID: "p1", Tag: "spicy", Sentiment: 2, Confidence: 0.9,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Tag != "spicy" || out.Sentiment != 2 || out.Confidence != 0.9 {
+		t.Fatalf("unexpected pref: %+v", out)
+	}
+	if len(f.prefs) != 1 {
+		t.Fatalf("expected 1 stored pref, got %d", len(f.prefs))
+	}
+}
+
+func TestSetPreference_UpdatesExisting(t *testing.T) {
+	f := &fakeStore{prefs: []persistence.PersonPreference{
+		{PersonID: "p1", Tag: "spicy", Sentiment: 1, Confidence: 0.5, UpdatedAt: time.Now()},
+	}}
+	svc := service.NewPreferences(f)
+	out, err := svc.SetPreference(context.Background(), dto.SetPreferenceInput{
+		PersonID: "p1", Tag: "spicy", Sentiment: -1, Confidence: 0.7,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Sentiment != -1 {
+		t.Fatalf("expected updated sentiment -1, got %d", out.Sentiment)
+	}
+	if len(f.prefs) != 1 {
+		t.Fatalf("expected still 1 pref (upsert), got %d", len(f.prefs))
+	}
+}
+
+func TestSetPreference_Invalid(t *testing.T) {
+	f := &fakeStore{}
+	svc := service.NewPreferences(f)
+	cases := []struct {
+		name string
+		in   dto.SetPreferenceInput
+	}{
+		{"missing person", dto.SetPreferenceInput{Tag: "spicy", Sentiment: 1, Confidence: 0.5}},
+		{"missing tag", dto.SetPreferenceInput{PersonID: "p1", Sentiment: 1, Confidence: 0.5}},
+		{"sentiment too high", dto.SetPreferenceInput{PersonID: "p1", Tag: "spicy", Sentiment: 3, Confidence: 0.5}},
+		{"sentiment too low", dto.SetPreferenceInput{PersonID: "p1", Tag: "spicy", Sentiment: -3, Confidence: 0.5}},
+		{"confidence too high", dto.SetPreferenceInput{PersonID: "p1", Tag: "spicy", Sentiment: 1, Confidence: 1.5}},
+		{"confidence negative", dto.SetPreferenceInput{PersonID: "p1", Tag: "spicy", Sentiment: 1, Confidence: -0.1}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := svc.SetPreference(context.Background(), tc.in)
+			if !errors.Is(err, dto.ErrInvalidPreference) {
+				t.Fatalf("expected ErrInvalidPreference, got %v", err)
+			}
+		})
 	}
 }
 
@@ -615,5 +814,383 @@ func TestStoresSearchProductsNoClient(t *testing.T) {
 	}
 	if _, err := svc.SearchProductsByGTIN(context.Background(), "123"); err == nil {
 		t.Fatal("expected error when MPK client is nil")
+	}
+}
+
+func TestRecipeFamilyGetNotFound(t *testing.T) {
+	svc := service.NewRecipeFamily(&fakeStore{})
+	if _, err := svc.GetFamily(context.Background(), "missing"); !errors.Is(err, dto.ErrNotFound) {
+		t.Fatalf("expected dto.ErrNotFound, got %v", err)
+	}
+	if _, err := svc.ListVariants(context.Background(), "missing"); !errors.Is(err, dto.ErrNotFound) {
+		t.Fatalf("expected dto.ErrNotFound, got %v", err)
+	}
+	if _, err := svc.ListRevisions(context.Background(), "missing"); !errors.Is(err, dto.ErrNotFound) {
+		t.Fatalf("expected dto.ErrNotFound, got %v", err)
+	}
+	if _, err := svc.GetRevision(context.Background(), 99); !errors.Is(err, dto.ErrNotFound) {
+		t.Fatalf("expected dto.ErrNotFound, got %v", err)
+	}
+}
+
+func TestRecipeFamilySetDefaultVariantWrongFamily(t *testing.T) {
+	// fakeStore returns pgx.ErrNoRows for GetRecipeFamily, so the family lookup
+	// fails first and maps to ErrNotFound.
+	svc := service.NewRecipeFamily(&fakeStore{})
+	if err := svc.SetDefaultVariant(context.Background(), "fam", "var"); !errors.Is(err, dto.ErrNotFound) {
+		t.Fatalf("expected dto.ErrNotFound, got %v", err)
+	}
+}
+
+// TestRecipeFamilyCreateFamilySlug exercises slugify indirectly: when no ID is
+// supplied, CreateFamily derives one from the name via slugify.
+func TestRecipeFamilyCreateFamilySlug(t *testing.T) {
+	svc := service.NewRecipeFamily(&fakeStore{})
+	out, err := svc.CreateFamily(context.Background(), dto.CreateRecipeFamilyInput{
+		Name: "Korvstroganoff",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.ID != "korvstroganoff" {
+		t.Fatalf("expected slug id korvstroganoff, got %q", out.ID)
+	}
+	if out.Name != "Korvstroganoff" {
+		t.Fatalf("expected name Korvstroganoff, got %q", out.Name)
+	}
+}
+
+func TestRecipeFamilyCreateFamilyRequiresName(t *testing.T) {
+	svc := service.NewRecipeFamily(&fakeStore{})
+	if _, err := svc.CreateFamily(context.Background(), dto.CreateRecipeFamilyInput{ID: "x"}); err == nil {
+		t.Fatal("expected error when name is empty")
+	}
+}
+
+func TestFavoritesGetRecipeRating(t *testing.T) {
+	svc := service.NewFavorites(&fakeStore{})
+	out, err := svc.GetRecipeRating(context.Background(), "rec-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.MealieRecipeID != "rec-1" || out.Average != 4.2 || out.ReviewCount != 3 {
+		t.Fatalf("unexpected rating: %+v", out)
+	}
+}
+
+func TestFavoritesListEmpty(t *testing.T) {
+	svc := service.NewFavorites(&fakeStore{})
+	out, err := svc.ListFavoritesForRecipe(context.Background(), "rec-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 0 {
+		t.Fatalf("expected no favorites, got %d", len(out))
+	}
+}
+
+func TestPantryListExpiring(t *testing.T) {
+	svc := service.NewPantry(&fakeStore{})
+	out, err := svc.ListExpiring(context.Background(), 7*24*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("expected 1 expiring lot, got %d", len(out))
+	}
+	if out[0].IngredientID != "mjolk" || out[0].Quantity != 1 {
+		t.Fatalf("unexpected expiring lot: %+v", out[0])
+	}
+	if out[0].BestBefore.IsZero() {
+		t.Fatal("expected a non-zero best_before")
+	}
+}
+
+func TestPriceIntelligenceCheapestStore(t *testing.T) {
+	svc := service.NewPriceIntelligence(&fakeStore{})
+	out, err := svc.ListProductPrices(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("expected 1 product group, got %d", len(out))
+	}
+	g := out[0]
+	if g.RetailerProductID != "rp-1" {
+		t.Fatalf("expected rp-1, got %q", g.RetailerProductID)
+	}
+	if len(g.Prices) != 2 {
+		t.Fatalf("expected 2 prices, got %d", len(g.Prices))
+	}
+	if g.Cheapest == nil {
+		t.Fatal("expected a cheapest store")
+	}
+	if g.Cheapest.StoreID != "s-2" || g.Cheapest.Price != 17.5 {
+		t.Fatalf("expected cheapest s-2 @ 17.5, got %+v", g.Cheapest)
+	}
+	if g.RetailerName != "Willys" {
+		t.Fatalf("expected retailer name Willys, got %q", g.RetailerName)
+	}
+	if g.DisplayName != "Mjölk 3%" {
+		t.Fatalf("expected display name Mjölk 3%%, got %q", g.DisplayName)
+	}
+}
+
+func TestStoresLocateRanksByDistance(t *testing.T) {
+	// Origin: Stockholm city centre (59.3293, 18.0686).
+	// s-near is ~1 km away, s-far is ~100 km away, s-nogeo has no position.
+	f := &fakeStore{
+		stores: []domain.Store{
+			{ID: "s-far", RetailerID: "willys", Name: "Far Store",
+				Latitude: ptr64(59.8587), Longitude: ptr64(17.6389)},
+			{ID: "s-near", RetailerID: "willys", Name: "Near Store",
+				Latitude: ptr64(59.3345), Longitude: ptr64(18.0720)},
+			{ID: "s-nogeo", RetailerID: "willys", Name: "No Geo Store"},
+		},
+	}
+	svc := service.NewStores(f, nil)
+	out, err := svc.LocateStores(context.Background(), dto.LocateStoresInput{
+		Latitude:  ptr64(59.3293),
+		Longitude: ptr64(18.0686),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 3 {
+		t.Fatalf("expected 3 stores, got %d", len(out))
+	}
+	// Nearest first; geo-less store last.
+	if out[0].ID != "s-near" {
+		t.Fatalf("expected s-near first, got %q", out[0].ID)
+	}
+	if out[2].ID != "s-nogeo" {
+		t.Fatalf("expected s-nogeo last, got %q", out[2].ID)
+	}
+	if out[0].DistanceKm == nil {
+		t.Fatal("expected s-near to have a distance")
+	}
+	if *out[0].DistanceKm > 5 {
+		t.Fatalf("expected s-near within 5 km, got %.2f", *out[0].DistanceKm)
+	}
+	if out[2].DistanceKm != nil {
+		t.Fatal("expected s-nogeo to have no distance")
+	}
+	if out[0].RetailerName != "Willys" {
+		t.Fatalf("expected retailer name Willys, got %q", out[0].RetailerName)
+	}
+}
+
+func TestStoresLocateNoOriginSortsByName(t *testing.T) {
+	f := &fakeStore{
+		stores: []domain.Store{
+			{ID: "s-b", RetailerID: "willys", Name: "Beta"},
+			{ID: "s-a", RetailerID: "willys", Name: "Alpha"},
+		},
+	}
+	svc := service.NewStores(f, nil)
+	out, err := svc.LocateStores(context.Background(), dto.LocateStoresInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("expected 2 stores, got %d", len(out))
+	}
+	if out[0].ID != "s-a" || out[1].ID != "s-b" {
+		t.Fatalf("expected Alpha then Beta, got %q then %q", out[0].ID, out[1].ID)
+	}
+	if out[0].DistanceKm != nil {
+		t.Fatal("expected no distance without an origin")
+	}
+}
+
+func ptr64(v float64) *float64 { return &v }
+
+// fakeTonightProvider is a service.TonightProvider for dashboard tests.
+type fakeTonightProvider struct {
+	view dto.TonightView
+	err  error
+}
+
+func (f *fakeTonightProvider) GetTonight(ctx context.Context) (dto.TonightView, error) {
+	return f.view, f.err
+}
+
+// fakePantryProvider is a service.PantryProvider for dashboard tests.
+type fakePantryProvider struct {
+	locations []dto.PantryLocation
+	expiring  []dto.PantryLot
+	err       error
+}
+
+func (f *fakePantryProvider) ListLocations(ctx context.Context, householdID string) ([]dto.PantryLocation, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.locations, nil
+}
+
+func (f *fakePantryProvider) ListExpiring(ctx context.Context, within time.Duration) ([]dto.PantryLot, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.expiring, nil
+}
+
+func TestDashboardAggregatesTonightAndPantry(t *testing.T) {
+	// One location with two lots (counted via the db fakeStore), one expiring.
+	db := &fakeStore{}
+	db.lots = []persistence.InventoryLot{
+		{ID: 1, IngredientID: "mjolk", LocationID: "l-1", Quantity: 1, Unit: "L"},
+		{ID: 2, IngredientID: "ost", LocationID: "l-1", Quantity: 2, Unit: "st"},
+	}
+	tonight := &fakeTonightProvider{view: dto.TonightView{
+		ServedOn: "2026-08-28",
+		Recipe:   dto.RecipeRefResponse{MealieRecipeID: "r-1", Title: "Pasta"},
+	}}
+	pantry := &fakePantryProvider{
+		locations: []dto.PantryLocation{{ID: "l-1", Name: "Fridge"}},
+		expiring: []dto.PantryLot{
+			{ID: 1, IngredientID: "mjolk", Quantity: 1, Unit: "L", BestBefore: time.Now().Add(24 * time.Hour)},
+		},
+	}
+	svc := service.NewDashboard(db, tonight, pantry)
+	out, err := svc.Get(context.Background(), "household-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Tonight == nil || out.Tonight.Recipe.Title != "Pasta" {
+		t.Fatalf("expected tonight Pasta, got %+v", out.Tonight)
+	}
+	if out.Pantry.Locations != 1 {
+		t.Fatalf("expected 1 location, got %d", out.Pantry.Locations)
+	}
+	if out.Pantry.Lots != 2 {
+		t.Fatalf("expected 2 lots, got %d", out.Pantry.Lots)
+	}
+	if out.Pantry.Expiring != 1 {
+		t.Fatalf("expected 1 expiring, got %d", out.Pantry.Expiring)
+	}
+	if len(out.Expiring) != 1 || out.Expiring[0].IngredientID != "mjolk" {
+		t.Fatalf("expected expiring mjolk, got %+v", out.Expiring)
+	}
+}
+
+func TestDashboardNoMealTonightLeavesTonightNil(t *testing.T) {
+	db := &fakeStore{}
+	tonight := &fakeTonightProvider{err: dto.ErrNoMealTonight}
+	pantry := &fakePantryProvider{}
+	svc := service.NewDashboard(db, tonight, pantry)
+	out, err := svc.Get(context.Background(), "household-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Tonight != nil {
+		t.Fatalf("expected nil tonight, got %+v", out.Tonight)
+	}
+}
+
+func TestIngredientAliasCreateRequiresFields(t *testing.T) {
+	svc := service.NewIngredientAlias(&fakeStore{})
+	if _, err := svc.Create(context.Background(), dto.IngredientAliasNew{Alias: "", IngredientID: "potato"}); err == nil {
+		t.Fatal("expected error for empty alias")
+	}
+	if _, err := svc.Create(context.Background(), dto.IngredientAliasNew{Alias: "potatis", IngredientID: ""}); err == nil {
+		t.Fatal("expected error for empty ingredient_id")
+	}
+}
+
+func TestIngredientAliasResolve(t *testing.T) {
+	svc := service.NewIngredientAlias(&fakeStore{})
+	id, err := svc.Resolve(context.Background(), "h-1", "potatis")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != "" {
+		t.Fatalf("expected empty resolve for unknown alias, got %q", id)
+	}
+}
+
+func TestInspirationSuggest_RanksByPantryCoverage(t *testing.T) {
+	f := &fakeStore{
+		recipes: []persistence.RecipeRef{
+			{MealieRecipeID: "r1", Title: "Pasta", Tags: []string{"italian"}, Effort: 1},
+			{MealieRecipeID: "r2", Title: "Salad", Effort: 1},
+		},
+		lots: []persistence.InventoryLot{
+			{ID: 1, IngredientID: "flour", Quantity: 500, Unit: "g"},
+			{ID: 2, IngredientID: "tomato", Quantity: 3, Unit: "pcs"},
+			{ID: 3, IngredientID: "lettuce", Quantity: 1, Unit: "head"},
+		},
+		recipeIngredients: []persistence.RecipeIngredient{
+			// r1 (Pasta): flour + tomato + sugar → 2/3 matched
+			{MealieRecipeID: "r1", IngredientID: "flour"},
+			{MealieRecipeID: "r1", IngredientID: "tomato"},
+			{MealieRecipeID: "r1", IngredientID: "sugar"},
+			// r2 (Salad): lettuce + oil → 1/2 matched
+			{MealieRecipeID: "r2", IngredientID: "lettuce"},
+			{MealieRecipeID: "r2", IngredientID: "oil"},
+		},
+	}
+	svc := service.NewInspiration(f)
+	out, err := svc.Suggest(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("expected 2 suggestions, got %d", len(out))
+	}
+	// Pasta (2/3 ≈ 0.67) should rank above Salad (1/2 = 0.5).
+	if out[0].MealieRecipeID != "r1" {
+		t.Fatalf("expected Pasta first, got %s", out[0].MealieRecipeID)
+	}
+	if out[0].MatchRatio < 0.66 || out[0].MatchRatio > 0.67 {
+		t.Fatalf("unexpected Pasta ratio: %f", out[0].MatchRatio)
+	}
+	if len(out[0].MissingIngredientIDs) != 1 || out[0].MissingIngredientIDs[0] != "sugar" {
+		t.Fatalf("unexpected Pasta missing: %+v", out[0].MissingIngredientIDs)
+	}
+}
+
+func TestInspirationSuggest_OmitsNoMatch(t *testing.T) {
+	f := &fakeStore{
+		recipes: []persistence.RecipeRef{
+			{MealieRecipeID: "r1", Title: "Pasta", Effort: 1},
+			{MealieRecipeID: "r2", Title: "Curry", Effort: 2},
+		},
+		lots: []persistence.InventoryLot{
+			{ID: 1, IngredientID: "flour", Quantity: 500, Unit: "g"},
+		},
+		recipeIngredients: []persistence.RecipeIngredient{
+			{MealieRecipeID: "r1", IngredientID: "flour"},
+			// r2 shares nothing with the pantry.
+			{MealieRecipeID: "r2", IngredientID: "spice"},
+		},
+	}
+	svc := service.NewInspiration(f)
+	out, err := svc.Suggest(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 1 || out[0].MealieRecipeID != "r1" {
+		t.Fatalf("expected only Pasta, got %+v", out)
+	}
+}
+
+func TestInspirationSuggest_EmptyPantry(t *testing.T) {
+	f := &fakeStore{
+		recipes: []persistence.RecipeRef{
+			{MealieRecipeID: "r1", Title: "Pasta", Effort: 1},
+		},
+		recipeIngredients: []persistence.RecipeIngredient{
+			{MealieRecipeID: "r1", IngredientID: "flour"},
+		},
+	}
+	svc := service.NewInspiration(f)
+	out, err := svc.Suggest(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 0 {
+		t.Fatalf("expected no suggestions with empty pantry, got %+v", out)
 	}
 }

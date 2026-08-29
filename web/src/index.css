@@ -1,0 +1,868 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.5;
+  --bg: #fafaf9;
+  --fg: #1c1917;
+  --card: #ffffff;
+  --border: #e7e5e4;
+  --muted: #78716c;
+  --accent: #0f766e;
+  --accent-fg: #ffffff;
+  --danger: #dc2626;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1c1917;
+    --fg: #fafaf9;
+    --card: #292524;
+    --border: #44403c;
+    --muted: #a8a29e;
+    --accent: #2dd4bf;
+    --accent-fg: #042f2e;
+    --danger: #f87171;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+code {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+/* ── Shell ─────────────────────────────────────────────────────────────── */
+
+.shell {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  min-height: 100vh;
+}
+
+@media (max-width: 720px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+}
+
+.sidebar {
+  border-right: 1px solid var(--border);
+  padding: 1.5rem 1rem;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+
+@media (max-width: 720px) {
+  .sidebar {
+    position: static;
+    height: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+}
+
+.brand h1 {
+  margin: 0;
+  font-size: 1.35rem;
+  letter-spacing: -0.02em;
+}
+
+.brand .tagline {
+  margin: 0.15rem 0 1.25rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.nav-link {
+  display: block;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  color: var(--fg);
+  text-decoration: none;
+  font-size: 0.95rem;
+}
+
+.nav-link:hover {
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+}
+
+.nav-link.active {
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+
+.content {
+  padding: 2rem 2rem 4rem;
+  max-width: 960px;
+}
+
+/* ── Page ──────────────────────────────────────────────────────────────── */
+
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.page-header h2 {
+  margin: 0;
+  font-size: 1.5rem;
+  letter-spacing: -0.02em;
+}
+
+.page-subtitle {
+  margin: 0.2rem 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.page-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.section-title {
+  margin: 1.75rem 0 0.75rem;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+/* ── Primitives ────────────────────────────────────────────────────────── */
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.75rem 0.9rem;
+}
+
+.card.notice {
+  background: color-mix(in srgb, var(--accent) 10%, var(--card));
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+}
+
+.badge {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.tone-neutral {
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+  color: var(--fg);
+}
+.tone-draft {
+  background: #e5e7eb;
+  color: #374151;
+}
+.tone-approved {
+  background: #dcfce7;
+  color: #166534;
+}
+.tone-archived {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+.tone-good {
+  background: #dcfce7;
+  color: #166534;
+}
+.tone-warn {
+  background: #fef3c7;
+  color: #92400e;
+}
+.tone-bad {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.btn {
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  padding: 0.5rem 0.9rem;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--fg);
+  border-color: var(--border);
+}
+
+.btn-danger {
+  background: transparent;
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
+  padding: 0.35rem 0.6rem;
+  font-size: 0.8rem;
+}
+
+.input {
+  font: inherit;
+  font-size: 0.9rem;
+  padding: 0.5rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--fg);
+}
+
+.input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.input-narrow {
+  width: 5rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.field-label {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.link-btn {
+  font: inherit;
+  font-size: 0.85rem;
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0;
+}
+
+.state {
+  opacity: 0.75;
+  font-style: italic;
+}
+
+.state-empty {
+  color: var(--muted);
+}
+
+.state-error {
+  color: var(--danger);
+  font-style: normal;
+}
+
+.row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 0.75rem;
+}
+
+.add-row {
+  margin-top: 0.5rem;
+}
+
+/* ── Planner ───────────────────────────────────────────────────────────── */
+
+.plan-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.days,
+.items {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.day,
+.item {
+  display: grid;
+  grid-template-columns: 6.5rem 1fr auto;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.item {
+  grid-template-columns: 5rem 1fr auto auto;
+}
+
+.day-decided {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+}
+
+.day-weekday,
+.item-qty {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.day-title,
+.item-name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.day-subtitle,
+.item-forms {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.day-pick {
+  grid-column: 1 / -1;
+  margin-top: 0.25rem;
+}
+
+.item input[type="checkbox"] {
+  width: 1.1rem;
+  height: 1.1rem;
+  accent-color: var(--accent);
+}
+
+.item-checked .item-name {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
+/* ── Shopping ──────────────────────────────────────────────────────────── */
+
+.results {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+
+.result-btn {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.result-btn:hover {
+  border-color: var(--accent);
+}
+
+/* ── Compare ───────────────────────────────────────────────────────────── */
+
+.compare-item {
+  margin-bottom: 0.5rem;
+}
+
+.compare-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.compare-results {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.5rem;
+}
+
+.compare-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+}
+
+.compare-unavailable {
+  opacity: 0.6;
+}
+
+.compare-retailer {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.compare-product {
+  font-size: 0.9rem;
+}
+
+.compare-price {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.compare-error {
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.totals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.75rem;
+}
+
+.total {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.total-cheapest {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+}
+
+.total-store {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.total-price {
+  font-size: 1.4rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Recipes ───────────────────────────────────────────────────────────── */
+
+.recipe-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 0.75rem;
+}
+
+.recipe-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.recipe-title {
+  font-weight: 600;
+}
+
+.recipe-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.5rem;
+}
+
+.tag {
+  font-size: 0.75rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  color: var(--muted);
+}
+
+.recipe-meta {
+  margin-top: 0.5rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+/* ── Tonight ───────────────────────────────────────────────────────────── */
+
+.tonight-card h3 {
+  margin: 0;
+  font-size: 1.3rem;
+}
+
+.tonight-reactions {
+  margin: 0.4rem 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.order-detail {
+  margin-top: 1rem;
+}
+
+/* ── Recipe card: rating + favorite ────────────────────────────────────── */
+
+.recipe-rating {
+  margin-left: 0.6rem;
+  color: var(--accent, #d9a441);
+}
+
+.recipe-actions {
+  margin-top: 0.6rem;
+}
+
+/* ── Recipe families ───────────────────────────────────────────────────── */
+
+.family-card {
+  margin-bottom: 0.5rem;
+}
+
+.family-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.family-name {
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.family-desc {
+  margin: 0.4rem 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.variant-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.variant {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.variant.active {
+  outline: 2px solid var(--accent, #d9a441);
+}
+
+.variant-select {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  flex: 1;
+}
+
+.variant-title {
+  font-weight: 600;
+}
+
+.variant-source {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.revision-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.revision-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.revision-id {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.revision-date {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.revision-desc {
+  margin: 0.4rem 0 0;
+  font-size: 0.9rem;
+}
+
+.revision-ingredients,
+.revision-steps {
+  margin: 0.4rem 0 0;
+  padding-left: 1.2rem;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.revision-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.textarea {
+  width: 100%;
+  resize: vertical;
+  font: inherit;
+}
+
+/* ── Prices ────────────────────────────────────────────────────────────── */
+
+.price-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.price-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.4rem;
+}
+
+.price-name {
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+.price-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.price-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  gap: 0.8rem;
+  align-items: center;
+  padding: 0.25rem 0.4rem;
+  border-radius: 6px;
+  font-size: 0.88rem;
+}
+
+.price-row.cheapest {
+  background: color-mix(in srgb, var(--accent, #d9a441) 14%, transparent);
+}
+
+.price-store {
+  font-weight: 500;
+}
+
+.price-kind {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.price-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.price-source {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+/* ── Best before (pantry) ──────────────────────────────────────────────── */
+
+.item.expired {
+  outline: 2px solid #d9534f;
+}
+
+.item.expiring {
+  outline: 2px solid var(--accent, #d9a441);
+}
+
+/* ── Store locator ───────────────────────────────────────────────────────── */
+
+.store-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.store-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.store-main {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.store-name {
+  font-weight: 600;
+}
+
+.store-distance {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  font-size: 0.88rem;
+  white-space: nowrap;
+}
+
+/* ── Barcode ─────────────────────────────────────────────────────────────── */
+
+.barcode-results {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.barcode-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.barcode-name {
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+.barcode-amount {
+  margin-top: 0.3rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.barcode-gtin {
+  margin-top: 0.2rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.barcode-desc {
+  margin-top: 0.4rem;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+/* ── Dashboard ───────────────────────────────────────────────────────────── */
+
+.dashboard-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 0.6rem;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  text-align: center;
+}
+
+.stat-value {
+  font-size: 1.8rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-label {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.dashboard-hint {
+  margin-top: 0.8rem;
+}
+
+/* ── Ingredient nicknames ────────────────────────────────────────────────── */
+
+.alias-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.alias-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.alias-main {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.alias-name {
+  font-weight: 600;
+}
+
+.alias-arrow {
+  color: var(--muted);
+}
+
+.alias-target {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}

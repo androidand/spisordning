@@ -27,11 +27,12 @@ func PushShoppingList(ctx context.Context, db *persistence.Store, listID int64, 
 	}
 
 	kind := retailer.RetailerKind(retailerName)
-	rc, err := retailer.NewFromKind(kind, adapterURL, adapterURL)
+	rc, err := retailer.NewFromKind(kind, adapterURL, adapterURL, adapterURL)
 	if err != nil {
 		recordPushFailure(ctx, db, listID, retailerName)
 		return nil, fmt.Errorf("push shopping list: retailer: %w", err)
 	}
+	rc.WithAuthFile(envOr("ICA_AUTH_FILE", ""))
 
 	var reqs []domain.ShoppingRequirement
 	terms := retailer.SearchTerms{}

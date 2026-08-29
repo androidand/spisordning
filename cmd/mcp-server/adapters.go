@@ -9,9 +9,9 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
 	"time"
 
+	"github.com/androidand/spisordning/internal/config"
 	"github.com/androidand/spisordning/internal/domain"
 	"github.com/androidand/spisordning/internal/mcptools"
 	"github.com/androidand/spisordning/internal/persistence"
@@ -27,6 +27,8 @@ type mcpStoreAdapter struct {
 	db        *persistence.Store
 	willysURL string
 	icaURL    string
+	hemkopURL string
+	cfg       config.Config
 }
 
 // PlanDinners loads the household and recipe candidates, then delegates to the
@@ -307,15 +309,15 @@ func (a mcpStoreAdapter) loadEnergyFor(ctx context.Context) (func(time.Time) dom
 // unset, it returns a no-op closure (no school dedup). Errors from the
 // skolmaten service are non-fatal: the planner continues without school tags.
 func (a mcpStoreAdapter) loadSchoolTagsFor(ctx context.Context, date time.Time) (func(time.Time) []string, error) {
-	school := os.Getenv("SKOLMATEN_SCHOOL")
+	school := a.cfg.SkolmatenSchool
 	if school == "" {
 		return func(time.Time) []string { return nil }, nil
 	}
-	baseURL := os.Getenv("SKOLMATEN_BASE_URL")
+	baseURL := a.cfg.SkolmatenBaseURL
 	if baseURL == "" {
 		baseURL = "http://192.168.1.120:8787"
 	}
-	token := os.Getenv("SKOLMATEN_CLIENT_TOKEN")
+	token := a.cfg.SkolmatenClientToken
 	sk := skolmaten.New(baseURL, token)
 
 	year, week := date.AddDate(0, 0, 7).ISOWeek()
@@ -376,17 +378,18 @@ func (a mcpStoreAdapter) ComparePrices(ctx context.Context, reqs []mcptools.Shop
 		})
 		terms[r.Ingredient] = r.Ingredient
 	}
-	cmp := retailer.Compare(ctx, domainReqs, terms, a.willysURL, a.icaURL)
+	cmp := retailer.Compare(ctx, domainReqs, terms, a.willysURL, a.icaURL, a.hemkopURL)
 	return toMCPComparison(cmp), nil
 }
 
 // PushToWishlist pushes resolved lines to a retailer's wishlist and records
 // the binding. It never fills a cart or checks out.
 func (a mcpStoreAdapter) PushToWishlist(ctx context.Context, in mcptools.PushWishlistInput) (mcptools.PushWishlistResult, error) {
-	rc, err := retailer.NewFromKind(retailer.RetailerKind(in.Retailer), a.willysURL, a.icaURL)
+	rc, err := retailer.NewFromKind(retailer.RetailerKind(in.Retailer), a.willysURL, a.icaURL, a.hemkopURL)
 	if err != nil {
 		return mcptools.PushWishlistResult{}, fmt.Errorf("push wishlist: %w", err)
 	}
+	rc.WithAuthFile(a.cfg.ICAAuthFile)
 	items := make([]retailer.ShoppingListItem, 0, len(in.Items))
 	for _, it := range in.Items {
 		items = append(items, retailer.ShoppingListItem{ProductCode: it.ProductCode, Quantity: it.Quantity})

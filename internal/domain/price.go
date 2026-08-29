@@ -22,10 +22,16 @@ type Retailer struct {
 
 // Store is a specific location within a retailer. Assortment and prices may
 // differ per store.
+//
+// Latitude/Longitude are WGS84 decimal degrees and are optional: a store may
+// be known (and carry prices) without a mapped position. The store-locator
+// feature skips geo-less stores when ranking by distance.
 type Store struct {
 	ID          string
 	RetailerID  string
 	Name        string
+	Latitude    *float64
+	Longitude   *float64
 	CreatedAt   time.Time
 }
 

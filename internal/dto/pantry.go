@@ -63,4 +63,7 @@ type PantryService interface {
 	ListLots(ctx context.Context, locationID string) ([]PantryLot, error)
 	Purchase(ctx context.Context, in PantryPurchaseInput) (PantryLot, error)
 	Consume(ctx context.Context, lotID int64, in PantryConsumeInput) error
+	// ListExpiring returns non-empty lots whose best_before is within the given
+	// window (already expired or expiring soon), most urgent first.
+	ListExpiring(ctx context.Context, within time.Duration) ([]PantryLot, error)
 }

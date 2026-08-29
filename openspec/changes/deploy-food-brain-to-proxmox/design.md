@@ -48,12 +48,12 @@ publish story, sibling-repo concern, needs resolving too) or can build on the ho
 
 ## Risks / Trade-offs
 
-- [`willys-adapter`'s image publish status is unverified — `docker-compose.yml` references
-  `ghcr.io/androidand/spisordning/willys-adapter:latest` but that's a sibling-repo (`willys-client`)
-  concern this change doesn't directly control] → Mitigation: verify willys-client's own CI/publish
-  setup before assuming the compose stack is deployable; if unpublished, either scope a matching fix
-  there or note it as a known blocker for the willys-adapter service specifically (food-brain/mcp-
-  server can still deploy and be verified independently).
+- [`willys-adapter`'s image was unpublished — a sibling-repo (`store-clients`) concern this change
+  doesn't directly control] → **Resolved 2026-08-27:** the `store-clients` repo now has a
+  `willys-adapter-image` CI workflow that builds `willys-client/Dockerfile.adapter` and publishes
+  `ghcr.io/androidand/store-clients/willys-adapter` on `master`; this repo's `docker-compose.yml` and
+  the tengil reference compose were repointed to that name. Remaining: confirm pullability after a
+  real `store-clients` master push (task 2.4) and that the service starts (task 3.2).
 - [Tengil's own auth model has a known open issue (`harden-api-auth-model`, per
   `docs/infrastructure/deployment-and-access.md`)] → Mitigation: deploy only from the trusted LAN, as
   already documented; this change doesn't need to wait on that Tengil-side fix, just needs to respect

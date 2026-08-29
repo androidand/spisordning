@@ -12,8 +12,10 @@
       job only build-verifies `food-brain` with `push: false` and never touches `willys-adapter`. No
       Makefile, no `ghcr` refs in any openspec, no publish scripts. So `docker-compose.yml`'s
       `image: ghcr.io/androidand/spisordning/willys-adapter:latest` assumes a published image that
-      nothing produces — a real blocker for the `willys-adapter` service (→ scope a CI fix in the
-      sibling repo, task 2.3).
+       nothing produces — a real blocker for the `willys-adapter` service (→ scope a CI fix in the
+       sibling repo, task 2.3). **Resolved 2026-08-27:** the `store-clients` repo now publishes
+       `ghcr.io/androidand/store-clients/willys-adapter` via CI and this repo's compose was repointed
+       to that name (task 2.3).
 - [x] 1.2 Confirm whether `Dockerfile.mcp` is referenced by anything (CI, docs, a different deploy
       path) or is dead now that `docker-compose.yml`'s `mcp-server` service builds from `Dockerfile`
       with an entrypoint override.
@@ -60,14 +62,15 @@
 - [x] 2.3 If task 1.1 finds `willys-adapter` unpublished, scope a matching CI fix in the sibling
       `willys-client` repo (tracked there, not duplicated here).
 
-      ✅ Scoped 2026-08-27: created a tracking OpenSpec change in the sibling repo at
-      `~/dev/store-clients/willys-client/openspec/changes/publish-willys-adapter-image/`
-      (proposal.md, design.md, tasks.md, .openspec.yaml — matching that repo's conventions). It scopes
-      a GitHub Actions workflow in willys-client that builds `Dockerfile.adapter` and pushes to GHCR on
-      main (`:latest` + sha), mirroring spisordning's `food-brain` CI. Key open question captured there:
-      the pulled namespace `androidand/spisordning` is not willys-client's own namespace, so the target
-      namespace + write credential (GITHUB_TOKEN vs PAT) must be confirmed before the workflow is written.
-      Not implemented (out of scope here); tracked in willys-client.
+      ✅ Implemented 2026-08-27: the sibling `store-clients` repo now has the CI fix. Because
+      `willys-client` is a subdir of the `store-clients` monorepo (no `.git` of its own), the workflow
+      lives at the monorepo root: `.github/workflows/willys-adapter-image.yml`. It builds
+      `willys-client/Dockerfile.adapter` (context `./willys-client`) and publishes
+      `ghcr.io/androidand/store-clients/willys-adapter` on `master` (`:latest` + sha) using
+      `GITHUB_TOKEN` — the namespace decision recorded in the sibling change
+      (`willys-client/openspec/changes/publish-willys-adapter-image/`). This repo's `docker-compose.yml`
+      and the tengil reference compose were repointed to the new image name. Remaining: confirm
+      pullability after a real `store-clients` master push (task 2.4).
 - [ ] 2.4 Verify the pushed images are pullable (`docker pull ghcr.io/androidand/spisordning/food-
       brain:latest` from a clean environment).
 
@@ -80,7 +83,7 @@
       ✅ Done 2026-08-27: rewrote the reference compose (it actually lives under `openspec/archived/
       full-stack-compose-deploys/...`, not `changes/` — the path above is stale) to match the real
       spisordning stack: correct image names (`ghcr.io/androidand/spisordning/food-brain:latest`,
-      `ghcr.io/androidand/spisordning/willys-adapter:latest`), `postgres:19beta3-alpine`, and — per
+      `ghcr.io/androidand/store-clients/willys-adapter:latest`), `postgres:19beta3-alpine`, and — per
       task 1.3's no-`build:` finding — `mcp-server` now reuses the `food-brain` image via an
       `entrypoint` override (no separate mcp image / no `build:`), plus the one-shot `migrate` service
       (food-brain image, `migrate up --seed`, `service_completed_successfully` gate on food-brain). Kept

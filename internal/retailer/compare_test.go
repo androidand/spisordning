@@ -51,7 +51,7 @@ func TestCompare_BothResolve_CheaperWins(t *testing.T) {
 	}})
 	defer ica.Close()
 
-	cmp := Compare(context.Background(), cauliflowerReq(), nil, willys.URL, ica.URL)
+	cmp := Compare(context.Background(), cauliflowerReq(), nil, willys.URL, ica.URL, "")
 	if len(cmp.Items) != 1 {
 		t.Fatalf("expected 1 item, got %d", len(cmp.Items))
 	}
@@ -59,15 +59,18 @@ func TestCompare_BothResolve_CheaperWins(t *testing.T) {
 	if item.Unresolved {
 		t.Errorf("item should be resolved")
 	}
-	if len(item.Results) != 2 {
-		t.Fatalf("expected 2 retailer results, got %d", len(item.Results))
+	if len(item.Results) != 3 {
+		t.Fatalf("expected 3 retailer results, got %d", len(item.Results))
 	}
-	w, i := item.Results[0], item.Results[1]
-	if w.Retailer != RetailerWillys || i.Retailer != RetailerICA {
-		t.Fatalf("results must follow RetailerOrder (willys, ica): %+v", item.Results)
+	w, i, h := item.Results[0], item.Results[1], item.Results[2]
+	if w.Retailer != RetailerWillys || i.Retailer != RetailerICA || h.Retailer != RetailerHemkop {
+		t.Fatalf("results must follow RetailerOrder (willys, ica, hemkop): %+v", item.Results)
 	}
 	if !w.Available || !i.Available {
-		t.Errorf("both retailers should be available: %+v", item.Results)
+		t.Errorf("willys and ica should be available: %+v", item.Results)
+	}
+	if h.Available {
+		t.Errorf("hemkop should be unavailable (no adapter): %+v", h)
 	}
 	if item.Cheapest == nil {
 		t.Fatal("expected a cheapest result")
@@ -92,17 +95,20 @@ func TestCompare_ICAStale_DegradesGracefully(t *testing.T) {
 	ica := mockErrorServer(t, http.StatusBadGateway)
 	defer ica.Close()
 
-	cmp := Compare(context.Background(), cauliflowerReq(), nil, willys.URL, ica.URL)
+	cmp := Compare(context.Background(), cauliflowerReq(), nil, willys.URL, ica.URL, "")
 	item := cmp.Items[0]
 	if item.Unresolved {
 		t.Errorf("item should still be resolved via Willys")
 	}
-	w, i := item.Results[0], item.Results[1]
+	w, i, h := item.Results[0], item.Results[1], item.Results[2]
 	if !w.Available {
 		t.Errorf("Willys should be available")
 	}
 	if i.Available {
 		t.Errorf("ICA should be unavailable after a 502")
+	}
+	if h.Available {
+		t.Errorf("Hemkop should be unavailable (no adapter)")
 	}
 	if item.Cheapest == nil || item.Cheapest.Retailer != RetailerWillys {
 		t.Errorf("expected Willys to be the only cheapest, got %+v", item.Cheapest)
@@ -123,7 +129,7 @@ func TestCompare_NeitherResolves_Unresolved(t *testing.T) {
 
 	cmp := Compare(context.Background(),
 		[]domain.ShoppingRequirement{{IngredientID: "saffron", Quantity: 1, Unit: "g"}},
-		nil, willys.URL, ica.URL)
+		nil, willys.URL, ica.URL, "")
 	item := cmp.Items[0]
 	if !item.Unresolved {
 		t.Errorf("item should be unresolved")
@@ -155,14 +161,17 @@ func TestCompare_ResolvedWithoutPrice_NotCheapestCandidate(t *testing.T) {
 	}})
 	defer ica.Close()
 
-	cmp := Compare(context.Background(), cauliflowerReq(), nil, willys.URL, ica.URL)
+	cmp := Compare(context.Background(), cauliflowerReq(), nil, willys.URL, ica.URL, "")
 	item := cmp.Items[0]
 	if item.Unresolved {
 		t.Errorf("item should be resolved (both matched a product)")
 	}
-	w, i := item.Results[0], item.Results[1]
+	w, i, h := item.Results[0], item.Results[1], item.Results[2]
 	if !w.Available || !i.Available {
-		t.Errorf("both should be available (both matched): %+v", item.Results)
+		t.Errorf("willys and ica should be available (both matched): %+v", item.Results)
+	}
+	if h.Available {
+		t.Errorf("hemkop should be unavailable (no adapter)")
 	}
 	if w.PriceValue != nil {
 		t.Errorf("Willys resolved without a price, expected nil PriceValue")

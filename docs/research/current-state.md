@@ -1,4 +1,4 @@
-# Current state (as of 2026-08-19)
+# Current state (as of 2026-08-28)
 
 This is the Phase 0 "inspect existing Spisordning" deliverable `PLAN.md` asks for. It records
 what actually exists today, distinct from what `PLAN.md` envisions, so new OpenSpec changes
@@ -16,15 +16,23 @@ cmd/mcp-server/        main.go (stdio + stateless Streamable HTTP on :8081), ada
                         docs/adr/mcp-protocol-2026-07-28-and-go-sdk.md
 internal/
   architecturetest/     layer-boundary guard (TestLayeredArchitecture via `go list -deps`)
+  config/               env-only config (Config, Load, Validate, MissingVars, Has* predicates);
+                        single source for every env var — established by
+                        establish-config-di-and-presentation-layer
   domain/               core types (Person, Preference, Candidate, Ingredient,
                         ShoppingRequirement, …)
+  dto/                  application-layer data-transfer types (services depend on dto, not
+                        httpapi — enforced by the architecture test)
    httpapi/              HTTP handlers + wiring (health.go, people.go, shopping.go,
-                        helpers.go, tests) — shopping.go adds the shopping-list endpoints incl.
-                        POST /shopping-lists/from-checklist (Apple Notes ingestion)
+                        helpers.go, progress.go, tests) — shopping.go adds the shopping-list
+                        endpoints incl. POST /shopping-lists/from-checklist (Apple Notes
+                        ingestion); progress.go adds POST /plans/run/stream (SSE)
   httpclient/           shared JSON-over-HTTP transport used by every backend client
   llm/                  AI provider abstraction (Provider interface); Olla (Client) is the
                         primary OpenAI-compatible implementation
   mealie/client.go       read-only Mealie sync client (real, tested)
+  grocy/client.go        Grocy inventory client (real, tested); degrades to
+                        ErrGrocyNotConfigured → 503 when GROCY_BASE_URL is unset
    mcptools/              MCP tool adapters (list_recipe_candidates, record_meal_reaction,
                         get_shopping_requirements, create_shopping_list,
                         compare_shopping_prices, push_shopping_wishlist); thin layer over the
@@ -33,18 +41,24 @@ internal/
   persistence/          pgx-v5 Postgres repositories (people, recipes, meals, meal_plan)
                         + Config/FromEnv/New/NewStore; integration-tested
    planning/              requirements.go, staples.go, week.go (PlanWeek planner loop),
-                         snacks.go (snack/breakfast tag filters, fallback snacks, PlanSimpleSlot,
-                         PlanWeekAllSlots)
-   retailer/client.go     Go-side client for the willys-adapter HTTP service; Resolution now
-                          carries PriceValue/Price (price-in-resolution)
+                          snacks.go (snack/breakfast tag filters, fallback snacks, PlanSimpleSlot,
+                          PlanWeekAllSlots)
+   retailer/client.go     Go-side client for the willys/ica/hemkop-adapter HTTP services;
+                           Resolution carries PriceValue/Price (price-in-resolution); Client
+                           stores kind + authFile (WithAuthFile/AuthFile) for elevated creds
+   retailer/auth.go       AuthTier (AuthBasic/AuthElevated) + Operation constants + TierFor;
+                           ErrElevatedStale / IsStaleCredential / IsElevatedStale for 401/403
    retailer/compare.go    cross-retailer price comparison (Compare resolves a set of
-                          requirements against Willys + ICA, reports per-item cheapest +
-                          availability; a stale retailer degrades to available:false)
+                           requirements against Willys + ICA + Hemköp, reports per-item cheapest +
+                           availability; a stale retailer degrades to available:false)
   scoring/scoring.go     deterministic candidate scorer
+  service/              application-layer services (grocy.go, …) — depend on internal/dto
   skolmaten/client.go    school-lunch client
 migrations/0001-0014      Postgres schema (0001 first-slice … 0014 meal plan slots) —
-                           applied by docker-compose; Go persistence wired for all (see below)
+                            applied by docker-compose; Go persistence wired for all (see below)
 api/openapi.yaml          design-first OpenAPI 3.0.3 contract; server code generated from this
+web/                      Vite + React 19 + TypeScript 7.0.2 multi-page frontend (hand-written
+                            typed client in web/src/generated/spisordning.ts); see below
 openspec/                 see below
 ```
 
@@ -62,7 +76,8 @@ persistence integration tests skip locally without a Postgres and run in CI's
 `persistence-test` job). CI also runs architecture-enforcement, migrations-apply,
 docker-build, and codegen-verify jobs.
 
-No `AGENTS.md`/`CLAUDE.md` existed before this change. No `docs/` existed before this change.
+`AGENTS.md` (agent instructions) and `docs/` (research + ADRs + infrastructure) now exist and are
+tracked.
 
 ## `PLAN.md` vs. `README.md`
 
@@ -123,8 +138,10 @@ See `docs/research/willys-capabilities.md` for the full capability map.
 - **Mealie**: real, tested client (`internal/mealie/client.go`), talks to an already-deployed
   instance (`MEALIE_BASE_URL` defaults to `http://hlab-mealie:9000`). Includes tag
   normalization, Swedish effort-time parsing, and a fallback to Mealie's own ingredient parser.
-- **Grocy**: no code, config, or schema anywhere in this repo or its siblings. Pure research
-  target.
+- **Grocy**: real, tested client (`internal/grocy/client.go`) + service (`internal/service/grocy.go`)
+  + handler (`internal/httpapi/grocy.go`); reads `GROCY_BASE_URL` / `GROCY_USER` / `GROCY_PASSWORD`
+  via `internal/config`. A nil client degrades to `ErrGrocyNotConfigured` → 503. Frontend
+  `GrocyPage` consumes the endpoints.
 - **Directus**: no code or config anywhere. Pure research target (the "Directus Research
   Spike" in `PLAN.md` has not been performed).
 
@@ -209,6 +226,43 @@ binary alongside `cmd/food-brain` (`implement-mcp-server`, completed 2026-08-22)
 The MCP server is the infrastructure that makes "AI SHALL call application-layer tools.
 Never expose unrestricted SQL" structurally true — AI providers (Epic G) will consume
 this surface, not talk to Postgres directly.
+
+## Presentation layer (config, auth tiers, SSE, web frontend)
+
+`establish-config-di-and-presentation-layer` added the env-only config package, the ICA
+auth-tier concept, an SSE progress endpoint, and the first `web/` frontend slice.
+
+- **`internal/config`** — single source for every env var. `Config` + `Load()` read the
+  environment once; `Validate` / `MissingVars` / `FormatMissing` report unset required vars;
+  `Has*` predicates gate optional integrations. `cmd/food-brain` and `cmd/mcp-server` both call
+  `config.Load()` in their composition roots instead of ad-hoc `os.Getenv` reads. `ICA_AUTH_FILE`
+  → `Config.ICAAuthFile` (see auth tiers below).
+- **Auth tiers (`internal/retailer/auth.go`)** — `AuthTier` (`AuthBasic` / `AuthElevated`) and
+  `Operation` constants (`OpResolve`, `OpSearch`, `OpCreateList`, `OpSyncList`, `OpToCart`,
+  `OpBarcode`, `OpBonus`, `OpOffers`). `Client.TierFor(op)` declares which tier each operation
+  needs: ICA's anonymous ecom surface is basic; account-bound writes are elevated. Willys and
+  Hemköp are single-tier. `ErrElevatedStale` / `IsStaleCredential(code)` (keyed to 401/403) /
+  `IsElevatedStale(err)` detect a stale elevated credential. The elevated credential (ICA mobile
+  OAuth2/PKCE Bearer session) is a human-run Playwright login on the TS `ica-adapter` side; the
+  file path is injected via `Client.WithAuthFile` (never read from env by the client). See
+  `docs/infrastructure/ica-elevated-login.md`.
+- **SSE progress (`POST /plans/run/stream`)** — `internal/httpapi/progress.go` streams
+  `text/event-stream` progress events as a plan run progresses (`started`, `planning`,
+  `resolving`, `wishlist`, `done`). `RunPlanInput.Progress` in `cmd/food-brain/plan.go` emits the
+  phase events. Per-item events are not possible today: `ResolveRequirements` is a single
+  blocking adapter HTTP call, so the Go side only observes phase boundaries. The synchronous
+  `POST /plans/run` is unaffected — SSE is additive. The event payload (`PlanProgress{phase,
+  message, at}`) is intentionally minimal and not finalized until the frontend's SSE consumer
+  needs it (task 3.4).
+- **`web/` frontend** — Vite + React 19.2.8 + TypeScript 7.0.2 (the native/Go compiler) +
+  TanStack Query + openapi-fetch. Multi-page (HashRouter) with a sidebar nav and pages for
+  Planner, Shopping, Compare, Recipes, Preferences, Pantry, Orders, Tonight, Sync, Dashboard,
+  RecipeFamily, Prices, StoreLocator, Barcode, Aliases, Inspiration, and Grocy — each a
+  TanStack Query + openapi-fetch consumer of the real REST API at `VITE_API_URL` (default
+  `http://localhost:8080`), no mock data. The typed client is hand-written in
+  `web/src/generated/spisordning.ts` (not codegen'd — `openapi-typescript` calls the TS compiler
+  API, which TS 7.0 does not expose as a JS module). `npm run build` type-checks with TS 7;
+  `npm run lint` uses the TS 6 toolchain.
 
 ## What this means for new OpenSpec changes
 

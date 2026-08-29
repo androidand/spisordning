@@ -16,11 +16,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/androidand/spisordning/internal/config"
 	"github.com/androidand/spisordning/internal/dto"
+	"github.com/androidand/spisordning/internal/domain"
+	"github.com/androidand/spisordning/internal/grocy"
 	"github.com/androidand/spisordning/internal/httpapi"
 	"github.com/androidand/spisordning/internal/ingredients"
 	"github.com/androidand/spisordning/internal/mealie"
 	"github.com/androidand/spisordning/internal/persistence"
+	"github.com/androidand/spisordning/internal/retailer"
 	"github.com/androidand/spisordning/internal/service"
 	"github.com/jackc/pgx/v5"
 	"github.com/oapi-codegen/runtime/types"
@@ -34,14 +38,16 @@ import (
 func buildDependencies() httpapi.Dependencies {
 	deps := httpapi.Dependencies{}
 
-	cfg, err := persistence.FromEnv(os.Getenv)
+	cfg := config.Load()
+
+	pgCfg, err := persistence.FromEnv(os.Getenv)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "⚠ no database configured (POSTGRES_PASSWORD/DATABASE_URL unset); serving /health only")
 		return deps
 	}
 
 	ctx := context.Background()
-	store, err := persistence.New(ctx, cfg)
+	store, err := persistence.New(ctx, pgCfg)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "⚠ persistence unavailable:", err)
 		return deps
@@ -49,7 +55,7 @@ func buildDependencies() httpapi.Dependencies {
 
 	// Refuse to serve on a database whose schema is behind the embedded
 	// migrations. serve never mutates the schema — run `food-brain migrate up`.
-	pending, err := persistence.MigrationsPending(ctx, cfg)
+	pending, err := persistence.MigrationsPending(ctx, pgCfg)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "⚠ migration check failed:", err)
 		return deps
@@ -60,26 +66,46 @@ func buildDependencies() httpapi.Dependencies {
 	}
 
 	var mealieClient *mealie.Client
-	if mealieURL := os.Getenv("MEALIE_BASE_URL"); mealieURL != "" && os.Getenv("MEALIE_API_TOKEN") != "" {
-		mealieClient = mealie.New(mealieURL, os.Getenv("MEALIE_API_TOKEN"))
+	if cfg.HasMealie() {
+		mealieClient = mealie.New(cfg.MealieBaseURL, cfg.MealieAPIToken)
 	}
 	deps.People = service.NewPeople(store)
 	deps.Preferences = service.NewPreferences(store)
 	deps.Recipes = service.NewRecipes(store, mealieClient)
 	deps.Meals = service.NewMeals(store, nil)
 	deps.Pantry = service.NewPantry(store)
+	deps.RecipeFamily = service.NewRecipeFamily(store)
+	deps.Favorites = service.NewFavorites(store)
+	deps.PriceIntelligence = service.NewPriceIntelligence(store)
+
+	// Dashboard aggregates tonight + pantry + expiring into one read model. The
+	// tonight provider adapts storeAdapter.GetTonight (httpapi view) to the
+	// service-layer tonightView so the service layer never imports httpapi.
+	adapter := storeAdapter{db: store, adapterURL: cfg.AdapterURL}
+	deps.Dashboard = service.NewDashboard(store, dashboardTonightProvider{adapter}, deps.Pantry)
+	deps.IngredientAlias = service.NewIngredientAlias(store)
+	deps.Inspiration = service.NewInspiration(store)
+
+	// Grocy is optional — only wired when GROCY_BASE_URL is set. When unset the
+	// service is constructed with a nil client and reports "not configured"
+	// (503) on every /grocy route, so the API degrades gracefully.
+	var grocyClient *grocy.Client
+	if cfg.HasGrocy() {
+		grocyClient = grocy.New(cfg.GrocyBaseURL, cfg.GrocyAPIKey)
+	}
+	deps.Grocy = service.NewGrocy(grocyClient, cfg.GrocyBaseURL)
 
 	// External clients are optional — only wired when configured.
 	var slv *ingredients.Client
-	if slvURL := os.Getenv("SLV_BASE_URL"); slvURL != "" {
-		slv = ingredients.NewLivsmedelsverket(slvURL)
+	if cfg.HasSLV() {
+		slv = ingredients.NewLivsmedelsverket(cfg.SLVBaseURL)
 	}
 	var dabas *ingredients.DabasClient
-	if os.Getenv("DABAS_ENABLED") != "" {
+	if cfg.DabasEnabled {
 		dabas = ingredients.NewDabas()
 	}
 	var mpk *ingredients.MPKClient
-	if os.Getenv("MPK_ENABLED") != "" {
+	if cfg.MPKEnabled {
 		mpk = ingredients.NewMatpriskollen()
 	}
 	deps.Ingredients = service.NewIngredients(store, slv, dabas, mpk)
@@ -91,7 +117,7 @@ func buildDependencies() httpapi.Dependencies {
 	// lists/items/push, and orders. It supersedes the old dto.PlanningService
 	// wiring for /plans (this Plans field is a strict superset — adds
 	// POST /plans/run and GET /plans/{id}/candidates).
-	adapters := storeAdapter{db: store}
+	adapters := storeAdapter{db: store, adapterURL: cfg.AdapterURL}
 	deps.Tonight = adapters
 	deps.Reactions = adapters
 	deps.Plans = adapters
@@ -101,7 +127,88 @@ func buildDependencies() httpapi.Dependencies {
 	deps.ShoppingListItems = adapters
 	deps.ShoppingPush = adapters
 	deps.Orders = adapters
+
+	// Price comparison resolves each requirement against every retailer via
+	// internal/retailer.Compare. It needs the adapter base URLs; when neither is
+	// configured the route is simply not registered (nil-guarded in
+	// RegisterHandlers), matching the optional-client convention above.
+	if cfg.HasWillys() {
+		deps.PriceComparison = priceComparisonAdapter{
+			willysURL: cfg.AdapterURL,
+			icaURL:    cfg.ICAAdapterURL,
+			hemkopURL: cfg.HemkopAdapterURL,
+		}
+	}
 	return deps
+}
+
+// priceComparisonAdapter adapts the retailer client to the httpapi
+// PriceComparisonService interface. It is the sole place that knows both the
+// retailer client and the httpapi compare DTOs; httpapi sees only the interface
+// it defines itself (enforced by internal/architecturetest).
+type priceComparisonAdapter struct {
+	willysURL string
+	icaURL    string
+	hemkopURL string
+}
+
+func (a priceComparisonAdapter) ComparePrices(ctx context.Context, reqs []httpapi.CompareRequirement) (httpapi.PriceComparison, error) {
+	domainReqs := make([]domain.ShoppingRequirement, 0, len(reqs))
+	terms := retailer.SearchTerms{}
+	for _, r := range reqs {
+		domainReqs = append(domainReqs, domain.ShoppingRequirement{
+			IngredientID:    r.Ingredient,
+			Quantity:        r.Quantity,
+			Unit:            r.Unit,
+			AcceptableForms: r.AcceptableForms,
+			PreferredForm:   r.PreferredForm,
+		})
+		terms[r.Ingredient] = r.Ingredient
+	}
+	cmp := retailer.Compare(ctx, domainReqs, terms, a.willysURL, a.icaURL, a.hemkopURL)
+	return toHTTPComparison(cmp), nil
+}
+
+// toHTTPComparison maps a retailer.Comparison to the httpapi PriceComparison
+// wire shape (the HTTP equivalent of the MCP tool output).
+func toHTTPComparison(cmp *retailer.Comparison) httpapi.PriceComparison {
+	out := httpapi.PriceComparison{Items: make([]httpapi.ItemComparison, 0, len(cmp.Items))}
+	for _, item := range cmp.Items {
+		mi := httpapi.ItemComparison{
+			Ingredient: item.Requirement.IngredientID,
+			Results:    make([]httpapi.RetailerPriceResult, 0, len(item.Results)),
+			Unresolved: item.Unresolved,
+		}
+		for _, r := range item.Results {
+			mi.Results = append(mi.Results, toHTTPResult(r))
+		}
+		if item.Cheapest != nil {
+			c := toHTTPResult(*item.Cheapest)
+			mi.Cheapest = &c
+		}
+		out.Items = append(out.Items, mi)
+	}
+	return out
+}
+
+// toHTTPResult maps a single retailer.RetailerResult to the httpapi wire shape.
+func toHTTPResult(r retailer.RetailerResult) httpapi.RetailerPriceResult {
+	mr := httpapi.RetailerPriceResult{
+		Retailer:   string(r.Retailer),
+		Available:  r.Available,
+		PriceValue: r.PriceValue,
+		Error:      r.Error,
+	}
+	if r.Resolution.RetailerProductID != nil {
+		mr.ProductID = r.Resolution.RetailerProductID
+	}
+	if r.Resolution.ProductName != "" {
+		mr.ProductName = &r.Resolution.ProductName
+	}
+	if r.Resolution.Price != nil {
+		mr.Price = r.Resolution.Price
+	}
+	return mr
 }
 
 // storeAdapter adapts *persistence.Store to the newer httpapi service
@@ -113,7 +220,26 @@ func buildDependencies() httpapi.Dependencies {
 // layer (see buildDependencies); storeAdapter only supplies the capabilities
 // that layer doesn't have yet.
 type storeAdapter struct {
-	db *persistence.Store
+	db         *persistence.Store
+	adapterURL string
+}
+
+// dashboardTonightProvider adapts storeAdapter.GetTonight (which returns the
+// httpapi view) to the service-layer TonightProvider, so the dashboard service
+// never imports httpapi.
+type dashboardTonightProvider struct {
+	inner storeAdapter
+}
+
+func (p dashboardTonightProvider) GetTonight(ctx context.Context) (dto.TonightView, error) {
+	view, err := p.inner.GetTonight(ctx)
+	if err != nil {
+		if errors.Is(err, dto.ErrNoMealTonight) {
+			return dto.TonightView{}, dto.ErrNoMealTonight
+		}
+		return dto.TonightView{}, err
+	}
+	return view, nil
 }
 
 func (a storeAdapter) ListRecipes(ctx context.Context) ([]dto.RecipeRefResponse, error) {
@@ -131,7 +257,7 @@ func (a storeAdapter) ListRecipes(ctx context.Context) ([]dto.RecipeRefResponse,
 	return out, nil
 }
 
-func (a storeAdapter) GetTonight(ctx context.Context) (httpapi.TonightView, error) {
+func (a storeAdapter) GetTonight(ctx context.Context) (dto.TonightView, error) {
 	// Use local midnight so "today" matches the household's timezone (see TZ
 	// env var in docker-compose.yml). time.Now().Truncate(24h) truncates to UTC
 	// midnight, which is wrong for UTC+1/+2 households in the early morning.
@@ -139,11 +265,11 @@ func (a storeAdapter) GetTonight(ctx context.Context) (httpapi.TonightView, erro
 	meal, err := a.db.GetTonightMeal(ctx, today)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return httpapi.TonightView{}, httpapi.ErrNoMealTonight
+			return dto.TonightView{}, dto.ErrNoMealTonight
 		}
-		return httpapi.TonightView{}, fmt.Errorf("tonight get: %w", err)
+		return dto.TonightView{}, fmt.Errorf("tonight get: %w", err)
 	}
-	out := httpapi.TonightView{
+	out := dto.TonightView{
 		ServedOn: meal.ServedOn.Format("2006-01-02"),
 		Recipe: dto.RecipeRefResponse{
 			MealieRecipeID: meal.MealieRecipeID, Title: meal.RecipeTitle,
@@ -354,6 +480,28 @@ func (a storeAdapter) RunPlan(ctx context.Context, in httpapi.PlanRunInput) (htt
 	out := httpapi.PlanRunResult{
 		Status:   "accepted",
 		Message:  result.Message,
+		WeekStart: func() *string { s := result.WeekStart.Format("2006-01-02"); return &s }(),
+	}
+	return out, nil
+}
+
+func (a storeAdapter) RunPlanWithProgress(ctx context.Context, in httpapi.PlanRunInput, progress func(httpapi.PlanProgress)) (httpapi.PlanRunResult, error) {
+	result, err := RunPlan(ctx, RunPlanInput{
+		Week:           in.Week,
+		Days:           in.Days,
+		CreateWishlist: in.CreateWishlist,
+		Family:         "family.json",
+		School:         "",
+		Progress: func(phase, message string) {
+			progress(httpapi.PlanProgress{Phase: phase, Message: message, At: time.Now()})
+		},
+	})
+	if err != nil {
+		return httpapi.PlanRunResult{}, fmt.Errorf("plan run: %w", err)
+	}
+	out := httpapi.PlanRunResult{
+		Status:    "accepted",
+		Message:   result.Message,
 		WeekStart: func() *string { s := result.WeekStart.Format("2006-01-02"); return &s }(),
 	}
 	return out, nil
@@ -617,7 +765,7 @@ func (a storeAdapter) DeleteShoppingListItem(ctx context.Context, listID, itemID
 }
 
 func (a storeAdapter) PushShoppingList(ctx context.Context, listID int64, retailer string) (httpapi.RetailerListBindingResponse, error) {
-	if _, err := PushShoppingList(ctx, a.db, listID, envOr("ADAPTER_URL", "http://localhost:8402"), retailer); err != nil {
+	if _, err := PushShoppingList(ctx, a.db, listID, a.adapterURL, retailer); err != nil {
 		return httpapi.RetailerListBindingResponse{}, err
 	}
 	binding, err := a.db.GetRetailerListBinding(ctx, listID, retailer)

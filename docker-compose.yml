@@ -43,7 +43,9 @@ services:
     command: ["migrate", "up", "--seed"]
 
   willys-adapter:
-    image: ghcr.io/androidand/spisordning/willys-adapter:latest
+    # Built + published by the store-clients repo's CI (willys-adapter-image.yml);
+    # the image lives under that repo's own GHCR namespace.
+    image: ghcr.io/androidand/store-clients/willys-adapter:latest
     restart: unless-stopped
     environment:
       ADAPTER_PORT: '8402'

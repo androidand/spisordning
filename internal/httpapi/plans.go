@@ -26,6 +26,15 @@ type PlanRunResult struct {
 	WeekStart *string `json:"week_start,omitempty"`
 }
 
+// PlanProgress is one SSE progress event for a running plan (api/openapi.yaml
+// PlanProgress). The payload shape is intentionally minimal and not finalized
+// until the frontend's SSE consumer needs it (task 3.4).
+type PlanProgress struct {
+	Phase   string    `json:"phase"`
+	Message string    `json:"message"`
+	At      time.Time `json:"at"`
+}
+
 // PlanService is the application surface the /plans handlers need.
 // It is defined here so httpapi stays dependency-free of persistence.
 // The cmd composition root supplies an implementation backed by persistence.Store.
@@ -39,6 +48,10 @@ type PlanService interface {
 	InsertCandidates(ctx context.Context, candidates []PlanCandidateInput) error
 	ListShoppingRequirements(ctx context.Context, planID int64) ([]ShoppingRequirementResponse, error)
 	RunPlan(ctx context.Context, in PlanRunInput) (PlanRunResult, error)
+	// RunPlanWithProgress runs the plan and reports progress via the callback
+	// as each phase completes. The SSE endpoint (POST /plans/run/stream) uses
+	// this to stream progress events.
+	RunPlanWithProgress(ctx context.Context, in PlanRunInput, progress func(PlanProgress)) (PlanRunResult, error)
 }
 
 // PlanResponse is the JSON view of a meal plan (openapi: components/schemas/MealPlan).

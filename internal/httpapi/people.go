@@ -38,6 +38,31 @@ type Dependencies struct {
 	ShoppingListItems   ShoppingListItemService
 	ShoppingPush        ShoppingPushService
 	Orders              OrderService
+	// PriceComparison compares prices across retailers (POST /compare). It
+	// resolves each requirement against every retailer and reports the cheapest;
+	// a stale/unavailable retailer degrades to available:false per item.
+	PriceComparison PriceComparisonService
+	// RecipeFamily is the git-like recipe hierarchy (family -> variant ->
+	// revision). Backs the /recipe-families routes.
+	RecipeFamily dto.RecipeFamilyService
+	// Favorites is the explicit recipe favorite + rating surface. Backs the
+	// /recipes/{id}/favorites and /recipes/{id}/rating routes.
+	Favorites dto.FavoritesService
+	// PriceIntelligence reads current prices per retailer product across
+	// stores, with the cheapest store computed. Backs the /prices routes.
+	PriceIntelligence dto.PriceIntelligenceService
+	// Dashboard aggregates tonight's meal, a pantry summary, and expiring items
+	// into a single read model. Backs the /widgets routes.
+	Dashboard dto.DashboardService
+	// IngredientAlias manages household nicknames → canonical ingredient
+	// (configurable nickname matching). Backs the /ingredient-aliases routes.
+	IngredientAlias dto.IngredientAliasService
+	// Inspiration ranks recipes by pantry coverage ("what can I make from my
+	// pantry"). Backs the /inspiration routes.
+	Inspiration dto.InspirationService
+	// Grocy bridges a running Grocy instance (products, stock, shopping list).
+	// Backs the /grocy routes; degrades to 503 when not configured.
+	Grocy dto.GrocyService
 }
 
 type peopleHandler struct {
@@ -55,10 +80,12 @@ func RegisterHandlers(mux *http.ServeMux, deps Dependencies) {
 		mux.HandleFunc("GET /people", h.listPeople)
 		mux.HandleFunc("POST /people", h.createPerson)
 		mux.HandleFunc("GET /people/{id}", h.getPerson)
+		mux.HandleFunc("PATCH /people/{id}", h.updatePerson)
 	}
 	if deps.Preferences != nil {
 		h := prefsHandler{svc: deps.Preferences}
 		mux.HandleFunc("GET /preferences", h.listPreferences)
+		mux.HandleFunc("POST /preferences", h.setPreference)
 	}
 	if deps.Recipes != nil {
 		h := recipesHandler{svc: deps.Recipes}
@@ -78,6 +105,7 @@ func RegisterHandlers(mux *http.ServeMux, deps Dependencies) {
 		mux.HandleFunc("GET /pantry/locations/{id}/lots", h.listLots)
 		mux.HandleFunc("POST /pantry/lots/purchase", h.purchase)
 		mux.HandleFunc("POST /pantry/lots/{id}/consume", h.consume)
+		mux.HandleFunc("GET /pantry/expiring", h.listExpiring)
 	}
 	if deps.Ingredients != nil {
 		h := ingredientsHandler{svc: deps.Ingredients}
@@ -106,6 +134,8 @@ func RegisterHandlers(mux *http.ServeMux, deps Dependencies) {
 	if deps.Plans != nil {
 		h := planRunHandler{svc: deps.Plans}
 		mux.HandleFunc("POST /plans/run", h.runPlan)
+		hp := planProgressHandler{svc: deps.Plans}
+		mux.HandleFunc("POST /plans/run/stream", hp.runPlanStream)
 		h2 := planListHandler{svc: deps.Plans}
 		mux.HandleFunc("GET /plans", h2.listPlans)
 		h3 := planCreateHandler{svc: deps.Plans}
@@ -171,6 +201,58 @@ func RegisterHandlers(mux *http.ServeMux, deps Dependencies) {
 		h3 := listOrderItemsHandler{svc: deps.Orders}
 		mux.HandleFunc("GET /orders/{orderId}/items", h3.listOrderItems)
 	}
+	if deps.PriceComparison != nil {
+		h := compareHandler{svc: deps.PriceComparison}
+		mux.HandleFunc("POST /compare", h.compare)
+	}
+	if deps.Favorites != nil {
+		h := favoritesHandler{svc: deps.Favorites}
+		mux.HandleFunc("GET /recipes/{id}/favorites", h.listFavorites)
+		mux.HandleFunc("POST /recipes/{id}/favorites", h.setFavorite)
+		mux.HandleFunc("DELETE /recipes/{id}/favorites", h.unsetFavorite)
+		mux.HandleFunc("GET /recipes/{id}/rating", h.getRating)
+	}
+	if deps.PriceIntelligence != nil {
+		h := pricesHandler{svc: deps.PriceIntelligence}
+		mux.HandleFunc("GET /prices", h.listProductPrices)
+	}
+	if deps.Dashboard != nil {
+		h := dashboardHandler{svc: deps.Dashboard}
+		mux.HandleFunc("GET /widgets/dashboard", h.getDashboard)
+	}
+	if deps.IngredientAlias != nil {
+		h := ingredientAliasHandler{svc: deps.IngredientAlias}
+		mux.HandleFunc("GET /ingredient-aliases", h.listAliases)
+		mux.HandleFunc("POST /ingredient-aliases", h.createAlias)
+		mux.HandleFunc("DELETE /ingredient-aliases/{alias}", h.deleteAlias)
+		mux.HandleFunc("GET /ingredient-aliases/resolve/{alias}", h.resolveAlias)
+	}
+	if deps.Inspiration != nil {
+		h := inspirationHandler{svc: deps.Inspiration}
+		mux.HandleFunc("GET /inspiration", h.suggest)
+	}
+	if deps.Grocy != nil {
+		h := grocyHandler{svc: deps.Grocy}
+		mux.HandleFunc("GET /grocy/status", h.status)
+		mux.HandleFunc("GET /grocy/products", h.listProducts)
+		mux.HandleFunc("GET /grocy/stock", h.listStock)
+		mux.HandleFunc("GET /grocy/shopping-list", h.listShoppingList)
+		mux.HandleFunc("POST /grocy/stock/add", h.addStock)
+		mux.HandleFunc("POST /grocy/stock/consume", h.consumeStock)
+		mux.HandleFunc("POST /grocy/shopping-list/items", h.addShoppingItem)
+	}
+	if deps.RecipeFamily != nil {
+		h := recipeFamilyHandler{svc: deps.RecipeFamily}
+		mux.HandleFunc("GET /recipe-families", h.listFamilies)
+		mux.HandleFunc("POST /recipe-families", h.createFamily)
+		mux.HandleFunc("GET /recipe-families/{id}", h.getFamily)
+		mux.HandleFunc("GET /recipe-families/{id}/variants", h.listVariants)
+		mux.HandleFunc("POST /recipe-families/{id}/variants", h.createVariant)
+		mux.HandleFunc("GET /recipe-families/{id}/variants/{variantId}/revisions", h.listRevisions)
+		mux.HandleFunc("POST /recipe-families/{id}/variants/{variantId}/revisions", h.createRevision)
+		mux.HandleFunc("GET /recipe-families/{id}/variants/{variantId}/revisions/{revisionId}", h.getRevision)
+		mux.HandleFunc("POST /recipe-families/{id}/variants/{variantId}/default", h.setDefaultVariant)
+	}
 }
 
 // Serve starts the HTTP server on addr (e.g. ":8080"). Handlers are sourced from
@@ -223,4 +305,28 @@ func (h *peopleHandler) createPerson(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, out)
+}
+
+func (h *peopleHandler) updatePerson(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var in dto.PersonUpdate
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid JSON body: " + err.Error()})
+		return
+	}
+	in.Name = strings.TrimSpace(in.Name)
+	if in.Name == "" {
+		writeJSON(w, http.StatusBadRequest, errorBody{Message: "field 'name' is required"})
+		return
+	}
+	out, err := h.svc.UpdatePerson(r.Context(), id, in)
+	if errors.Is(err, ErrNotFound) {
+		writeJSON(w, http.StatusNotFound, errorBody{Message: "person " + id + " not found"})
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "update person: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }

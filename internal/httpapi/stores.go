@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/androidand/spisordning/internal/dto"
 )
@@ -12,7 +13,24 @@ type storesHandler struct {
 }
 
 func (h *storesHandler) listStores(w http.ResponseWriter, r *http.Request) {
-	out, err := h.svc.ListStores(r.Context())
+	var input dto.LocateStoresInput
+	if lat := r.URL.Query().Get("latitude"); lat != "" {
+		v, err := strconv.ParseFloat(lat, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "latitude must be a number")
+			return
+		}
+		input.Latitude = &v
+	}
+	if lon := r.URL.Query().Get("longitude"); lon != "" {
+		v, err := strconv.ParseFloat(lon, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "longitude must be a number")
+			return
+		}
+		input.Longitude = &v
+	}
+	out, err := h.svc.LocateStores(r.Context(), input)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "list stores: "+err.Error())
 		return

@@ -11,9 +11,11 @@
 //	application  internal/planning                                — use-case logic
 //	service      internal/service, internal/mcp                   — app services
 //	contract     internal/dto                                     — shared DTOs + service interfaces
+//	config       internal/config                                  — runtime configuration
 //	client       internal/mealie, internal/skolmaten, internal/retailer,
-//	             internal/icaretailer, internal/llm, internal/httpclient,
-//	             internal/recipeimport, internal/matpriskollen, internal/ingredients
+//	             internal/icaretailer, internal/grocy, internal/llm,
+//	             internal/httpclient, internal/recipeimport,
+//	             internal/matpriskollen, internal/ingredients
 //	persistence  internal/persistence                      — Postgres repos
 //	httpapi      internal/httpapi                          — HTTP handlers
 //	mcptools     internal/mcptools                         — MCP tool adapters (no persistence)
@@ -45,6 +47,7 @@ const (
 	External    Layer = "external"
 	Service     Layer = "service"
 	Contract    Layer = "contract"
+	Config      Layer = "config"
 	Unknown     Layer = "unknown"
 )
 
@@ -60,11 +63,13 @@ var layerPrefixes = []prefix{
 	{Application, []string{"internal/planning"}},
 	{Service, []string{"internal/service", "internal/mcp"}},
 	{Contract, []string{"internal/dto"}},
+	{Config, []string{"internal/config"}},
 	{Client, []string{
 		"internal/mealie",
 		"internal/skolmaten",
 		"internal/retailer",
 		"internal/icaretailer",
+		"internal/grocy",
 		"internal/llm",
 		"internal/httpclient",
 		"internal/recipeimport",

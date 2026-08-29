@@ -59,8 +59,9 @@ func (s *Store) ListRetailers(ctx context.Context) ([]domain.Retailer, error) {
 
 // CreateStore inserts a store.
 func (s *Store) CreateStore(ctx context.Context, st domain.Store) error {
-	const q = `INSERT INTO store (id, retailer_id, name) VALUES ($1, $2, $3)`
-	if _, err := s.db.Exec(ctx, q, st.ID, st.RetailerID, st.Name); err != nil {
+	const q = `INSERT INTO store (id, retailer_id, name, latitude, longitude)
+		VALUES ($1, $2, $3, $4, $5)`
+	if _, err := s.db.Exec(ctx, q, st.ID, st.RetailerID, st.Name, st.Latitude, st.Longitude); err != nil {
 		return fmt.Errorf("persistence: create store: %w", err)
 	}
 	return nil
@@ -68,9 +69,12 @@ func (s *Store) CreateStore(ctx context.Context, st domain.Store) error {
 
 // GetStore fetches one store by id.
 func (s *Store) GetStore(ctx context.Context, id string) (domain.Store, error) {
-	const q = `SELECT id, retailer_id, name, created_at FROM store WHERE id = $1`
+	const q = `SELECT id, retailer_id, name, latitude, longitude, created_at
+		FROM store WHERE id = $1`
 	var st domain.Store
-	if err := s.db.QueryRow(ctx, q, id).Scan(&st.ID, &st.RetailerID, &st.Name, &st.CreatedAt); err != nil {
+	if err := s.db.QueryRow(ctx, q, id).Scan(
+		&st.ID, &st.RetailerID, &st.Name, &st.Latitude, &st.Longitude, &st.CreatedAt,
+	); err != nil {
 		return domain.Store{}, fmt.Errorf("persistence: get store: %w", err)
 	}
 	return st, nil
@@ -78,7 +82,8 @@ func (s *Store) GetStore(ctx context.Context, id string) (domain.Store, error) {
 
 // ListStores returns all stores for a retailer, ordered by id.
 func (s *Store) ListStores(ctx context.Context, retailerID string) ([]domain.Store, error) {
-	const q = `SELECT id, retailer_id, name, created_at FROM store WHERE retailer_id = $1 ORDER BY id`
+	const q = `SELECT id, retailer_id, name, latitude, longitude, created_at
+		FROM store WHERE retailer_id = $1 ORDER BY id`
 	rows, err := s.db.Query(ctx, q, retailerID)
 	if err != nil {
 		return nil, fmt.Errorf("persistence: list stores: %w", err)
@@ -87,7 +92,7 @@ func (s *Store) ListStores(ctx context.Context, retailerID string) ([]domain.Sto
 	var out []domain.Store
 	for rows.Next() {
 		var st domain.Store
-		if err := rows.Scan(&st.ID, &st.RetailerID, &st.Name, &st.CreatedAt); err != nil {
+		if err := rows.Scan(&st.ID, &st.RetailerID, &st.Name, &st.Latitude, &st.Longitude, &st.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, st)
@@ -96,13 +101,16 @@ func (s *Store) ListStores(ctx context.Context, retailerID string) ([]domain.Sto
 }
 
 // UpsertStore inserts a store or, if one with the same id already exists,
-// refreshes its name and retailer. Idempotent for sync commands.
+// refreshes its name, retailer, and position. Idempotent for sync commands.
 func (s *Store) UpsertStore(ctx context.Context, st domain.Store) error {
-	const q = `INSERT INTO store (id, retailer_id, name) VALUES ($1, $2, $3)
+	const q = `INSERT INTO store (id, retailer_id, name, latitude, longitude)
+		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT (id) DO UPDATE SET
 			retailer_id = EXCLUDED.retailer_id,
-			name = EXCLUDED.name`
-	if _, err := s.db.Exec(ctx, q, st.ID, st.RetailerID, st.Name); err != nil {
+			name = EXCLUDED.name,
+			latitude = EXCLUDED.latitude,
+			longitude = EXCLUDED.longitude`
+	if _, err := s.db.Exec(ctx, q, st.ID, st.RetailerID, st.Name, st.Latitude, st.Longitude); err != nil {
 		return fmt.Errorf("persistence: upsert store: %w", err)
 	}
 	return nil
@@ -110,7 +118,8 @@ func (s *Store) UpsertStore(ctx context.Context, st domain.Store) error {
 
 // ListAllStores returns every store across all retailers, ordered by id.
 func (s *Store) ListAllStores(ctx context.Context) ([]domain.Store, error) {
-	const q = `SELECT id, retailer_id, name, created_at FROM store ORDER BY id`
+	const q = `SELECT id, retailer_id, name, latitude, longitude, created_at
+		FROM store ORDER BY id`
 	rows, err := s.db.Query(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("persistence: list all stores: %w", err)
@@ -119,7 +128,7 @@ func (s *Store) ListAllStores(ctx context.Context) ([]domain.Store, error) {
 	var out []domain.Store
 	for rows.Next() {
 		var st domain.Store
-		if err := rows.Scan(&st.ID, &st.RetailerID, &st.Name, &st.CreatedAt); err != nil {
+		if err := rows.Scan(&st.ID, &st.RetailerID, &st.Name, &st.Latitude, &st.Longitude, &st.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, st)

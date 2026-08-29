@@ -106,6 +106,23 @@ func (s *Pantry) Consume(ctx context.Context, lotID int64, in dto.PantryConsumeI
 	return nil
 }
 
+func (s *Pantry) ListExpiring(ctx context.Context, within time.Duration) ([]dto.PantryLot, error) {
+	lots, err := s.db.ListExpiringLots(ctx, within)
+	if err != nil {
+		return nil, fmt.Errorf("service: list expiring lots: %w", err)
+	}
+	out := make([]dto.PantryLot, 0, len(lots))
+	for _, l := range lots {
+		out = append(out, dto.PantryLot{
+			ID: l.ID, IngredientID: l.IngredientID, ProductID: l.ProductID,
+			LocationID: l.LocationID, Quantity: l.Quantity, Unit: l.Unit,
+			Confidence: string(l.Confidence), BestBefore: nilOrTime(l.BestBefore),
+			OpenedAt: nilOrTime(l.OpenedAt), CreatedAt: l.CreatedAt, UpdatedAt: l.UpdatedAt,
+		})
+	}
+	return out, nil
+}
+
 func nilOrTime(t *time.Time) time.Time {
 	if t == nil {
 		return time.Time{}
