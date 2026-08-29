@@ -140,7 +140,7 @@ export default function RecipesPage() {
   const recipesQuery = useRecipes();
   const [q, setQ] = useState("");
 
-  const recipes: RecipeRef[] = recipesQuery.data ?? [];
+  const recipes: RecipeRef[] = useMemo(() => recipesQuery.data ?? [], [recipesQuery.data]);
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     if (!needle) return recipes;

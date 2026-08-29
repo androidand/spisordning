@@ -143,7 +143,7 @@ export default function PlannerPage() {
     return map;
   }, [view]);
 
-  const decisions = view?.decisions ?? [];
+  const decisions = useMemo(() => view?.decisions ?? [], [view]);
   const decisionByDate = useMemo(() => {
     const map = new Map<string, string>();
     for (const d of decisions) map.set(d.slot_date, d.mealie_recipe_id);

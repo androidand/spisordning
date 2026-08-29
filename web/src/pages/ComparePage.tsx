@@ -56,7 +56,7 @@ export default function ComparePage() {
   const [planId, setPlanId] = useState<number | null>(null);
   const activePlanId = planId ?? plans.find((p) => p.status === "approved")?.id ?? plans.at(-1)?.id ?? null;
   const reqQuery = useRequirements(activePlanId ?? undefined);
-  const requirements: Requirement[] = reqQuery.data ?? [];
+  const requirements: Requirement[] = useMemo(() => reqQuery.data ?? [], [reqQuery.data]);
 
   const [manual, setManual] = useState<CompareReq[]>([]);
   const [mIng, setMIng] = useState("");
@@ -87,7 +87,7 @@ export default function ComparePage() {
     },
   });
 
-  const items: ItemComparison[] = compareMutation.data?.items ?? [];
+  const items: ItemComparison[] = useMemo(() => compareMutation.data?.items ?? [], [compareMutation.data]);
   const totals = useMemo(() => {
     const t: Record<string, number> = {};
     for (const item of items) {
