@@ -6,8 +6,8 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
 
+	"github.com/androidand/spisordning/internal/config"
 	"github.com/androidand/spisordning/internal/mealie"
 	"github.com/androidand/spisordning/internal/service"
 )
@@ -30,8 +30,8 @@ func runSync(args []string) error {
 }
 
 func runSyncRecipes(ctx context.Context) error {
-	mealieURL, mealieToken := os.Getenv("MEALIE_BASE_URL"), os.Getenv("MEALIE_API_TOKEN")
-	if mealieURL == "" || mealieToken == "" {
+	cfg := config.Load()
+	if cfg.MealieBaseURL == "" || cfg.MealieAPIToken == "" {
 		return fmt.Errorf("sync recipes: MEALIE_BASE_URL and MEALIE_API_TOKEN must be set")
 	}
 	store, err := openStore(ctx)
@@ -41,7 +41,7 @@ func runSyncRecipes(ctx context.Context) error {
 	if store == nil {
 		return fmt.Errorf("sync recipes: no database configured (set POSTGRES_PASSWORD or DATABASE_URL)")
 	}
-	svc := service.NewRecipes(store, mealie.New(mealieURL, mealieToken))
+	svc := service.NewRecipes(store, mealie.New(cfg.MealieBaseURL, cfg.MealieAPIToken))
 	n, err := svc.SyncFromMealie(ctx)
 	if err != nil {
 		return err

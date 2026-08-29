@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/androidand/spisordning/internal/config"
 	"github.com/androidand/spisordning/internal/domain"
 	"github.com/androidand/spisordning/internal/retailer"
 )
@@ -36,16 +37,13 @@ func runSyncPrices(args []string) error {
 		return fmt.Errorf("sync prices: no database configured (set POSTGRES_PASSWORD or DATABASE_URL)")
 	}
 
+	cfg := config.Load()
 	kind := retailer.RetailerKind(*retailerFlag)
-	rc, err := retailer.NewFromKind(kind,
-		envOr("ADAPTER_URL", "http://localhost:8402"),
-		envOr("ICA_ADAPTER_URL", "http://localhost:8403"),
-		envOr("HEMKOP_ADAPTER_URL", "http://localhost:8404"),
-	)
+	rc, err := retailer.NewFromKind(kind, cfg.AdapterURL, cfg.ICAAdapterURL, cfg.HemkopAdapterURL)
 	if err != nil {
 		return fmt.Errorf("sync prices: %w", err)
 	}
-	rc.WithAuthFile(envOr("ICA_AUTH_FILE", ""))
+	rc.WithAuthFile(cfg.ICAAuthFile)
 
 	offers, err := rc.SyncOffers(ctx, *storeID)
 	if err != nil {

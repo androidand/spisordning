@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/androidand/spisordning/internal/config"
 	"github.com/androidand/spisordning/internal/domain"
 	"github.com/androidand/spisordning/internal/persistence"
 	"github.com/androidand/spisordning/internal/retailer"
@@ -32,7 +33,7 @@ func PushShoppingList(ctx context.Context, db *persistence.Store, listID int64, 
 		recordPushFailure(ctx, db, listID, retailerName)
 		return nil, fmt.Errorf("push shopping list: retailer: %w", err)
 	}
-	rc.WithAuthFile(envOr("ICA_AUTH_FILE", ""))
+	rc.WithAuthFile(config.Load().ICAAuthFile)
 
 	var reqs []domain.ShoppingRequirement
 	terms := retailer.SearchTerms{}
