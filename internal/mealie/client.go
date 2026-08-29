@@ -410,6 +410,65 @@ type recipeInstructionPatch struct {
 	IngredientReferences []string `json:"ingredientReferences"`
 }
 
+type tagListResponse struct {
+	Items []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+		Slug string `json:"slug"`
+	} `json:"items"`
+}
+
+type tagRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Slug string `json:"slug"`
+}
+
+// getOrCreateTag returns the id of the Mealie tag named name, creating it if
+// it doesn't exist. POST /api/organizers/tags is NOT idempotent — it 500s if
+// the tag already exists (verified against the live instance) — so this
+// always lists first rather than create-then-fall-back-on-error.
+func (c *Client) getOrCreateTag(ctx context.Context, name string) (tagRef, error) {
+	var list tagListResponse
+	if err := c.get(ctx, "/api/organizers/tags", &list); err != nil {
+		return tagRef{}, fmt.Errorf("mealie: list tags: %w", err)
+	}
+	for _, t := range list.Items {
+		if strings.EqualFold(t.Name, name) {
+			return tagRef{ID: t.ID, Name: t.Name, Slug: t.Slug}, nil
+		}
+	}
+	raw, err := c.postRaw(ctx, "/api/organizers/tags", map[string]any{"name": name})
+	if err != nil {
+		return tagRef{}, fmt.Errorf("mealie: create tag %q: %w", name, err)
+	}
+	var created tagRef
+	if err := json.Unmarshal(raw, &created); err != nil {
+		return tagRef{}, fmt.Errorf("mealie: create tag %q: decode: %w", name, err)
+	}
+	return created, nil
+}
+
+// SetTags replaces slug's tags with tagNames, creating any tag that doesn't
+// already exist in Mealie. PATCHing tags without a resolved id throws a 500
+// (TypeError) — found while importing recipes earlier in the session that
+// produced this write path — so every tag is resolved via getOrCreateTag
+// first.
+func (c *Client) SetTags(ctx context.Context, slug string, tagNames []string) error {
+	tags := make([]tagRef, 0, len(tagNames))
+	for _, name := range tagNames {
+		t, err := c.getOrCreateTag(ctx, name)
+		if err != nil {
+			return fmt.Errorf("mealie: set tags for %q: %w", slug, err)
+		}
+		tags = append(tags, t)
+	}
+	if _, err := c.patchRaw(ctx, "/api/recipes/"+slug, map[string]any{"tags": tags}); err != nil {
+		return fmt.Errorf("mealie: set tags for %q: %w", slug, err)
+	}
+	return nil
+}
+
 // SetInstructions replaces slug's recipeInstructions list, one entry per step.
 func (c *Client) SetInstructions(ctx context.Context, slug string, steps []string) error {
 	patch := make([]recipeInstructionPatch, len(steps))

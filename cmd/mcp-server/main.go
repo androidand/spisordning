@@ -4,10 +4,8 @@
 // local agent tooling without standing up the REST HTTP stack, and so its
 // lifecycle is decoupled from the REST API's.
 //
-//
 //	mcp-server            — Streamable HTTP (stateless) on SPISORNING_MCP_ADDR (default :8081)
 //	mcp-server --stdio    — stdio transport, for an agent spawning it as a subprocess
-//
 //
 // The server degrades gracefully: without a Postgres connection (POSTGRES_* /
 // DATABASE_URL) it serves /health but registers no tools.
@@ -27,7 +25,9 @@ import (
 
 	"github.com/androidand/spisordning/internal/config"
 	"github.com/androidand/spisordning/internal/mcptools"
+	"github.com/androidand/spisordning/internal/mealie"
 	"github.com/androidand/spisordning/internal/persistence"
+	"github.com/androidand/spisordning/internal/service"
 )
 
 func main() {
@@ -92,12 +92,20 @@ func buildMCPDeps(logger *slog.Logger) mcptools.Dependencies {
 		willysURL: appCfg.WillysAdapterURL,
 		icaURL:    appCfg.ICAAdapterURL,
 	}
+	if appCfg.MealieEnabled() {
+		adapter.recipes = service.NewRecipes(store, mealie.New(appCfg.MealieBaseURL, appCfg.MealieAPIToken))
+	} else {
+		logger.Warn("no Mealie instance configured (MEALIE_BASE_URL/MEALIE_API_TOKEN unset); structure_recipe not registered")
+	}
 	deps.Planner = adapter
 	deps.Reactions = adapter
 	deps.Requirements = adapter
 	deps.ShoppingList = adapter
 	deps.Compare = adapter
 	deps.Wishlist = adapter
+	if adapter.recipes != nil {
+		deps.RecipeStructuring = adapter
+	}
 	return deps
 }
 

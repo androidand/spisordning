@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/androidand/spisordning/internal/mealie"
@@ -101,10 +102,15 @@ func TestSectionRecipeText_MarkerCaseAndColonInsensitive(t *testing.T) {
 // resolved ingredient.
 func TestStructureFromText_WorkedExample(t *testing.T) {
 	var createdName string
-	var patchedIngredients, patchedInstructions json.RawMessage
+	var patchedIngredients, patchedInstructions, patchedTags json.RawMessage
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.URL.Path == "/api/organizers/tags" && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(`{"items":[]}`)) // no existing tags — chat-import must be created
+		case r.URL.Path == "/api/organizers/tags" && r.Method == http.MethodPost:
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":"tag-id-1","name":"chat-import","slug":"chat-import"}`))
 		case r.URL.Path == "/api/recipes" && r.Method == http.MethodPost:
 			var body struct {
 				Name string `json:"name"`
@@ -145,6 +151,7 @@ func TestStructureFromText_WorkedExample(t *testing.T) {
 			var body struct {
 				RecipeIngredient  json.RawMessage `json:"recipeIngredient"`
 				RecipeInstruction json.RawMessage `json:"recipeInstructions"`
+				Tags              json.RawMessage `json:"tags"`
 			}
 			raw, _ := io.ReadAll(r.Body)
 			_ = json.Unmarshal(raw, &body)
@@ -153,6 +160,9 @@ func TestStructureFromText_WorkedExample(t *testing.T) {
 			}
 			if body.RecipeInstruction != nil {
 				patchedInstructions = body.RecipeInstruction
+			}
+			if body.Tags != nil {
+				patchedTags = body.Tags
 			}
 			_, _ = w.Write([]byte(`{}`))
 		default:
@@ -187,6 +197,11 @@ func TestStructureFromText_WorkedExample(t *testing.T) {
 	}
 	if patchedInstructions == nil {
 		t.Error("expected a recipeInstructions PATCH")
+	}
+	if patchedTags == nil {
+		t.Error("expected a tags PATCH (chat-import)")
+	} else if !strings.Contains(string(patchedTags), "chat-import") {
+		t.Errorf("expected the chat-import tag in the PATCH body, got %s", patchedTags)
 	}
 
 	// The genuinely ambiguous lines must be flagged, not silently guessed.

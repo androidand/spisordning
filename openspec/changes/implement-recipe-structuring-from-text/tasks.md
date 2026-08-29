@@ -104,17 +104,33 @@ working, not guessed:
 
 ## 4. MCP tool
 
-- [ ] 4.1 Design the tool schema: input `{raw_text: string}`, output `{recipe_id, title,
+- [x] 4.1 Design the tool schema: input `{raw_text: string}`, output `{recipe_id, title,
       ingredients: [...], instructions: [...], low_confidence: [...]}`.
-- [ ] 4.2 Add a `Recipes`-service method (alongside the existing `SyncFromMealie`) that sections
+
+      ✅ Done 2026-08-29. `internal/mcptools/recipestructure.go`.
+- [x] 4.2 Add a `Recipes`-service method (alongside the existing `SyncFromMealie`) that sections
       the text, calls `CreateRecipe`/`SetIngredients`/`SetInstructions`, and returns the structured
       result — keep composition-root (`cmd/mcp-server/adapters.go`) thin, matching how
       `ShoppingRequirements` already delegates to `internal/planning`/`internal/service` rather
       than doing real work itself.
-- [ ] 4.3 Register the MCP tool in `internal/mcptools` following the existing pattern (schema +
+
+      ✅ Done 2026-08-29. `Recipes.StructureFromText` (internal/service/recipe_structuring.go).
+      `mcpStoreAdapter.StructureRecipe` (cmd/mcp-server/adapters.go) is a thin DTO-mapping shim.
+- [x] 4.3 Register the MCP tool in `internal/mcptools` following the existing pattern (schema +
       handler in `mcptools`, service interface implemented by the composition root).
-- [ ] 4.4 Tag recipes created this way (e.g. `chat-import`) so they're distinguishable from the
+
+      ✅ Done 2026-08-29. `structure_recipe` tool registered in `RegisterTools`; wired in
+      `cmd/mcp-server/main.go`'s `buildMCPDeps`, gated on `appCfg.MealieEnabled()` (degrades
+      gracefully — no Mealie configured means the tool isn't registered, same pattern as the rest
+      of this file).
+- [x] 4.4 Tag recipes created this way (e.g. `chat-import`) so they're distinguishable from the
       Middagsbank imports and this session's 7 hand-imported dinners.
+
+      ✅ Done 2026-08-29. `internal/mealie/client.go` `SetTags`/`getOrCreateTag`. Verified live
+      against the real Mealie instance first (not guessed): `POST /api/organizers/tags` 500s if
+      the tag already exists (not idempotent), so `getOrCreateTag` always lists first. Best-effort:
+      a tagging failure doesn't fail the whole `StructureFromText` call, since the recipe already
+      exists and is usable without the tag.
 
 ## 5. Verification
 

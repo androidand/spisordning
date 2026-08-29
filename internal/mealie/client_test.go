@@ -337,6 +337,61 @@ func TestSetInstructions_AlwaysSendsFullObjectShape(t *testing.T) {
 	}
 }
 
+// TestSetTags_ReusesExistingTagAndCreatesMissing guards two real bugs found
+// while importing recipes earlier in the session that produced this write
+// path: (1) POST /api/organizers/tags is NOT idempotent — it 500s if the tag
+// already exists — so an existing tag must be looked up, never blindly
+// (re)created; (2) PATCHing tags without a resolved id throws a 500.
+func TestSetTags_ReusesExistingTagAndCreatesMissing(t *testing.T) {
+	var createCalls int
+	var patchedTags []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/organizers/tags" && r.Method == http.MethodGet:
+			w.Write([]byte(`{"items":[{"id":"existing-id","name":"middag","slug":"middag"}]}`))
+		case r.URL.Path == "/api/organizers/tags" && r.Method == http.MethodPost:
+			createCalls++
+			var body struct {
+				Name string `json:"name"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			w.WriteHeader(http.StatusCreated)
+			w.Write([]byte(`{"id":"new-id","name":"` + body.Name + `","slug":"` + body.Name + `"}`))
+		case r.URL.Path == "/api/recipes/tacopaj" && r.Method == http.MethodPatch:
+			var body struct {
+				Tags []map[string]any `json:"tags"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			patchedTags = body.Tags
+			w.Write([]byte(`{}`))
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	if err := New(srv.URL, "tok").SetTags(context.Background(), "tacopaj", []string{"middag", "chat-import"}); err != nil {
+		t.Fatalf("SetTags: %v", err)
+	}
+	if createCalls != 1 {
+		t.Fatalf("expected exactly 1 tag creation (only for the missing tag), got %d", createCalls)
+	}
+	if len(patchedTags) != 2 {
+		t.Fatalf("expected 2 patched tags, got %+v", patchedTags)
+	}
+	if patchedTags[0]["id"] != "existing-id" {
+		t.Errorf("expected the existing tag's real id to be reused, got %+v", patchedTags[0])
+	}
+	if patchedTags[1]["id"] != "new-id" || patchedTags[1]["name"] != "chat-import" {
+		t.Errorf("expected the newly-created tag's id, got %+v", patchedTags[1])
+	}
+	for i, tag := range patchedTags {
+		if id, _ := tag["id"].(string); id == "" {
+			t.Errorf("tag %d: id must never be empty (this is the 500-causing shape), got %+v", i, tag)
+		}
+	}
+}
+
 func TestEffortFromTotalTime(t *testing.T) {
 	cases := []struct {
 		in   string

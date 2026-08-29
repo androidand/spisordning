@@ -17,6 +17,10 @@ import (
 // second-guessing every imperfect parse.
 const lowConfidenceThreshold = 0.5
 
+// chatImportTag distinguishes recipes created via StructureFromText from the
+// Middagsbank imports and manually-imported recipes already in Mealie.
+const chatImportTag = "chat-import"
+
 // StructuredIngredient is one ingredient line as actually written to Mealie,
 // reported back to the caller.
 type StructuredIngredient struct {
@@ -76,6 +80,12 @@ func (s *Recipes) StructureFromText(ctx context.Context, rawText string) (Struct
 			return StructuredRecipe{}, fmt.Errorf("service: structure recipe: set instructions for %q: %w", slug, err)
 		}
 	}
+
+	// Tag distinctly so these are identifiable later, same spirit as the
+	// lågeffekt/matlåda tagging already used elsewhere. Best-effort: tagging
+	// failure shouldn't fail the whole structuring call — the recipe already
+	// exists and is usable without the tag.
+	_ = s.mealie.SetTags(ctx, slug, []string{chatImportTag})
 
 	out := StructuredRecipe{
 		RecipeID:     slug,
