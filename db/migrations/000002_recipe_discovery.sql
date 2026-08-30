@@ -43,7 +43,7 @@ CREATE TABLE external_recipe_source (
 -- denormalized for the review surface; raw_jsonld is retained for re-sync and
 -- audit. status gates the lifecycle: candidate -> promoted | rejected.
 CREATE TABLE recipe_import_candidate (
-    id                 BIGSERIAL PRIMARY KEY,
+    id                 UUID PRIMARY KEY,
     source_id          TEXT NOT NULL REFERENCES external_recipe_source(id) ON DELETE RESTRICT,
     source_url         TEXT NOT NULL,
     external_id        TEXT,              -- source's own recipe id, when it has one
@@ -57,7 +57,7 @@ CREATE TABLE recipe_import_candidate (
     category           TEXT,
     cuisine            TEXT,
     attribution        TEXT,              -- author, carried into the promoted variant
-    rating             DOUBLE PRECISION,
+    rating             numeric(3,1) CHECK (rating >= 0 AND rating <= 5),
     rating_count       INT,
     nutrition          JSONB,
     raw_jsonld         JSONB,
@@ -66,7 +66,7 @@ CREATE TABLE recipe_import_candidate (
     first_served_at    TIMESTAMPTZ,       -- set when first planned/cooked (nudge signal)
     status             TEXT NOT NULL DEFAULT 'candidate'
                        CHECK (status IN ('candidate', 'promoted', 'rejected')),
-    promoted_variant_id TEXT              -- set only when status = 'promoted'; FK deferred
+    promoted_variant_id UUID              -- set only when status = 'promoted'; FK deferred
 );
 
 -- A source's own id wins when present; otherwise the URL is the identity.
@@ -82,15 +82,14 @@ CREATE INDEX ON recipe_import_candidate (source_id);
 -- canonical ingredient, at which point needs_review clears. This reuses the
 -- ingredient_mapping.needs_review pattern rather than inventing a parallel one.
 CREATE TABLE recipe_import_candidate_ingredient (
-    id            BIGSERIAL PRIMARY KEY,
-    candidate_id  BIGINT NOT NULL REFERENCES recipe_import_candidate(id) ON DELETE CASCADE,
+    candidate_id  UUID NOT NULL REFERENCES recipe_import_candidate(id) ON DELETE CASCADE,
     line_no       INT NOT NULL,
     raw_text      TEXT NOT NULL,
-    ingredient_id TEXT REFERENCES ingredient(id) ON DELETE SET NULL,
-    quantity      DOUBLE PRECISION,
+    ingredient_id UUID REFERENCES ingredient(id) ON DELETE SET NULL,
+    quantity      numeric(12,3),
     unit          TEXT,
     needs_review  BOOLEAN NOT NULL DEFAULT true,
-    UNIQUE (candidate_id, line_no)
+    PRIMARY KEY (candidate_id, line_no)
 );
 CREATE INDEX ON recipe_import_candidate_ingredient (candidate_id, needs_review);
 

@@ -15,11 +15,11 @@ import (
 // (design.md D9) — most locations are expected to stay flat
 // (ParentLocationID == "").
 type InventoryLocation struct {
-	ID               string
-	HouseholdID      string
+	ID               domain.InventoryLocationID
+	HouseholdID      domain.HouseholdID
 	Name             string
 	LocationType     string // "" when unset; one of domain's location-type strings otherwise
-	ParentLocationID string // "" when this location has no parent
+	ParentLocationID *domain.InventoryLocationID // nil when this location has no parent
 	ArchivedAt       *time.Time
 }
 
@@ -28,19 +28,22 @@ type InventoryLocation struct {
 // walks the candidate parent's ancestor chain with a recursive query and
 // hands it to domain.WouldCreateLocationCycle for the actual decision.
 func (s *Store) CreateInventoryLocation(ctx context.Context, l InventoryLocation) error {
-	if l.ParentLocationID != "" {
-		ancestors, err := s.locationAncestors(ctx, l.ParentLocationID)
+	if l.ParentLocationID != nil {
+		ancestors, err := s.locationAncestors(ctx, *l.ParentLocationID)
 		if err != nil {
 			return err
 		}
-		if domain.WouldCreateLocationCycle(l.ID, l.ParentLocationID, ancestors) {
-			return fmt.Errorf("persistence: creating inventory_location %q under %q would create a cycle", l.ID, l.ParentLocationID)
+		if domain.WouldCreateLocationCycle(l.ID, *l.ParentLocationID, ancestors) {
+			return fmt.Errorf("persistence: creating inventory_location %q under %q would create a cycle", l.ID, *l.ParentLocationID)
 		}
 	}
 	const q = `INSERT INTO inventory_location (id, household_id, name, location_type, parent_location_id)
 		VALUES ($1, $2, $3, $4, $5)`
 	locType := nullableText(l.LocationType)
-	parent := nullableText(l.ParentLocationID)
+	var parent any
+	if l.ParentLocationID != nil {
+		parent = *l.ParentLocationID
+	}
 	if _, err := s.db.Exec(ctx, q, l.ID, l.HouseholdID, l.Name, locType, parent); err != nil {
 		return fmt.Errorf("persistence: create inventory_location: %w", err)
 	}
@@ -49,23 +52,23 @@ func (s *Store) CreateInventoryLocation(ctx context.Context, l InventoryLocation
 
 // locationAncestors returns id's full ancestor chain (parent, grandparent,
 // ... up to the root), via a recursive query over parent_location_id.
-func (s *Store) locationAncestors(ctx context.Context, id string) ([]string, error) {
+func (s *Store) locationAncestors(ctx context.Context, id domain.InventoryLocationID) ([]domain.InventoryLocationID, error) {
 	const q = `WITH RECURSIVE ancestors AS (
-			SELECT id, parent_location_id FROM inventory_location WHERE id = $1
-		UNION ALL
-			SELECT l.id, l.parent_location_id
-			FROM inventory_location l
-			JOIN ancestors a ON l.id = a.parent_location_id
-		)
-		SELECT id FROM ancestors`
+		SELECT id, parent_location_id FROM inventory_location WHERE id = $1
+	UNION ALL
+		SELECT l.id, l.parent_location_id
+		FROM inventory_location l
+		JOIN ancestors a ON l.id = a.parent_location_id
+	)
+	SELECT id FROM ancestors`
 	rows, err := s.db.Query(ctx, q, id)
 	if err != nil {
 		return nil, fmt.Errorf("persistence: walk inventory_location ancestors: %w", err)
 	}
 	defer rows.Close()
-	var out []string
+	var out []domain.InventoryLocationID
 	for rows.Next() {
-		var locID string
+		var locID domain.InventoryLocationID
 		if err := rows.Scan(&locID); err != nil {
 			return nil, err
 		}
@@ -75,19 +78,20 @@ func (s *Store) locationAncestors(ctx context.Context, id string) ([]string, err
 }
 
 // GetInventoryLocation fetches one location by id.
-func (s *Store) GetInventoryLocation(ctx context.Context, id string) (InventoryLocation, error) {
+func (s *Store) GetInventoryLocation(ctx context.Context, id domain.InventoryLocationID) (InventoryLocation, error) {
 	const q = `SELECT id, household_id, name, location_type, parent_location_id, archived_at
 		FROM inventory_location WHERE id = $1`
 	var l InventoryLocation
-	var locType, parent *string
+	var locType *string
+	var parent domain.InventoryLocationID
 	if err := s.db.QueryRow(ctx, q, id).Scan(&l.ID, &l.HouseholdID, &l.Name, &locType, &parent, &l.ArchivedAt); err != nil {
 		return InventoryLocation{}, fmt.Errorf("persistence: get inventory_location: %w", err)
 	}
 	if locType != nil {
 		l.LocationType = *locType
 	}
-	if parent != nil {
-		l.ParentLocationID = *parent
+	if parent != (domain.InventoryLocationID{}) {
+		l.ParentLocationID = &parent
 	}
 	return l, nil
 }
@@ -96,7 +100,7 @@ func (s *Store) GetInventoryLocation(ctx context.Context, id string) (InventoryL
 // of its descendant locations (design.md D9: "everything under this
 // location" is a recursive walk down, not a requirement that lots be
 // recorded at the coarsest ancestor).
-func (s *Store) ListLotsUnderLocation(ctx context.Context, id string) ([]InventoryLot, error) {
+func (s *Store) ListLotsUnderLocation(ctx context.Context, id domain.InventoryLocationID) ([]InventoryLot, error) {
 	const q = `WITH RECURSIVE descendants AS (
 			SELECT id FROM inventory_location WHERE id = $1
 		UNION ALL
@@ -120,10 +124,10 @@ func (s *Store) ListLotsUnderLocation(ctx context.Context, id string) ([]Invento
 // ProductID is "" when the lot exists at ingredient-only specificity
 // (design.md D8).
 type InventoryLot struct {
-	ID           int64
-	IngredientID string
-	ProductID    string
-	LocationID   string
+	ID           domain.InventoryLotID
+	IngredientID domain.IngredientID
+	ProductID    *domain.ProductID
+	LocationID   domain.InventoryLocationID
 	Quantity     float64
 	Unit         string
 	Confidence   domain.Confidence
@@ -138,14 +142,14 @@ func scanLots(rows pgx.Rows) ([]InventoryLot, error) {
 	var out []InventoryLot
 	for rows.Next() {
 		var l InventoryLot
-		var productID *string
+		var productID domain.ProductID
 		var confidence string
 		if err := rows.Scan(&l.ID, &l.IngredientID, &productID, &l.LocationID, &l.Quantity, &l.Unit,
 			&confidence, &l.BestBefore, &l.OpenedAt, &l.CreatedAt, &l.UpdatedAt); err != nil {
 			return nil, err
 		}
-		if productID != nil {
-			l.ProductID = *productID
+		if productID != (domain.ProductID{}) {
+			l.ProductID = &productID
 		}
 		l.Confidence = domain.Confidence(confidence)
 		out = append(out, l)
@@ -178,16 +182,16 @@ func (s *Store) ListExpiringLots(ctx context.Context, within time.Duration) ([]I
 // currently have at least one non-empty lot (quantity > 0) in the pantry.
 // This is the read behind the "what can I make from my pantry" inspiration
 // use case.
-func (s *Store) ListPantryIngredientIDs(ctx context.Context) ([]string, error) {
+func (s *Store) ListPantryIngredientIDs(ctx context.Context) ([]domain.IngredientID, error) {
 	const q = `SELECT DISTINCT ingredient_id FROM inventory_lot WHERE quantity > 0 ORDER BY ingredient_id`
 	rows, err := s.db.Query(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("persistence: list pantry ingredient ids: %w", err)
 	}
 	defer rows.Close()
-	var out []string
+	var out []domain.IngredientID
 	for rows.Next() {
-		var id string
+		var id domain.IngredientID
 		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
@@ -197,7 +201,7 @@ func (s *Store) ListPantryIngredientIDs(ctx context.Context) ([]string, error) {
 }
 
 // GetInventoryLot fetches one lot by id.
-func (s *Store) GetInventoryLot(ctx context.Context, id int64) (InventoryLot, error) {
+func (s *Store) GetInventoryLot(ctx context.Context, id domain.InventoryLotID) (InventoryLot, error) {
 	const q = `SELECT id, ingredient_id, product_id, location_id, quantity, unit, confidence,
 		best_before, opened_at, created_at, updated_at FROM inventory_lot WHERE id = $1`
 	rows, err := s.db.Query(ctx, q, id)
@@ -209,7 +213,7 @@ func (s *Store) GetInventoryLot(ctx context.Context, id int64) (InventoryLot, er
 		return InventoryLot{}, err
 	}
 	if len(lots) == 0 {
-		return InventoryLot{}, fmt.Errorf("persistence: inventory_lot %d not found", id)
+		return InventoryLot{}, fmt.Errorf("persistence: inventory_lot %s not found", id)
 	}
 	return lots[0], nil
 }
@@ -223,40 +227,42 @@ const sourceShoppingOrder = "shopping_order"
 // (design.md D8, invariant 7): the retailer resolution that produced the
 // order already determined the exact product, so there is no "quick" version
 // of this path.
-func (s *Store) RecordPurchase(ctx context.Context, ingredientID, productID, locationID string, quantity float64, unit string, bestBefore *time.Time, source string) (int64, error) {
-	if source == sourceShoppingOrder && productID == "" {
-		return 0, errors.New("persistence: RecordPurchase: productId is required when source is shopping_order")
+func (s *Store) RecordPurchase(ctx context.Context, ingredientID domain.IngredientID, productID *domain.ProductID, locationID domain.InventoryLocationID, quantity float64, unit string, bestBefore *time.Time, source string) (domain.InventoryLotID, error) {
+	if source == sourceShoppingOrder && productID == nil {
+		return domain.InventoryLotID{}, errors.New("persistence: RecordPurchase: productId is required when source is shopping_order")
 	}
 	if quantity <= 0 {
-		return 0, errors.New("persistence: RecordPurchase: quantity must be > 0")
+		return domain.InventoryLotID{}, errors.New("persistence: RecordPurchase: quantity must be > 0")
 	}
 	confidence := domain.ConfidenceForEvent(domain.EventPurchase, source, false)
 
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("persistence: begin RecordPurchase: %w", err)
+		return domain.InventoryLotID{}, fmt.Errorf("persistence: begin RecordPurchase: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
-	var lotID int64
+	lotID := domain.NewInventoryLotID()
 	const insertLot = `INSERT INTO inventory_lot
-		(ingredient_id, product_id, location_id, quantity, unit, confidence, best_before)
-		VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`
-	if err := tx.QueryRow(ctx, insertLot, ingredientID, nullableText(productID), locationID, quantity, unit, string(confidence), bestBefore).Scan(&lotID); err != nil {
-		return 0, fmt.Errorf("persistence: RecordPurchase insert lot: %w", err)
+		(id, ingredient_id, product_id, location_id, quantity, unit, confidence, best_before)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`
+	var returnedLotID domain.InventoryLotID
+	if err := tx.QueryRow(ctx, insertLot, lotID, ingredientID, productID, locationID, quantity, unit, string(confidence), bestBefore).Scan(&returnedLotID); err != nil {
+		return domain.InventoryLotID{}, fmt.Errorf("persistence: RecordPurchase insert lot: %w", err)
 	}
 
+	eventID := domain.NewInventoryEventID()
 	const insertEvent = `INSERT INTO inventory_event
-		(kind, lot_id, ingredient_id, product_id, quantity_delta, source)
-		VALUES ($1, $2, $3, $4, $5, $6)`
-	if _, err := tx.Exec(ctx, insertEvent, string(domain.EventPurchase), lotID, ingredientID, nullableText(productID), quantity, source); err != nil {
-		return 0, fmt.Errorf("persistence: RecordPurchase insert event: %w", err)
+		(id, kind, lot_id, ingredient_id, product_id, quantity_delta, source)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`
+	if _, err := tx.Exec(ctx, insertEvent, eventID, string(domain.EventPurchase), returnedLotID, ingredientID, productID, quantity, source); err != nil {
+		return domain.InventoryLotID{}, fmt.Errorf("persistence: RecordPurchase insert event: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return 0, fmt.Errorf("persistence: commit RecordPurchase: %w", err)
+		return domain.InventoryLotID{}, fmt.Errorf("persistence: commit RecordPurchase: %w", err)
 	}
-	return lotID, nil
+	return returnedLotID, nil
 }
 
 // RefineLotProduct attaches a specific Product to a previously
@@ -270,17 +276,14 @@ func (s *Store) RecordPurchase(ctx context.Context, ingredientID, productID, loc
 // this implementation drops it: a refinement is not an inventory event and
 // carries no delta, so there is no event row to attach a source to. The
 // deviation is intentional and documented in tasks.md 4.5's note.
-func (s *Store) RefineLotProduct(ctx context.Context, lotID int64, productID string) error {
-	if productID == "" {
-		return errors.New("persistence: RefineLotProduct: productID is required")
-	}
+func (s *Store) RefineLotProduct(ctx context.Context, lotID domain.InventoryLotID, productID domain.ProductID) error {
 	const q = `UPDATE inventory_lot SET product_id = $1, updated_at = now() WHERE id = $2`
 	c, err := s.db.Exec(ctx, q, productID, lotID)
 	if err != nil {
 		return fmt.Errorf("persistence: RefineLotProduct: %w", err)
 	}
 	if c.RowsAffected() == 0 {
-		return fmt.Errorf("persistence: inventory_lot %d not found", lotID)
+		return fmt.Errorf("persistence: inventory_lot %s not found", lotID)
 	}
 	return nil
 }
@@ -289,7 +292,7 @@ func (s *Store) RefineLotProduct(ctx context.Context, lotID int64, productID str
 // (design.md D8): products already mapped to ingredientID first, falling
 // back to a name-match search against the ingredient's own display name when
 // no mapping exists yet. Never an unscoped catalog-wide search.
-func (s *Store) ListCandidateProductsForIngredient(ctx context.Context, ingredientID string) ([]Product, error) {
+func (s *Store) ListCandidateProductsForIngredient(ctx context.Context, ingredientID domain.IngredientID) ([]Product, error) {
 	mapped, err := s.ListProductsForIngredient(ctx, ingredientID)
 	if err != nil {
 		return nil, err
@@ -338,7 +341,7 @@ func (s *Store) ListCandidateProductsForIngredient(ctx context.Context, ingredie
 // against a concurrent writer of the same lot: the `quantity + $1 >= 0`
 // guard makes an over-consuming/over-discarding write fail atomically
 // (RowsAffected 0) instead of driving the lot negative.
-func (s *Store) applyLotDelta(ctx context.Context, lotID int64, kind domain.EventKind, delta float64, confidence domain.Confidence, reason, source string) error {
+func (s *Store) applyLotDelta(ctx context.Context, lotID domain.InventoryLotID, kind domain.EventKind, delta float64, confidence domain.Confidence, reason, source string) error {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("persistence: begin %s: %w", kind, err)
@@ -352,12 +355,13 @@ func (s *Store) applyLotDelta(ctx context.Context, lotID int64, kind domain.Even
 		return fmt.Errorf("persistence: %s update lot: %w", kind, err)
 	}
 	if c.RowsAffected() == 0 {
-		return fmt.Errorf("persistence: %s: inventory_lot %d not found, or delta %v would make quantity negative", kind, lotID, delta)
+		return fmt.Errorf("persistence: %s: inventory_lot %s not found, or delta %v would make quantity negative", kind, lotID, delta)
 	}
 
-	const insertEvent = `INSERT INTO inventory_event (kind, lot_id, quantity_delta, reason, source)
-		VALUES ($1, $2, $3, $4, $5)`
-	if _, err := tx.Exec(ctx, insertEvent, string(kind), lotID, delta, nullableText(reason), source); err != nil {
+	eventID := domain.NewInventoryEventID()
+	const insertEvent = `INSERT INTO inventory_event (id, kind, lot_id, quantity_delta, reason, source)
+		VALUES ($1, $2, $3, $4, $5, $6)`
+	if _, err := tx.Exec(ctx, insertEvent, eventID, string(kind), lotID, delta, nullableText(reason), source); err != nil {
 		return fmt.Errorf("persistence: %s insert event: %w", kind, err)
 	}
 
@@ -367,7 +371,7 @@ func (s *Store) applyLotDelta(ctx context.Context, lotID int64, kind domain.Even
 // RecordConsume decrements lotID by quantity and appends a CONSUME event.
 // estimated controls the resulting confidence (design.md D3): false for an
 // explicit counted amount, true for a household estimate like "about half".
-func (s *Store) RecordConsume(ctx context.Context, lotID int64, quantity float64, estimated bool, source string) error {
+func (s *Store) RecordConsume(ctx context.Context, lotID domain.InventoryLotID, quantity float64, estimated bool, source string) error {
 	if quantity <= 0 {
 		return errors.New("persistence: RecordConsume: quantity must be positive")
 	}
@@ -377,7 +381,7 @@ func (s *Store) RecordConsume(ctx context.Context, lotID int64, quantity float64
 
 // RecordDiscard decrements lotID by quantity and appends a DISCARD event with
 // reason (expired/spoiled/other).
-func (s *Store) RecordDiscard(ctx context.Context, lotID int64, quantity float64, estimated bool, reason, source string) error {
+func (s *Store) RecordDiscard(ctx context.Context, lotID domain.InventoryLotID, quantity float64, estimated bool, reason, source string) error {
 	if quantity <= 0 {
 		return errors.New("persistence: RecordDiscard: quantity must be positive")
 	}
@@ -393,7 +397,7 @@ func (s *Store) RecordDiscard(ctx context.Context, lotID int64, quantity float64
 // read the prior quantity safely, rather than reading it in a separate,
 // racy query beforehand. newQuantity must be non-negative; negative targets
 // would silently drive the lot into negative territory.
-func (s *Store) RecordAdjust(ctx context.Context, lotID int64, newQuantity float64, estimated bool, reason, source string) error {
+func (s *Store) RecordAdjust(ctx context.Context, lotID domain.InventoryLotID, newQuantity float64, estimated bool, reason, source string) error {
 	if newQuantity < 0 {
 		return errors.New("persistence: RecordAdjust: newQuantity must be >= 0")
 	}
@@ -406,7 +410,7 @@ func (s *Store) RecordAdjust(ctx context.Context, lotID int64, newQuantity float
 	var oldQuantity float64
 	if err := tx.QueryRow(ctx, `SELECT quantity FROM inventory_lot WHERE id = $1 FOR UPDATE`, lotID).Scan(&oldQuantity); err != nil {
 		if err == pgx.ErrNoRows {
-			return fmt.Errorf("persistence: inventory_lot %d not found", lotID)
+			return fmt.Errorf("persistence: inventory_lot %s not found", lotID)
 		}
 		return fmt.Errorf("persistence: RecordAdjust lock lot: %w", err)
 	}
@@ -418,9 +422,10 @@ func (s *Store) RecordAdjust(ctx context.Context, lotID int64, newQuantity float
 		return fmt.Errorf("persistence: RecordAdjust update lot: %w", err)
 	}
 
-	const insertEvent = `INSERT INTO inventory_event (kind, lot_id, quantity_delta, reason, source)
-		VALUES ($1, $2, $3, $4, $5)`
-	if _, err := tx.Exec(ctx, insertEvent, string(domain.EventAdjust), lotID, delta, nullableText(reason), source); err != nil {
+	eventID := domain.NewInventoryEventID()
+	const insertEvent = `INSERT INTO inventory_event (id, kind, lot_id, quantity_delta, reason, source)
+		VALUES ($1, $2, $3, $4, $5, $6)`
+	if _, err := tx.Exec(ctx, insertEvent, eventID, string(domain.EventAdjust), lotID, delta, nullableText(reason), source); err != nil {
 		return fmt.Errorf("persistence: RecordAdjust insert event: %w", err)
 	}
 
@@ -433,7 +438,7 @@ func (s *Store) RecordAdjust(ctx context.Context, lotID int64, newQuantity float
 // observation") regardless of any prior confidence. Locks the row (SELECT
 // ... FOR UPDATE) to read the prior quantity safely for the event's
 // quantity_delta, same reasoning as RecordAdjust.
-func (s *Store) RecordMarkEmpty(ctx context.Context, lotID int64) error {
+func (s *Store) RecordMarkEmpty(ctx context.Context, lotID domain.InventoryLotID) error {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("persistence: begin RecordMarkEmpty: %w", err)
@@ -443,7 +448,7 @@ func (s *Store) RecordMarkEmpty(ctx context.Context, lotID int64) error {
 	var oldQuantity float64
 	if err := tx.QueryRow(ctx, `SELECT quantity FROM inventory_lot WHERE id = $1 FOR UPDATE`, lotID).Scan(&oldQuantity); err != nil {
 		if err == pgx.ErrNoRows {
-			return fmt.Errorf("persistence: inventory_lot %d not found", lotID)
+			return fmt.Errorf("persistence: inventory_lot %s not found", lotID)
 		}
 		return fmt.Errorf("persistence: RecordMarkEmpty lock lot: %w", err)
 	}
@@ -454,9 +459,10 @@ func (s *Store) RecordMarkEmpty(ctx context.Context, lotID int64) error {
 		return fmt.Errorf("persistence: RecordMarkEmpty update lot: %w", err)
 	}
 
-	const insertEvent = `INSERT INTO inventory_event (kind, lot_id, quantity_delta, source)
-		VALUES ($1, $2, $3, $4)`
-	if _, err := tx.Exec(ctx, insertEvent, string(domain.EventConsume), lotID, -oldQuantity, domain.SourceMarkEmpty); err != nil {
+	eventID := domain.NewInventoryEventID()
+	const insertEvent = `INSERT INTO inventory_event (id, kind, lot_id, quantity_delta, source)
+		VALUES ($1, $2, $3, $4, $5)`
+	if _, err := tx.Exec(ctx, insertEvent, eventID, string(domain.EventConsume), lotID, -oldQuantity, domain.SourceMarkEmpty); err != nil {
 		return fmt.Errorf("persistence: RecordMarkEmpty insert event: %w", err)
 	}
 
@@ -467,7 +473,7 @@ func (s *Store) RecordMarkEmpty(ctx context.Context, lotID int64) error {
 // quantity or confidence (design.md D3) — it only records the OPEN event and
 // sets opened_at, making the lot eligible for future time-based confidence
 // decay (a separate, not-yet-implemented mechanism per design.md D3/D4).
-func (s *Store) RecordOpen(ctx context.Context, lotID int64, source string) error {
+func (s *Store) RecordOpen(ctx context.Context, lotID domain.InventoryLotID, source string) error {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("persistence: begin RecordOpen: %w", err)
@@ -480,12 +486,13 @@ func (s *Store) RecordOpen(ctx context.Context, lotID int64, source string) erro
 		return fmt.Errorf("persistence: RecordOpen update lot: %w", err)
 	}
 	if c.RowsAffected() == 0 {
-		return fmt.Errorf("persistence: inventory_lot %d not found", lotID)
+		return fmt.Errorf("persistence: inventory_lot %s not found", lotID)
 	}
 
-	const insertEvent = `INSERT INTO inventory_event (kind, lot_id, quantity_delta, source)
-		VALUES ($1, $2, 0, $3)`
-	if _, err := tx.Exec(ctx, insertEvent, string(domain.EventOpen), lotID, source); err != nil {
+	eventID := domain.NewInventoryEventID()
+	const insertEvent = `INSERT INTO inventory_event (id, kind, lot_id, quantity_delta, source)
+		VALUES ($1, $2, $3, 0, $4)`
+	if _, err := tx.Exec(ctx, insertEvent, eventID, string(domain.EventOpen), lotID, source); err != nil {
 		return fmt.Errorf("persistence: RecordOpen insert event: %w", err)
 	}
 
@@ -501,10 +508,10 @@ func (s *Store) RecordOpen(ctx context.Context, lotID int64, source string) erro
 // destination as a distinct lot, not a merge" (tasks.md 9.3). Confidence is
 // preserved unchanged on both sides (design.md D3: "moving inventory doesn't
 // change how sure we are of the amount").
-func (s *Store) RecordTransfer(ctx context.Context, lotID int64, toLocationID string, quantity float64, source string) (newLotID int64, err error) {
+func (s *Store) RecordTransfer(ctx context.Context, lotID domain.InventoryLotID, toLocationID domain.InventoryLocationID, quantity float64, source string) (newLotID domain.InventoryLotID, err error) {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("persistence: begin RecordTransfer: %w", err)
+		return domain.InventoryLotID{}, fmt.Errorf("persistence: begin RecordTransfer: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
@@ -515,22 +522,22 @@ func (s *Store) RecordTransfer(ctx context.Context, lotID int64, toLocationID st
 	const lockLot = `SELECT ingredient_id, product_id, location_id, quantity, unit, confidence, best_before
 		FROM inventory_lot WHERE id = $1 FOR UPDATE`
 	var lot InventoryLot
-	var productID *string
+	var productID domain.ProductID
 	var confidence string
 	row := tx.QueryRow(ctx, lockLot, lotID)
 	if err := row.Scan(&lot.IngredientID, &productID, &lot.LocationID, &lot.Quantity, &lot.Unit, &confidence, &lot.BestBefore); err != nil {
 		if err == pgx.ErrNoRows {
-			return 0, fmt.Errorf("persistence: inventory_lot %d not found", lotID)
+			return domain.InventoryLotID{}, fmt.Errorf("persistence: inventory_lot %s not found", lotID)
 		}
-		return 0, fmt.Errorf("persistence: RecordTransfer lock lot: %w", err)
+		return domain.InventoryLotID{}, fmt.Errorf("persistence: RecordTransfer lock lot: %w", err)
 	}
-	if productID != nil {
-		lot.ProductID = *productID
+	if productID != (domain.ProductID{}) {
+		lot.ProductID = &productID
 	}
 	lot.Confidence = domain.Confidence(confidence)
 
 	if quantity <= 0 || quantity > lot.Quantity {
-		return 0, fmt.Errorf("persistence: RecordTransfer: invalid quantity %v for lot %d holding %v", quantity, lotID, lot.Quantity)
+		return domain.InventoryLotID{}, fmt.Errorf("persistence: RecordTransfer: invalid quantity %v for lot %s holding %v", quantity, lotID, lot.Quantity)
 	}
 	fromLocationID := lot.LocationID
 
@@ -538,32 +545,36 @@ func (s *Store) RecordTransfer(ctx context.Context, lotID int64, toLocationID st
 		// Full transfer: move the lot itself, no new row.
 		const updateLot = `UPDATE inventory_lot SET location_id = $1, updated_at = now() WHERE id = $2`
 		if _, err := tx.Exec(ctx, updateLot, toLocationID, lotID); err != nil {
-			return 0, fmt.Errorf("persistence: RecordTransfer move lot: %w", err)
+			return domain.InventoryLotID{}, fmt.Errorf("persistence: RecordTransfer move lot: %w", err)
 		}
 		newLotID = lotID
 	} else {
 		// Partial transfer: decrement the source, create a distinct destination lot.
 		const decrementLot = `UPDATE inventory_lot SET quantity = quantity - $1, updated_at = now() WHERE id = $2`
 		if _, err := tx.Exec(ctx, decrementLot, quantity, lotID); err != nil {
-			return 0, fmt.Errorf("persistence: RecordTransfer decrement source lot: %w", err)
+			return domain.InventoryLotID{}, fmt.Errorf("persistence: RecordTransfer decrement source lot: %w", err)
 		}
+		newLotID = domain.NewInventoryLotID()
 		const insertLot = `INSERT INTO inventory_lot
-			(ingredient_id, product_id, location_id, quantity, unit, confidence, best_before)
-			VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`
-		if err := tx.QueryRow(ctx, insertLot, lot.IngredientID, nullableText(lot.ProductID), toLocationID, quantity, lot.Unit, string(lot.Confidence), lot.BestBefore).Scan(&newLotID); err != nil {
-			return 0, fmt.Errorf("persistence: RecordTransfer create destination lot: %w", err)
+			(id, ingredient_id, product_id, location_id, quantity, unit, confidence, best_before)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`
+		var returnedLotID domain.InventoryLotID
+		if err := tx.QueryRow(ctx, insertLot, newLotID, lot.IngredientID, lot.ProductID, toLocationID, quantity, lot.Unit, string(lot.Confidence), lot.BestBefore).Scan(&returnedLotID); err != nil {
+			return domain.InventoryLotID{}, fmt.Errorf("persistence: RecordTransfer create destination lot: %w", err)
 		}
+		newLotID = returnedLotID
 	}
 
+	eventID := domain.NewInventoryEventID()
 	const insertEvent = `INSERT INTO inventory_event
-		(kind, lot_id, from_location_id, to_location_id, quantity_delta, source)
-		VALUES ($1, $2, $3, $4, $5, $6)`
-	if _, err := tx.Exec(ctx, insertEvent, string(domain.EventTransfer), lotID, fromLocationID, toLocationID, quantity, source); err != nil {
-		return 0, fmt.Errorf("persistence: RecordTransfer insert event: %w", err)
+		(id, kind, lot_id, from_location_id, to_location_id, quantity_delta, source)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`
+	if _, err := tx.Exec(ctx, insertEvent, eventID, string(domain.EventTransfer), lotID, fromLocationID, toLocationID, quantity, source); err != nil {
+		return domain.InventoryLotID{}, fmt.Errorf("persistence: RecordTransfer insert event: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return 0, fmt.Errorf("persistence: commit RecordTransfer: %w", err)
+		return domain.InventoryLotID{}, fmt.Errorf("persistence: commit RecordTransfer: %w", err)
 	}
 	return newLotID, nil
 }
@@ -578,9 +589,13 @@ func (s *Store) ListInventoryLocations(ctx context.Context, householdID string) 
 			`SELECT id, household_id, name, location_type, parent_location_id, archived_at
 			 FROM inventory_location ORDER BY id`)
 	} else {
+		hhID, perr := domain.ParseHouseholdID(householdID)
+		if perr != nil {
+			return nil, perr
+		}
 		rows, err = s.db.Query(ctx,
 			`SELECT id, household_id, name, location_type, parent_location_id, archived_at
-			 FROM inventory_location WHERE household_id = $1 ORDER BY id`, householdID)
+			 FROM inventory_location WHERE household_id = $1 ORDER BY id`, hhID)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("persistence: list inventory_locations: %w", err)
@@ -589,15 +604,16 @@ func (s *Store) ListInventoryLocations(ctx context.Context, householdID string) 
 	var out []InventoryLocation
 	for rows.Next() {
 		var l InventoryLocation
-		var locType, parent *string
+		var locType *string
+		var parent domain.InventoryLocationID
 		if err := rows.Scan(&l.ID, &l.HouseholdID, &l.Name, &locType, &parent, &l.ArchivedAt); err != nil {
 			return nil, err
 		}
 		if locType != nil {
 			l.LocationType = *locType
 		}
-		if parent != nil {
-			l.ParentLocationID = *parent
+		if parent != (domain.InventoryLocationID{}) {
+			l.ParentLocationID = &parent
 		}
 		out = append(out, l)
 	}
@@ -611,10 +627,10 @@ func (s *Store) ListInventoryLocations(ctx context.Context, householdID string) 
 // separately (see tasks.md 7.3/7.4, left unchecked). Returns "", nil (not an
 // error) when normalization succeeds but no identifier row matches yet — the
 // same "not found, not fabricated" shape LookupProductByGTIN already uses.
-func (s *Store) LookupBarcode(ctx context.Context, rawGTIN string) (productID string, err error) {
+func (s *Store) LookupBarcode(ctx context.Context, rawGTIN string) (productID domain.ProductID, err error) {
 	normalized, err := domain.NormalizeGTIN(rawGTIN)
 	if err != nil {
-		return "", err
+		return domain.ProductID{}, err
 	}
 	return s.LookupProductByGTIN(ctx, normalized)
 }

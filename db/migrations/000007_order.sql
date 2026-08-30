@@ -36,25 +36,27 @@
 -- checkpoint, or entered manually with no preceding cart, e.g. a receipt import). `source` is
 -- explicit (D4): 'manual' is the common case until a retailer API or receipt pipeline exists.
 CREATE TABLE "order" (
-    id BIGSERIAL PRIMARY KEY,
-    shopping_cart_id BIGINT REFERENCES shopping_cart(id) ON DELETE SET NULL,
+    id UUID PRIMARY KEY,
+    shopping_cart_id UUID REFERENCES shopping_cart(id) ON DELETE SET NULL,
     retailer TEXT NOT NULL,
     source TEXT NOT NULL CHECK (source IN ('manual','retailer_api','receipt_import')),
     ordered_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    total_price DOUBLE PRECISION
+    total_price_minor BIGINT,
+    currency CHAR(3) NOT NULL DEFAULT 'SEK'
 );
 
 -- The actual items purchased (D4): product, quantity, prices, and substitutions.
 -- `substituted_for_item_id` is a self-reference set when the retailer substituted a product at
 -- fulfillment (the referenced item is the originally-intended product).
 CREATE TABLE order_item (
-    id BIGSERIAL PRIMARY KEY,
-    order_id BIGINT NOT NULL REFERENCES "order"(id) ON DELETE CASCADE,
+    id UUID PRIMARY KEY,
+    order_id UUID NOT NULL REFERENCES "order"(id) ON DELETE CASCADE,
     retailer_product_id TEXT NOT NULL,
-    quantity DOUBLE PRECISION NOT NULL,
-    unit_price DOUBLE PRECISION,
-    total_price DOUBLE PRECISION,
-    substituted_for_item_id BIGINT REFERENCES order_item(id)
+    quantity numeric(12,3) NOT NULL,
+    unit_price numeric(12,3),
+    total_price_minor BIGINT,
+    currency CHAR(3) NOT NULL DEFAULT 'SEK',
+    substituted_for_item_id UUID REFERENCES order_item(id)
 );
 CREATE INDEX ON order_item (order_id);
 

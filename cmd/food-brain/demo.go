@@ -14,17 +14,21 @@ import (
 func runDemo() {
 	day := time.Date(2026, 7, 20, 17, 0, 0, 0, time.UTC) // a tired Monday
 
+	mumID := domain.NewPersonID()
+	dadID := domain.NewPersonID()
+	kidID := domain.NewPersonID()
+
 	people := []domain.Person{
-		{ID: "mum", Name: "Mum", Weight: 1},
-		{ID: "dad", Name: "Dad", Weight: 1},
-		{ID: "kid", Name: "Vera", Weight: 2}, // the picky one counts double
+		{ID: mumID, Name: "Mum", Weight: 1},
+		{ID: dadID, Name: "Dad", Weight: 1},
+		{ID: kidID, Name: "Vera", Weight: 2}, // the picky one counts double
 	}
 
 	prefs := []domain.Preference{
-		{PersonID: "kid", Tag: "pasta", Sentiment: domain.Loves, Confidence: 0.9},
-		{PersonID: "kid", Tag: "fish", Sentiment: domain.Hates, Confidence: 0.8},
-		{PersonID: "mum", Tag: "fish", Sentiment: domain.Loves, Confidence: 0.7},
-		{PersonID: "dad", Tag: "stew", Sentiment: domain.Likes, Confidence: 0.6},
+		{PersonID: kidID, Tag: "pasta", Sentiment: domain.Loves, Confidence: 0.9},
+		{PersonID: kidID, Tag: "fish", Sentiment: domain.Hates, Confidence: 0.8},
+		{PersonID: mumID, Tag: "fish", Sentiment: domain.Loves, Confidence: 0.7},
+		{PersonID: dadID, Tag: "stew", Sentiment: domain.Likes, Confidence: 0.6},
 	}
 
 	candidates := []domain.Candidate{

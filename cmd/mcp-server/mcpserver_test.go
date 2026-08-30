@@ -45,7 +45,7 @@ func (f *fakeReactions) RecordReaction(_ context.Context, in mcptools.RecordReac
 	f.calls++
 	f.last = in
 	return mcptools.RecordReactionResult{
-		MealEventID: 7, Recipe: in.Recipe, ServedOn: in.ServedOn, PersonID: in.PersonID, Sentiment: in.Sentiment,
+		MealEventID: "meal-7", Recipe: in.Recipe, ServedOn: in.ServedOn, PersonID: in.PersonID, Sentiment: in.Sentiment,
 	}, nil
 }
 
@@ -139,7 +139,7 @@ func TestIntegration_StreamableHTTP(t *testing.T) {
 		t.Fatalf("unexpected tool error: %+v", res)
 	}
 	got := structured[mcptools.RecordReactionResult](t, res)
-	if got.MealEventID != 7 || got.Recipe != "r1" || got.Sentiment != 2 {
+	if got.MealEventID != "meal-7" || got.Recipe != "r1" || got.Sentiment != 2 {
 		t.Fatalf("unexpected result: %+v", got)
 	}
 	if reactions.calls != 1 {

@@ -36,7 +36,7 @@ type PlannedSlot struct {
 
 // RecordReactionResult confirms a meal reaction recorded by the application layer.
 type RecordReactionResult struct {
-	MealEventID int64  `json:"meal_event_id"`
+	MealEventID string `json:"meal_event_id"`
 	Recipe      string `json:"recipe"`
 	ServedOn    string `json:"served_on"`
 	PersonID    string `json:"person_id"`

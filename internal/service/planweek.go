@@ -183,25 +183,26 @@ func persistWeek(ctx context.Context, db Store, weekStart time.Time,
 	}
 
 	for _, slot := range planned {
+		ref, err := db.GetRecipeRefByMealieID(ctx, slot.Winner.Candidate.MealieRecipeID)
+		if err != nil {
+			return fmt.Errorf("persist plan: resolve recipe %q: %w", slot.Winner.Candidate.MealieRecipeID, err)
+		}
 		c := persistence.MealPlanCandidate{
-			PlanID:         plan.ID,
-			SlotDate:       slot.Date,
-			MealieRecipeID: slot.Winner.Candidate.MealieRecipeID,
-			Score:          slot.Winner.Score,
-			Breakdown:      breakdownToMap(slot.Winner.Breakdown),
-			Feasible:       slot.Winner.Feasible,
-			Rank:           0, // the persisted winner is the top-scored candidate
+			PlanID:      plan.ID,
+			SlotDate:    slot.Date,
+			RecipeRefID: ref.ID,
+			Score:       slot.Winner.Score,
+			Breakdown:   breakdownToMap(slot.Winner.Breakdown),
+			Feasible:    slot.Winner.Feasible,
+			Rank:        0, // the persisted winner is the top-scored candidate
 		}
 		if err := db.InsertCandidate(ctx, c); err != nil {
 			return fmt.Errorf("persist plan: insert candidate for %s: %w", slot.Date.Format("2006-01-02"), err)
 		}
-	}
-
-	for _, slot := range planned {
 		d := persistence.MealPlanDecision{
-			PlanID:         plan.ID,
-			SlotDate:       slot.Date,
-			MealieRecipeID: slot.Winner.Candidate.MealieRecipeID,
+			PlanID:      plan.ID,
+			SlotDate:    slot.Date,
+			RecipeRefID: ref.ID,
 		}
 		if err := db.SetDecision(ctx, d); err != nil {
 			return fmt.Errorf("persist plan: set decision for %s: %w", slot.Date.Format("2006-01-02"), err)
@@ -209,9 +210,10 @@ func persistWeek(ctx context.Context, db Store, weekStart time.Time,
 	}
 
 	for _, r := range reqs {
+		ingID := domain.IngredientIDForName(r.IngredientID)
 		rr := persistence.ShoppingRequirement{
 			PlanID:          plan.ID,
-			IngredientID:    r.IngredientID,
+			IngredientID:    ingID,
 			Quantity:        r.Quantity,
 			Unit:            r.Unit,
 			AcceptableForms: r.AcceptableForms,

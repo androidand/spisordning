@@ -15,7 +15,8 @@
 -- ── 1. Create the household table if it does not already exist.
 --     (0008_household_catalog_minimal.sql may have created it already.)
 CREATE TABLE IF NOT EXISTS household (
-    id          TEXT PRIMARY KEY,
+    id          UUID PRIMARY KEY,
+    slug        TEXT NOT NULL UNIQUE,
     name        TEXT NOT NULL,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -25,14 +26,14 @@ CREATE TABLE IF NOT EXISTS household (
 --     version — joined_at and ended_at are required so the schema is usable
 --     by downstream changes immediately.)
 CREATE TABLE IF NOT EXISTS household_membership (
-    household_id  TEXT NOT NULL REFERENCES household(id) ON DELETE CASCADE,
-    person_id     TEXT NOT NULL REFERENCES person(id) ON DELETE CASCADE,
+    household_id  UUID NOT NULL REFERENCES household(id) ON DELETE CASCADE,
+    person_id     UUID NOT NULL REFERENCES person(id) ON DELETE CASCADE,
     joined_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     ended_at      TIMESTAMPTZ,
-    ended_by      TEXT,                    -- nullable; account() is created in migration 0011,
-                                          -- so the FK is deferred to avoid a fresh-DB ordering
-                                          -- failure. See 0011_household_and_catalog.sql for the
-                                          -- account table that later satisfies this column.
+    ended_by      UUID,                    -- nullable; account() is created in migration 0011,
+                                           -- so the FK is deferred to avoid a fresh-DB ordering
+                                           -- failure. See 0011_household_and_catalog.sql for the
+                                           -- account table that later satisfies this column.
     PRIMARY KEY (household_id, person_id)
 );
 CREATE INDEX IF NOT EXISTS idx_household_membership_person_ended
@@ -42,8 +43,8 @@ CREATE INDEX IF NOT EXISTS idx_household_membership_person_ended
 --     The id 'default' is deliberately simple — it is not a user-facing name,
 --     just the bootstrap anchor. The application layer will rename it later
 --     (Household is mutable per design.md Step 4).
-INSERT INTO household (id, name)
-    SELECT 'default', 'Default Household'
+INSERT INTO household (id, slug, name)
+    SELECT '01900000-0000-7000-8000-000000000001', 'default', 'Default Household'
     WHERE NOT EXISTS (SELECT 1 FROM household LIMIT 1);
 
 -- ── 4. Assign every existing person to the default household.
@@ -51,7 +52,7 @@ INSERT INTO household (id, name)
 --     Does NOT touch person_preference, preference_observation, or any other
 --     table — those rows survive unchanged.
 INSERT INTO household_membership (household_id, person_id, joined_at)
-    SELECT 'default', p.id, p.created_at
+    SELECT '01900000-0000-7000-8000-000000000001', p.id, p.created_at
     FROM person p
     LEFT JOIN household_membership hm ON hm.person_id = p.id
     WHERE hm.person_id IS NULL;

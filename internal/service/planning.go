@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/androidand/spisordning/internal/domain"
 	"github.com/androidand/spisordning/internal/dto"
 	"github.com/androidand/spisordning/internal/mealie"
 	"github.com/androidand/spisordning/internal/persistence"
@@ -33,7 +34,7 @@ func (s *Planning) ListPlans(ctx context.Context) ([]dto.MealPlan, error) {
 	out := make([]dto.MealPlan, 0, len(plans))
 	for _, p := range plans {
 		out = append(out, dto.MealPlan{
-			ID: p.ID, WeekStart: p.WeekStart.Format("2006-01-02"),
+			ID: p.ID.String(), WeekStart: p.WeekStart.Format("2006-01-02"),
 			Status: p.Status, CreatedAt: p.CreatedAt,
 		})
 	}
@@ -50,90 +51,118 @@ func (s *Planning) CreatePlan(ctx context.Context, weekStart string) (dto.MealPl
 		return dto.MealPlan{}, fmt.Errorf("service: create plan: %w", err)
 	}
 	return dto.MealPlan{
-		ID: plan.ID, WeekStart: plan.WeekStart.Format("2006-01-02"),
+		ID: plan.ID.String(), WeekStart: plan.WeekStart.Format("2006-01-02"),
 		Status: plan.Status, CreatedAt: plan.CreatedAt,
 	}, nil
 }
 
-func (s *Planning) GetPlan(ctx context.Context, id int64) (dto.MealPlanView, error) {
-	plan, err := s.db.GetMealPlan(ctx, id)
+func (s *Planning) GetPlan(ctx context.Context, id string) (dto.MealPlanView, error) {
+	planID, err := domain.ParseMealPlanID(id)
 	if err != nil {
 		return dto.MealPlanView{}, fmt.Errorf("service: get plan: %w", err)
 	}
-	candidates, err := s.db.ListCandidates(ctx, id)
+	plan, err := s.db.GetMealPlan(ctx, planID)
+	if err != nil {
+		return dto.MealPlanView{}, fmt.Errorf("service: get plan: %w", err)
+	}
+	candidates, err := s.db.ListCandidates(ctx, planID)
 	if err != nil {
 		return dto.MealPlanView{}, fmt.Errorf("service: get plan: list candidates: %w", err)
 	}
-	decisions, err := s.db.ListDecisions(ctx, id)
+	decisions, err := s.db.ListDecisions(ctx, planID)
 	if err != nil {
 		return dto.MealPlanView{}, fmt.Errorf("service: get plan: list decisions: %w", err)
 	}
 
+	candidatesDTO, err := s.toPlanCandidates(ctx, candidates)
+	if err != nil {
+		return dto.MealPlanView{}, err
+	}
+	decisionsDTO, err := s.toPlanDecisions(ctx, decisions)
+	if err != nil {
+		return dto.MealPlanView{}, err
+	}
 	view := dto.MealPlanView{
 		Plan: dto.MealPlan{
-			ID: plan.ID, WeekStart: plan.WeekStart.Format("2006-01-02"),
+			ID: plan.ID.String(), WeekStart: plan.WeekStart.Format("2006-01-02"),
 			Status: plan.Status, CreatedAt: plan.CreatedAt,
 		},
-		Candidates: toPlanCandidates(candidates),
-		Decisions:  toPlanDecisions(decisions),
+		Candidates: candidatesDTO,
+		Decisions:  decisionsDTO,
 	}
 	return view, nil
 }
 
-func (s *Planning) UpdatePlan(ctx context.Context, id int64, in dto.MealPlanUpdate) (dto.MealPlan, error) {
+func (s *Planning) UpdatePlan(ctx context.Context, id string, in dto.MealPlanUpdate) (dto.MealPlan, error) {
 	if in.Status == "" {
 		return dto.MealPlan{}, fmt.Errorf("service: update plan: status is required")
 	}
-	if err := s.db.SetMealPlanStatus(ctx, id, in.Status); err != nil {
+	planID, err := domain.ParseMealPlanID(id)
+	if err != nil {
 		return dto.MealPlan{}, fmt.Errorf("service: update plan: %w", err)
 	}
-	plan, err := s.db.GetMealPlan(ctx, id)
+	if err := s.db.SetMealPlanStatus(ctx, planID, in.Status); err != nil {
+		return dto.MealPlan{}, fmt.Errorf("service: update plan: %w", err)
+	}
+	plan, err := s.db.GetMealPlan(ctx, planID)
 	if err != nil {
 		return dto.MealPlan{}, fmt.Errorf("service: update plan: read back: %w", err)
 	}
 	return dto.MealPlan{
-		ID: plan.ID, WeekStart: plan.WeekStart.Format("2006-01-02"),
+		ID: plan.ID.String(), WeekStart: plan.WeekStart.Format("2006-01-02"),
 		Status: plan.Status, CreatedAt: plan.CreatedAt,
 	}, nil
 }
 
-func (s *Planning) SetDecisions(ctx context.Context, planID int64, in []dto.MealPlanDecision) ([]dto.MealPlanDecision, error) {
+func (s *Planning) SetDecisions(ctx context.Context, planID string, in []dto.MealPlanDecision) ([]dto.MealPlanDecision, error) {
+	parsedPlanID, err := domain.ParseMealPlanID(planID)
+	if err != nil {
+		return nil, fmt.Errorf("service: set decisions: %w", err)
+	}
+	plan, err := s.db.GetMealPlan(ctx, parsedPlanID)
+	if err != nil {
+		return nil, fmt.Errorf("service: set decisions: plan not found: %w", err)
+	}
+	if plan.Status != "approved" {
+		return nil, fmt.Errorf("service: set decisions: plan must be approved before setting decisions")
+	}
 	for _, d := range in {
-		plan, err := s.db.GetMealPlan(ctx, planID)
-		if err != nil {
-			return nil, fmt.Errorf("service: set decisions: plan not found: %w", err)
-		}
-		if plan.Status != "approved" {
-			return nil, fmt.Errorf("service: set decisions: plan must be approved before setting decisions")
-		}
 		slotDate, err := time.Parse("2006-01-02", d.SlotDate)
 		if err != nil {
 			return nil, fmt.Errorf("service: set decisions: invalid slot_date %q: %w", d.SlotDate, err)
 		}
+		ref, err := s.db.GetRecipeRefByMealieID(ctx, d.MealieRecipeID)
+		if err != nil {
+			return nil, fmt.Errorf("service: set decisions: resolve recipe %q: %w", d.MealieRecipeID, err)
+		}
 		decision := persistence.MealPlanDecision{
-			PlanID: planID, SlotDate: slotDate, MealieRecipeID: d.MealieRecipeID,
+			PlanID: parsedPlanID, SlotDate: slotDate, RecipeRefID: ref.ID,
 		}
 		if err := s.db.SetDecision(ctx, decision); err != nil {
 			return nil, fmt.Errorf("service: set decisions: %w", err)
 		}
 	}
-	decisions, err := s.db.ListDecisions(ctx, planID)
+	decisions, err := s.db.ListDecisions(ctx, parsedPlanID)
 	if err != nil {
 		return nil, fmt.Errorf("service: set decisions: read back: %w", err)
 	}
-	return toPlanDecisions(decisions), nil
+	return s.toPlanDecisions(ctx, decisions)
 }
 
-func (s *Planning) ListShoppingRequirements(ctx context.Context, planID int64) ([]dto.ShoppingRequirement, error) {
-	reqs, err := s.db.ListShoppingRequirements(ctx, planID)
+func (s *Planning) ListShoppingRequirements(ctx context.Context, planID string) ([]dto.ShoppingRequirement, error) {
+	parsedPlanID, err := domain.ParseMealPlanID(planID)
+	if err != nil {
+		return nil, fmt.Errorf("service: list shopping requirements: %w", err)
+	}
+	reqs, err := s.db.ListShoppingRequirements(ctx, parsedPlanID)
 	if err != nil {
 		return nil, fmt.Errorf("service: list shopping requirements: %w", err)
 	}
 	out := make([]dto.ShoppingRequirement, 0, len(reqs))
 	for _, r := range reqs {
 		out = append(out, dto.ShoppingRequirement{
-			ID:              r.ID,
-			IngredientID:    r.IngredientID,
+			ID:              r.ID.String(),
+			IngredientID:    r.IngredientID.String(),
 			Quantity:        r.Quantity,
 			Unit:            r.Unit,
 			AcceptableForms: r.AcceptableForms,
@@ -143,31 +172,39 @@ func (s *Planning) ListShoppingRequirements(ctx context.Context, planID int64) (
 	return out, nil
 }
 
-func toPlanCandidates(cands []persistence.MealPlanCandidate) []dto.MealPlanCandidate {
+func (s *Planning) toPlanCandidates(ctx context.Context, cands []persistence.MealPlanCandidate) ([]dto.MealPlanCandidate, error) {
 	out := make([]dto.MealPlanCandidate, 0, len(cands))
 	for _, c := range cands {
+		ref, err := s.db.GetRecipeRef(ctx, c.RecipeRefID)
+		if err != nil {
+			return nil, fmt.Errorf("service: get plan: resolve recipe: %w", err)
+		}
 		out = append(out, dto.MealPlanCandidate{
-			ID:       c.ID,
-			Recipe:   dto.RecipeRefResponse{MealieRecipeID: c.MealieRecipeID},
-			SlotDate: c.SlotDate.Format("2006-01-02"),
-			Score:    c.Score,
+			ID:        c.ID.String(),
+			Recipe:    dto.RecipeRefResponse{MealieRecipeID: ref.MealieRecipeID, Title: ref.Title, Tags: ref.Tags, Effort: ref.Effort},
+			SlotDate:  c.SlotDate.Format("2006-01-02"),
+			Score:     c.Score,
 			Breakdown: c.Breakdown,
-			Feasible: c.Feasible,
-			Rank:     c.Rank,
+			Feasible:  c.Feasible,
+			Rank:      c.Rank,
 		})
 	}
-	return out
+	return out, nil
 }
 
-func toPlanDecisions(decisions []persistence.MealPlanDecision) []dto.MealPlanDecision {
+func (s *Planning) toPlanDecisions(ctx context.Context, decisions []persistence.MealPlanDecision) ([]dto.MealPlanDecision, error) {
 	out := make([]dto.MealPlanDecision, 0, len(decisions))
 	for _, d := range decisions {
+		ref, err := s.db.GetRecipeRef(ctx, d.RecipeRefID)
+		if err != nil {
+			return nil, fmt.Errorf("service: get plan: resolve recipe: %w", err)
+		}
 		out = append(out, dto.MealPlanDecision{
-			PlanID:         d.PlanID,
+			PlanID:         d.PlanID.String(),
 			SlotDate:       d.SlotDate.Format("2006-01-02"),
-			MealieRecipeID: d.MealieRecipeID,
+			MealieRecipeID: ref.MealieRecipeID,
 			DecidedAt:      d.DecidedAt,
 		})
 	}
-	return out
+	return out, nil
 }

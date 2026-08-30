@@ -27,7 +27,6 @@ import (
 	"github.com/androidand/spisordning/internal/persistence"
 	"github.com/androidand/spisordning/internal/retailer"
 	"github.com/androidand/spisordning/internal/service"
-	"github.com/jackc/pgx/v5"
 	"github.com/oapi-codegen/runtime/types"
 )
 
@@ -269,7 +268,7 @@ func (a storeAdapter) GetTonight(ctx context.Context) (dto.TonightView, error) {
 	today := time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 0, 0, 0, 0, time.Local)
 	meal, err := a.db.GetTonightMeal(ctx, today)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, persistence.ErrNoRows) {
 			return dto.TonightView{}, dto.ErrNoMealTonight
 		}
 		return dto.TonightView{}, fmt.Errorf("tonight get: %w", err)
@@ -284,7 +283,7 @@ func (a storeAdapter) GetTonight(ctx context.Context) (dto.TonightView, error) {
 	}
 	for _, r := range meal.Reactions {
 		out.Reactions = append(out.Reactions, dto.MealReactionResponse{
-			PersonID: r.PersonID, Sentiment: r.Sentiment,
+			PersonID: r.PersonID.String(), Sentiment: r.Sentiment,
 		})
 	}
 	return out, nil
@@ -301,7 +300,7 @@ func (a storeAdapter) CreateReaction(ctx context.Context, in httpapi.ReactionNew
 		return dto.MealReactionResponse{}, fmt.Errorf("reaction: no meal tonight: %w", err)
 	}
 	// Find or create the meal event for today.
-	eventID, err := a.db.GetOrCreateMealEventForToday(ctx, meal.MealieRecipeID, today)
+	eventID, err := a.db.GetOrCreateMealEventForToday(ctx, meal.RecipeRefID, today)
 	if err != nil {
 		return dto.MealReactionResponse{}, fmt.Errorf("reaction: find meal event: %w", err)
 	}
@@ -309,7 +308,7 @@ func (a storeAdapter) CreateReaction(ctx context.Context, in httpapi.ReactionNew
 	if err != nil {
 		return dto.MealReactionResponse{}, fmt.Errorf("reaction: create: %w", err)
 	}
-	return dto.MealReactionResponse{PersonID: r.PersonID, Sentiment: r.Sentiment}, nil
+	return dto.MealReactionResponse{PersonID: r.PersonID.String(), Sentiment: r.Sentiment}, nil
 }
 
 func (a storeAdapter) ListPlans(ctx context.Context) ([]httpapi.PlanResponse, error) {
@@ -320,7 +319,7 @@ func (a storeAdapter) ListPlans(ctx context.Context) ([]httpapi.PlanResponse, er
 	out := make([]httpapi.PlanResponse, 0, len(plans))
 	for _, p := range plans {
 		out = append(out, httpapi.PlanResponse{
-			ID: int(p.ID), WeekStart: types.Date{Time: p.WeekStart}, Status: p.Status, CreatedAt: p.CreatedAt,
+			ID: p.ID.String(), WeekStart: types.Date{Time: p.WeekStart}, Status: p.Status, CreatedAt: p.CreatedAt,
 		})
 	}
 	return out, nil
@@ -332,36 +331,40 @@ func (a storeAdapter) CreatePlan(ctx context.Context, weekStart time.Time) (http
 		return httpapi.PlanResponse{}, fmt.Errorf("plan create/get: %w", err)
 	}
 	return httpapi.PlanResponse{
-		ID: int(p.ID), WeekStart: types.Date{Time: p.WeekStart}, Status: p.Status, CreatedAt: p.CreatedAt,
+		ID: p.ID.String(), WeekStart: types.Date{Time: p.WeekStart}, Status: p.Status, CreatedAt: p.CreatedAt,
 	}, nil
 }
 
-func (a storeAdapter) GetPlan(ctx context.Context, planID int64) (httpapi.PlanView, error) {
-	plan, err := a.db.GetMealPlan(ctx, planID)
+func (a storeAdapter) GetPlan(ctx context.Context, planID string) (httpapi.PlanView, error) {
+	parsedPlanID, err := domain.ParseMealPlanID(planID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		return httpapi.PlanView{}, fmt.Errorf("plan get: %w", err)
+	}
+	plan, err := a.db.GetMealPlan(ctx, parsedPlanID)
+	if err != nil {
+		if errors.Is(err, persistence.ErrNoRows) {
 			return httpapi.PlanView{}, httpapi.ErrNotFound
 		}
 		return httpapi.PlanView{}, fmt.Errorf("plan get: %w", err)
 	}
-	candidates, err := a.db.ListCandidates(ctx, planID)
+	candidates, err := a.db.ListCandidates(ctx, parsedPlanID)
 	if err != nil {
 		return httpapi.PlanView{}, fmt.Errorf("candidates list: %w", err)
 	}
-	decisions, err := a.db.ListDecisions(ctx, planID)
+	decisions, err := a.db.ListDecisions(ctx, parsedPlanID)
 	if err != nil {
 		return httpapi.PlanView{}, fmt.Errorf("decisions list: %w", err)
 	}
 
 	// Fetch recipe refs for all candidates and decisions.
-	recipeIDs := make(map[string]struct{})
+	recipeIDs := make(map[domain.RecipeRefID]struct{})
 	for _, c := range candidates {
-		recipeIDs[c.MealieRecipeID] = struct{}{}
+		recipeIDs[c.RecipeRefID] = struct{}{}
 	}
 	for _, d := range decisions {
-		recipeIDs[d.MealieRecipeID] = struct{}{}
+		recipeIDs[d.RecipeRefID] = struct{}{}
 	}
-	recipes := make(map[string]persistence.RecipeRef)
+	recipes := make(map[domain.RecipeRefID]persistence.RecipeRef)
 	for id := range recipeIDs {
 		r, err := a.db.GetRecipeRef(ctx, id)
 		if err != nil {
@@ -373,28 +376,32 @@ func (a storeAdapter) GetPlan(ctx context.Context, planID int64) (httpapi.PlanVi
 
 	view := httpapi.PlanView{
 		Plan: httpapi.PlanResponse{
-			ID: int(plan.ID), WeekStart: types.Date{Time: plan.WeekStart}, Status: plan.Status, CreatedAt: plan.CreatedAt,
+			ID: plan.ID.String(), WeekStart: types.Date{Time: plan.WeekStart}, Status: plan.Status, CreatedAt: plan.CreatedAt,
 		},
 		Candidates: make([]httpapi.PlanCandidateResponse, 0, len(candidates)),
 	}
 	for _, c := range candidates {
 		var recipe dto.RecipeRefResponse
-		if r, ok := recipes[c.MealieRecipeID]; ok {
+		if r, ok := recipes[c.RecipeRefID]; ok {
 			recipe = dto.RecipeRefResponse{
 				MealieRecipeID: r.MealieRecipeID, Title: r.Title, Tags: r.Tags, Effort: r.Effort,
 			}
 		}
 		view.Candidates = append(view.Candidates, httpapi.PlanCandidateResponse{
-			ID: int(c.ID), SlotDate: types.Date{Time: c.SlotDate}, Rank: c.Rank, Score: c.Score,
+			ID: c.ID.String(), SlotDate: types.Date{Time: c.SlotDate}, Rank: c.Rank, Score: c.Score,
 			Breakdown: c.Breakdown, Feasible: c.Feasible, Recipe: recipe,
 		})
 	}
 	if len(decisions) > 0 {
 		ds := make([]httpapi.PlanDecisionResponse, 0, len(decisions))
 		for _, d := range decisions {
+			var mealieRecipeID string
+			if r, ok := recipes[d.RecipeRefID]; ok {
+				mealieRecipeID = r.MealieRecipeID
+			}
 			ds = append(ds, httpapi.PlanDecisionResponse{
-				PlanID: int(d.PlanID), SlotDate: types.Date{Time: d.SlotDate},
-				MealieRecipeID: d.MealieRecipeID, DecidedAt: &d.DecidedAt,
+				PlanID: d.PlanID.String(), SlotDate: types.Date{Time: d.SlotDate},
+				MealieRecipeID: mealieRecipeID, DecidedAt: &d.DecidedAt,
 			})
 		}
 		view.Decisions = &ds
@@ -402,26 +409,38 @@ func (a storeAdapter) GetPlan(ctx context.Context, planID int64) (httpapi.PlanVi
 	return view, nil
 }
 
-func (a storeAdapter) UpdatePlan(ctx context.Context, planID int64, status string) (httpapi.PlanResponse, error) {
-	if err := a.db.SetMealPlanStatus(ctx, planID, status); err != nil {
+func (a storeAdapter) UpdatePlan(ctx context.Context, planID string, status string) (httpapi.PlanResponse, error) {
+	parsedPlanID, err := domain.ParseMealPlanID(planID)
+	if err != nil {
+		return httpapi.PlanResponse{}, fmt.Errorf("plan update: %w", err)
+	}
+	if err := a.db.SetMealPlanStatus(ctx, parsedPlanID, status); err != nil {
 		if strings.Contains(err.Error(), "meal_plan not found") {
 			return httpapi.PlanResponse{}, httpapi.ErrNotFound
 		}
 		return httpapi.PlanResponse{}, fmt.Errorf("plan update: %w", err)
 	}
-	p, err := a.db.GetMealPlan(ctx, planID)
+	p, err := a.db.GetMealPlan(ctx, parsedPlanID)
 	if err != nil {
 		return httpapi.PlanResponse{}, fmt.Errorf("plan get after update: %w", err)
 	}
 	return httpapi.PlanResponse{
-		ID: int(p.ID), WeekStart: types.Date{Time: p.WeekStart}, Status: p.Status, CreatedAt: p.CreatedAt,
+		ID: p.ID.String(), WeekStart: types.Date{Time: p.WeekStart}, Status: p.Status, CreatedAt: p.CreatedAt,
 	}, nil
 }
 
-func (a storeAdapter) SetDecisions(ctx context.Context, planID int64, decisions []httpapi.PlanDecisionInput) error {
+func (a storeAdapter) SetDecisions(ctx context.Context, planID string, decisions []httpapi.PlanDecisionInput) error {
+	parsedPlanID, err := domain.ParseMealPlanID(planID)
+	if err != nil {
+		return fmt.Errorf("plan set decisions: %w", err)
+	}
 	for _, d := range decisions {
+		ref, err := a.db.GetRecipeRefByMealieID(ctx, d.MealieRecipeID)
+		if err != nil {
+			return fmt.Errorf("plan set decisions: resolve recipe %q: %w", d.MealieRecipeID, err)
+		}
 		if err := a.db.SetDecision(ctx, persistence.MealPlanDecision{
-			PlanID: planID, SlotDate: d.SlotDate.Time, MealieRecipeID: d.MealieRecipeID,
+			PlanID: parsedPlanID, SlotDate: d.SlotDate.Time, RecipeRefID: ref.ID,
 		}); err != nil {
 			return fmt.Errorf("decision set: %w", err)
 		}
@@ -429,15 +448,19 @@ func (a storeAdapter) SetDecisions(ctx context.Context, planID int64, decisions 
 	return nil
 }
 
-func (a storeAdapter) ListCandidates(ctx context.Context, planID int64) ([]httpapi.PlanCandidateResponse, error) {
-	candidates, err := a.db.ListCandidates(ctx, planID)
+func (a storeAdapter) ListCandidates(ctx context.Context, planID string) ([]httpapi.PlanCandidateResponse, error) {
+	parsedPlanID, err := domain.ParseMealPlanID(planID)
+	if err != nil {
+		return nil, fmt.Errorf("candidates list: %w", err)
+	}
+	candidates, err := a.db.ListCandidates(ctx, parsedPlanID)
 	if err != nil {
 		return nil, fmt.Errorf("candidates list: %w", err)
 	}
 	out := make([]httpapi.PlanCandidateResponse, 0, len(candidates))
 	for _, c := range candidates {
 		out = append(out, httpapi.PlanCandidateResponse{
-			ID: int(c.ID), SlotDate: types.Date{Time: c.SlotDate}, Rank: c.Rank, Score: c.Score,
+			ID: c.ID.String(), SlotDate: types.Date{Time: c.SlotDate}, Rank: c.Rank, Score: c.Score,
 			Breakdown: c.Breakdown, Feasible: c.Feasible,
 		})
 	}
@@ -446,8 +469,16 @@ func (a storeAdapter) ListCandidates(ctx context.Context, planID int64) ([]httpa
 
 func (a storeAdapter) InsertCandidates(ctx context.Context, candidates []httpapi.PlanCandidateInput) error {
 	for _, c := range candidates {
+		parsedPlanID, err := domain.ParseMealPlanID(c.PlanID)
+		if err != nil {
+			return fmt.Errorf("candidate insert: %w", err)
+		}
+		ref, err := a.db.GetRecipeRefByMealieID(ctx, c.MealieRecipeID)
+		if err != nil {
+			return fmt.Errorf("candidate insert: resolve recipe %q: %w", c.MealieRecipeID, err)
+		}
 		if err := a.db.InsertCandidate(ctx, persistence.MealPlanCandidate{
-			PlanID: c.PlanID, SlotDate: c.SlotDate, MealieRecipeID: c.MealieRecipeID,
+			PlanID: parsedPlanID, SlotDate: c.SlotDate, RecipeRefID: ref.ID,
 			Score: c.Score, Breakdown: c.Breakdown, Feasible: c.Feasible, Rank: c.Rank,
 		}); err != nil {
 			return fmt.Errorf("candidate insert: %w", err)
@@ -456,15 +487,19 @@ func (a storeAdapter) InsertCandidates(ctx context.Context, candidates []httpapi
 	return nil
 }
 
-func (a storeAdapter) ListShoppingRequirements(ctx context.Context, planID int64) ([]httpapi.ShoppingRequirementResponse, error) {
-	reqs, err := a.db.ListShoppingRequirements(ctx, planID)
+func (a storeAdapter) ListShoppingRequirements(ctx context.Context, planID string) ([]httpapi.ShoppingRequirementResponse, error) {
+	parsedPlanID, err := domain.ParseMealPlanID(planID)
+	if err != nil {
+		return nil, fmt.Errorf("shopping requirements list: %w", err)
+	}
+	reqs, err := a.db.ListShoppingRequirements(ctx, parsedPlanID)
 	if err != nil {
 		return nil, fmt.Errorf("shopping requirements list: %w", err)
 	}
 	out := make([]httpapi.ShoppingRequirementResponse, 0, len(reqs))
 	for _, r := range reqs {
 		out = append(out, httpapi.ShoppingRequirementResponse{
-			ID: int(r.ID), IngredientID: r.IngredientID, Quantity: r.Quantity,
+			ID: r.ID.String(), IngredientID: r.IngredientID.String(), Quantity: r.Quantity,
 			Unit: r.Unit, AcceptableForms: r.AcceptableForms, PreferredForm: r.PreferredForm,
 		})
 	}
@@ -517,13 +552,21 @@ func (a storeAdapter) CreateMealEvent(ctx context.Context, in dto.MealEventNew) 
 	if err != nil {
 		return dto.MealEventResponse{}, fmt.Errorf("meals create: invalid served_on %q: %w", in.ServedOn, err)
 	}
-	eventID, err := a.db.CreateMealEvent(ctx, in.MealieRecipeID, servedOn, nil, nil)
+	ref, err := a.db.GetRecipeRefByMealieID(ctx, in.MealieRecipeID)
+	if err != nil {
+		return dto.MealEventResponse{}, fmt.Errorf("meals create: resolve recipe: %w", err)
+	}
+	eventID, err := a.db.CreateMealEvent(ctx, ref.ID, servedOn, nil, nil)
 	if err != nil {
 		return dto.MealEventResponse{}, fmt.Errorf("meals create: %w", err)
 	}
 	for _, rx := range in.Reactions {
+		pid, perr := domain.ParsePersonID(rx.PersonID)
+		if perr != nil {
+			return dto.MealEventResponse{}, fmt.Errorf("meals create: parse person id: %w", perr)
+		}
 		if err := a.db.AddMealReaction(ctx, persistence.MealReaction{
-			MealEventID: eventID, PersonID: rx.PersonID, Sentiment: rx.Sentiment,
+			MealEventID: eventID, PersonID: pid, Sentiment: rx.Sentiment,
 		}); err != nil {
 			return dto.MealEventResponse{}, fmt.Errorf("meals create: add reaction: %w", err)
 		}
@@ -533,14 +576,14 @@ func (a storeAdapter) CreateMealEvent(ctx context.Context, in dto.MealEventNew) 
 		return dto.MealEventResponse{}, fmt.Errorf("meals create: read reactions: %w", err)
 	}
 	out := dto.MealEventResponse{
-		ID: eventID, MealieRecipeID: in.MealieRecipeID,
+		ID: eventID.String(), MealieRecipeID: in.MealieRecipeID,
 		ServedOn:  in.ServedOn,
 		CreatedAt: time.Now(),
 		Reactions: make([]dto.MealReactionResponse, 0, len(rxns)),
 	}
 	for _, r := range rxns {
 		out.Reactions = append(out.Reactions, dto.MealReactionResponse{
-			PersonID: r.PersonID, Sentiment: r.Sentiment,
+			PersonID: r.PersonID.String(), Sentiment: r.Sentiment,
 		})
 	}
 	return out, nil
@@ -577,7 +620,7 @@ func (a storeAdapter) ListPlanningConstraints(ctx context.Context) ([]httpapi.Pl
 	out := make([]httpapi.PlanningConstraintResponse, 0, len(constraints))
 	for _, c := range constraints {
 		out = append(out, httpapi.PlanningConstraintResponse{
-			ID: int(c.ID), Kind: c.Kind, Value: c.Value, Active: c.Active,
+			ID: c.ID, Kind: c.Kind, Value: c.Value, Active: c.Active,
 		})
 	}
 	return out, nil
@@ -590,7 +633,7 @@ func (a storeAdapter) CreatePlanningConstraint(ctx context.Context, in httpapi.P
 	if err != nil {
 		return httpapi.PlanningConstraintResponse{}, fmt.Errorf("constraint create: %w", err)
 	}
-	return httpapi.PlanningConstraintResponse{ID: int(id), Kind: in.Kind, Value: in.Value, Active: in.Active}, nil
+	return httpapi.PlanningConstraintResponse{ID: id, Kind: in.Kind, Value: in.Value, Active: in.Active}, nil
 }
 
 func (a storeAdapter) ListShoppingLists(ctx context.Context) ([]httpapi.ShoppingListResponse, error) {
@@ -600,8 +643,13 @@ func (a storeAdapter) ListShoppingLists(ctx context.Context) ([]httpapi.Shopping
 	}
 	out := make([]httpapi.ShoppingListResponse, 0, len(lists))
 	for _, l := range lists {
+		var owner *string
+		if l.OwnerPersonID != nil {
+			s := l.OwnerPersonID.String()
+			owner = &s
+		}
 		out = append(out, httpapi.ShoppingListResponse{
-			ID: int(l.ID), OwnerPersonID: l.OwnerPersonID,
+			ID: l.ID.String(), OwnerPersonID: owner,
 			Name: l.Name, Status: l.Status, CreatedAt: l.CreatedAt,
 		})
 	}
@@ -609,13 +657,21 @@ func (a storeAdapter) ListShoppingLists(ctx context.Context) ([]httpapi.Shopping
 }
 
 func (a storeAdapter) CreateShoppingList(ctx context.Context, in httpapi.ShoppingListInput) (httpapi.ShoppingListResponse, error) {
+	var owner *domain.PersonID
+	if in.OwnerPersonID != nil {
+		p, perr := domain.ParsePersonID(*in.OwnerPersonID)
+		if perr != nil {
+			return httpapi.ShoppingListResponse{}, fmt.Errorf("shopping list create: %w", perr)
+		}
+		owner = &p
+	}
 	l, err := a.db.CreateShoppingList(ctx, persistence.ShoppingList{
-		OwnerPersonID: in.OwnerPersonID, Name: in.Name, Status: "active",
+		OwnerPersonID: owner, Name: in.Name, Status: "active",
 	})
 	if err != nil {
 		return httpapi.ShoppingListResponse{}, fmt.Errorf("shopping list create: %w", err)
 	}
-	return httpapi.ShoppingListResponse{ID: int(l), Name: in.Name, Status: "active", CreatedAt: time.Now()}, nil
+	return httpapi.ShoppingListResponse{ID: l.String(), Name: in.Name, Status: "active", CreatedAt: time.Now()}, nil
 }
 
 // CreateFromChecklist creates a shopping list plus its line items in one call, the
@@ -637,46 +693,51 @@ func (a storeAdapter) CreateFromChecklist(ctx context.Context, in httpapi.Shoppi
 	for i, it := range in.Items {
 		label := it.Label
 		respItems = append(respItems, httpapi.ShoppingListItemResponse{
-			ID: int(itemIDs[i]), ShoppingListID: int(listID), Label: &label,
+			ID: itemIDs[i].String(), ShoppingListID: listID.String(), Label: &label,
 			Quantity: it.Quantity, Unit: it.Unit, Checked: false, AddedAt: time.Now(),
 		})
 	}
 	return httpapi.ShoppingListFromChecklistResponse{
 		ShoppingListResponse: httpapi.ShoppingListResponse{
-			ID: int(listID), Name: in.Name, Status: "active", CreatedAt: time.Now(),
+			ID: listID.String(), Name: in.Name, Status: "active", CreatedAt: time.Now(),
 		},
 		Items: respItems,
 	}, nil
 }
 
-func (a storeAdapter) GetShoppingList(ctx context.Context, listID int64) (httpapi.ShoppingListResponse, error) {
-	l, err := a.db.GetShoppingList(ctx, listID)
+func (a storeAdapter) GetShoppingList(ctx context.Context, listID string) (httpapi.ShoppingListResponse, error) {
+	id, err := domain.ParseShoppingListID(listID)
 	if err != nil {
 		return httpapi.ShoppingListResponse{}, httpapi.ErrNotFound
 	}
+	l, err := a.db.GetShoppingList(ctx, id)
+	if err != nil {
+		return httpapi.ShoppingListResponse{}, httpapi.ErrNotFound
+	}
+	var owner *string
+	if l.OwnerPersonID != nil {
+		s := l.OwnerPersonID.String()
+		owner = &s
+	}
 	return httpapi.ShoppingListResponse{
-		ID: int(l.ID), OwnerPersonID: l.OwnerPersonID,
+		ID: l.ID.String(), OwnerPersonID: owner,
 		Name: l.Name, Status: l.Status, CreatedAt: l.CreatedAt,
 	}, nil
 }
 
-func (a storeAdapter) ArchiveShoppingList(ctx context.Context, listID int64) error {
-	_, err := a.db.GetShoppingList(ctx, listID)
+func (a storeAdapter) ArchiveShoppingList(ctx context.Context, listID string) error {
+	id, err := domain.ParseShoppingListID(listID)
 	if err != nil {
 		return httpapi.ErrNotFound
 	}
-	if err := a.db.UpdateShoppingListStatus(ctx, listID, "archived"); err != nil {
+	_, err = a.db.GetShoppingList(ctx, id)
+	if err != nil {
+		return httpapi.ErrNotFound
+	}
+	if err := a.db.UpdateShoppingListStatus(ctx, id, "archived"); err != nil {
 		return fmt.Errorf("shopping list archive: %w", err)
 	}
 	return nil
-}
-
-func intPtr64ToIntPtr(v *int64) *int {
-	if v == nil {
-		return nil
-	}
-	r := int(*v)
-	return &r
 }
 
 func float64ToFloat32(v float64) float32 {
@@ -699,62 +760,106 @@ func int64PtrToIntPtr(v *int64) *int {
 	return &r
 }
 
-func (a storeAdapter) ListShoppingListItems(ctx context.Context, listID int64) ([]httpapi.ShoppingListItemResponse, error) {
-	items, err := a.db.ListShoppingListItems(ctx, listID)
+func (a storeAdapter) ListShoppingListItems(ctx context.Context, listID string) ([]httpapi.ShoppingListItemResponse, error) {
+	id, err := domain.ParseShoppingListID(listID)
+	if err != nil {
+		return nil, fmt.Errorf("shopping list items list: %w", err)
+	}
+	items, err := a.db.ListShoppingListItems(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("shopping list items list: %w", err)
 	}
 	out := make([]httpapi.ShoppingListItemResponse, 0, len(items))
 	for _, it := range items {
+		var ingID *string
+		if it.IngredientID != nil {
+			s := it.IngredientID.String()
+			ingID = &s
+		}
+		var reqID *string
+		if it.ShoppingRequirementID != nil {
+			s := it.ShoppingRequirementID.String()
+			reqID = &s
+		}
 		out = append(out, httpapi.ShoppingListItemResponse{
-			ID: int(it.ID), ShoppingListID: int(it.ShoppingListID),
-			ShoppingRequirementID: int64PtrToIntPtr(it.ShoppingRequirementID),
-			IngredientID: it.IngredientID, Label: it.Label,
+			ID: it.ID.String(), ShoppingListID: it.ShoppingListID.String(),
+			ShoppingRequirementID: reqID,
+			IngredientID: ingID, Label: it.Label,
 			Quantity: float64ToFloat32(it.Quantity), Unit: it.Unit, Checked: it.Checked, AddedAt: it.AddedAt,
 		})
 	}
 	return out, nil
 }
 
-func (a storeAdapter) AddShoppingListItem(ctx context.Context, listID int64, in httpapi.ShoppingListItemInput) (httpapi.ShoppingListItemResponse, error) {
+func (a storeAdapter) AddShoppingListItem(ctx context.Context, listID string, in httpapi.ShoppingListItemInput) (httpapi.ShoppingListItemResponse, error) {
+	slid, err := domain.ParseShoppingListID(listID)
+	if err != nil {
+		return httpapi.ShoppingListItemResponse{}, fmt.Errorf("shopping list item create: %w", err)
+	}
+	var ingID *domain.IngredientID
+	if in.IngredientID != nil {
+		parsed, err := domain.ParseIngredientID(*in.IngredientID)
+		if err != nil {
+			return httpapi.ShoppingListItemResponse{}, fmt.Errorf("shopping list item create: %w", err)
+		}
+		ingID = &parsed
+	}
+	var reqID *domain.ShoppingRequirementID
+	if in.ShoppingRequirementID != nil {
+		parsed, err := domain.ParseShoppingRequirementID(*in.ShoppingRequirementID)
+		if err != nil {
+			return httpapi.ShoppingListItemResponse{}, fmt.Errorf("shopping list item create: %w", err)
+		}
+		reqID = &parsed
+	}
 	it, err := a.db.CreateShoppingListItem(ctx, persistence.ShoppingListItem{
-		ShoppingListID: listID, ShoppingRequirementID: func() *int64 {
-			if in.ShoppingRequirementID != nil {
-				v := int64(*in.ShoppingRequirementID)
-				return &v
-			}
-			return nil
-		}(),
-		IngredientID: in.IngredientID, Label: in.Label,
+		ShoppingListID: slid, ShoppingRequirementID: reqID,
+		IngredientID: ingID, Label: in.Label,
 		Quantity: float64(in.Quantity), Unit: in.Unit, Checked: false,
 	})
 	if err != nil {
 		return httpapi.ShoppingListItemResponse{}, fmt.Errorf("shopping list item create: %w", err)
 	}
 	return httpapi.ShoppingListItemResponse{
-		ID: int(it), ShoppingListID: int(listID),
-		ShoppingRequirementID: inPtrToIntPtr(in.ShoppingRequirementID),
+		ID: it.String(), ShoppingListID: listID,
+		ShoppingRequirementID: in.ShoppingRequirementID,
 		IngredientID: in.IngredientID, Label: in.Label,
 		Quantity: in.Quantity, Unit: in.Unit, Checked: false, AddedAt: time.Now(),
 	}, nil
 }
 
-func inPtrToIntPtr(v *int) *int { return v }
-
-func (a storeAdapter) ToggleShoppingListItem(ctx context.Context, listID, itemID int64, checked bool) (httpapi.ShoppingListItemResponse, error) {
-	if err := a.db.UpdateShoppingListItemChecked(ctx, itemID, checked); err != nil {
+func (a storeAdapter) ToggleShoppingListItem(ctx context.Context, listID, itemID string, checked bool) (httpapi.ShoppingListItemResponse, error) {
+	slid, err := domain.ParseShoppingListID(listID)
+	if err != nil {
 		return httpapi.ShoppingListItemResponse{}, httpapi.ErrNotFound
 	}
-	items, err := a.db.ListShoppingListItems(ctx, listID)
+	iiid, err := domain.ParseShoppingListItemID(itemID)
+	if err != nil {
+		return httpapi.ShoppingListItemResponse{}, httpapi.ErrNotFound
+	}
+	if err := a.db.UpdateShoppingListItemChecked(ctx, iiid, checked); err != nil {
+		return httpapi.ShoppingListItemResponse{}, httpapi.ErrNotFound
+	}
+	items, err := a.db.ListShoppingListItems(ctx, slid)
 	if err != nil {
 		return httpapi.ShoppingListItemResponse{}, fmt.Errorf("shopping list item toggle: %w", err)
 	}
 	for _, it := range items {
-		if it.ID == itemID {
+		if it.ID == iiid {
+			var ingID *string
+			if it.IngredientID != nil {
+				s := it.IngredientID.String()
+				ingID = &s
+			}
+			var reqID *string
+			if it.ShoppingRequirementID != nil {
+				s := it.ShoppingRequirementID.String()
+				reqID = &s
+			}
 			return httpapi.ShoppingListItemResponse{
-				ID: int(it.ID), ShoppingListID: int(it.ShoppingListID),
-				ShoppingRequirementID: int64PtrToIntPtr(it.ShoppingRequirementID),
-				IngredientID: it.IngredientID, Label: it.Label,
+				ID: it.ID.String(), ShoppingListID: it.ShoppingListID.String(),
+				ShoppingRequirementID: reqID,
+				IngredientID: ingID, Label: it.Label,
 				Quantity: float64ToFloat32(it.Quantity), Unit: it.Unit, Checked: it.Checked, AddedAt: it.AddedAt,
 			}, nil
 		}
@@ -762,23 +867,31 @@ func (a storeAdapter) ToggleShoppingListItem(ctx context.Context, listID, itemID
 	return httpapi.ShoppingListItemResponse{}, httpapi.ErrNotFound
 }
 
-func (a storeAdapter) DeleteShoppingListItem(ctx context.Context, listID, itemID int64) error {
-	if err := a.db.DeleteShoppingListItem(ctx, itemID); err != nil {
+func (a storeAdapter) DeleteShoppingListItem(ctx context.Context, listID, itemID string) error {
+	iiid, err := domain.ParseShoppingListItemID(itemID)
+	if err != nil {
+		return httpapi.ErrNotFound
+	}
+	if err := a.db.DeleteShoppingListItem(ctx, iiid); err != nil {
 		return httpapi.ErrNotFound
 	}
 	return nil
 }
 
-func (a storeAdapter) PushShoppingList(ctx context.Context, listID int64, retailer string) (httpapi.RetailerListBindingResponse, error) {
-	if _, err := PushShoppingList(ctx, a.db, listID, a.adapterURL, retailer); err != nil {
+func (a storeAdapter) PushShoppingList(ctx context.Context, listID string, retailer string) (httpapi.RetailerListBindingResponse, error) {
+	slid, err := domain.ParseShoppingListID(listID)
+	if err != nil {
 		return httpapi.RetailerListBindingResponse{}, err
 	}
-	binding, err := a.db.GetRetailerListBinding(ctx, listID, retailer)
+	if _, err := PushShoppingList(ctx, a.db, slid, a.adapterURL, retailer); err != nil {
+		return httpapi.RetailerListBindingResponse{}, err
+	}
+	binding, err := a.db.GetRetailerListBinding(ctx, slid, retailer)
 	if err != nil {
 		return httpapi.RetailerListBindingResponse{}, fmt.Errorf("push shopping list: get binding: %w", err)
 	}
 	out := httpapi.RetailerListBindingResponse{
-		ID: int(binding.ID), ShoppingListID: int(binding.ShoppingListID),
+		ShoppingListID: binding.ShoppingListID.String(),
 		Retailer: binding.Retailer, ExternalListID: binding.ExternalListID,
 		SyncDirection: binding.SyncDirection, LastPushedAt: binding.LastPushedAt,
 	}
@@ -789,20 +902,24 @@ func (a storeAdapter) PushShoppingList(ctx context.Context, listID int64, retail
 	return out, nil
 }
 
-func (a storeAdapter) ListShoppingCarts(ctx context.Context, listID int64) ([]httpapi.ShoppingCartResponse, error) {
-	bindings, err := a.db.ListRetailerListBindings(ctx, listID)
+func (a storeAdapter) ListShoppingCarts(ctx context.Context, listID string) ([]httpapi.ShoppingCartResponse, error) {
+	slid, err := domain.ParseShoppingListID(listID)
+	if err != nil {
+		return nil, fmt.Errorf("shopping carts list: %w", err)
+	}
+	bindings, err := a.db.ListRetailerListBindings(ctx, slid)
 	if err != nil {
 		return nil, fmt.Errorf("shopping carts list: %w", err)
 	}
 	out := make([]httpapi.ShoppingCartResponse, 0)
 	for _, b := range bindings {
-		carts, err := a.db.ListShoppingCarts(ctx, b.ID)
+		carts, err := a.db.ListShoppingCarts(ctx, b.ShoppingListID, b.Retailer)
 		if err != nil {
 			continue
 		}
 		for _, c := range carts {
 			out = append(out, httpapi.ShoppingCartResponse{
-				ID: int(c.ID), RetailerListBindingID: int(c.RetailerListBindingID),
+				ID: c.ID.String(),
 				CreatedAt: c.CreatedAt, Status: c.Status,
 			})
 		}
@@ -810,80 +927,122 @@ func (a storeAdapter) ListShoppingCarts(ctx context.Context, listID int64) ([]ht
 	return out, nil
 }
 
-func (a storeAdapter) ToCart(ctx context.Context, listID int64, retailer string) (httpapi.ShoppingCartResponse, error) {
-	binding, err := a.db.GetRetailerListBinding(ctx, listID, retailer)
+func (a storeAdapter) ToCart(ctx context.Context, listID string, retailer string) (httpapi.ShoppingCartResponse, error) {
+	slid, err := domain.ParseShoppingListID(listID)
 	if err != nil {
 		return httpapi.ShoppingCartResponse{}, httpapi.ErrNotFound
 	}
-	carts, err := a.db.ListShoppingCarts(ctx, binding.ID)
+	binding, err := a.db.GetRetailerListBinding(ctx, slid, retailer)
+	if err != nil {
+		return httpapi.ShoppingCartResponse{}, httpapi.ErrNotFound
+	}
+	carts, err := a.db.ListShoppingCarts(ctx, binding.ShoppingListID, binding.Retailer)
 	if err != nil {
 		return httpapi.ShoppingCartResponse{}, fmt.Errorf("to cart: %w", err)
 	}
 	if len(carts) == 0 {
-		return httpapi.ShoppingCartResponse{}, fmt.Errorf("to cart: no carts for binding %d", binding.ID)
+		return httpapi.ShoppingCartResponse{}, fmt.Errorf("to cart: no carts for binding %s", binding.ShoppingListID)
 	}
 	c := carts[0]
 	return httpapi.ShoppingCartResponse{
-		ID: int(c.ID), RetailerListBindingID: int(c.RetailerListBindingID),
+		ID: c.ID.String(),
 		CreatedAt: c.CreatedAt, Status: c.Status,
 	}, nil
 }
 
-func (a storeAdapter) ListOrders(ctx context.Context, retailer *string, cartID *int64) ([]httpapi.OrderResponse, error) {
-	orders, err := a.db.ListOrders(ctx, cartID, retailer)
+func (a storeAdapter) ListOrders(ctx context.Context, retailer *string, cartID *string) ([]httpapi.OrderResponse, error) {
+	var cartIDTyped *domain.ShoppingCartID
+	if cartID != nil {
+		parsed, err := domain.ParseShoppingCartID(*cartID)
+		if err != nil {
+			return nil, fmt.Errorf("orders list: %w", err)
+		}
+		cartIDTyped = &parsed
+	}
+	orders, err := a.db.ListOrders(ctx, cartIDTyped, retailer)
 	if err != nil {
 		return nil, fmt.Errorf("orders list: %w", err)
 	}
 	out := make([]httpapi.OrderResponse, 0, len(orders))
 	for _, o := range orders {
+		var scid *string
+		if o.ShoppingCartID != nil {
+			s := o.ShoppingCartID.String()
+			scid = &s
+		}
 		out = append(out, httpapi.OrderResponse{
-			ID: int(o.ID), ShoppingCartID: int64PtrToIntPtr(o.ShoppingCartID),
+			ID: o.ID.String(), ShoppingCartID: scid,
 			Retailer: o.Retailer, Source: o.Source,
-			OrderedAt: o.OrderedAt, TotalPrice: float64PtrToFloat32Ptr(o.TotalPrice),
+			OrderedAt: o.OrderedAt, TotalPriceMinor: o.TotalPriceMinor,
+			Currency: o.Currency,
 		})
 	}
 	return out, nil
 }
 
-func (a storeAdapter) GetOrder(ctx context.Context, orderID int64) (httpapi.OrderViewResponse, error) {
-	o, err := a.db.GetOrder(ctx, orderID)
-	if err != nil {
-		return httpapi.OrderViewResponse{}, httpapi.ErrNotFound
-	}
-	items, err := a.db.ListOrderItems(ctx, orderID)
+func (a storeAdapter) GetOrder(ctx context.Context, orderID string) (httpapi.OrderViewResponse, error) {
+	oid, err := domain.ParseOrderID(orderID)
 	if err != nil {
 		return httpapi.OrderViewResponse{}, fmt.Errorf("get order: %w", err)
 	}
+	o, err := a.db.GetOrder(ctx, oid)
+	if err != nil {
+		return httpapi.OrderViewResponse{}, httpapi.ErrNotFound
+	}
+	items, err := a.db.ListOrderItems(ctx, oid)
+	if err != nil {
+		return httpapi.OrderViewResponse{}, fmt.Errorf("get order: %w", err)
+	}
+	var scid *string
+	if o.ShoppingCartID != nil {
+		s := o.ShoppingCartID.String()
+		scid = &s
+	}
 	out := httpapi.OrderViewResponse{
 		Order: httpapi.OrderResponse{
-			ID: int(o.ID), ShoppingCartID: int64PtrToIntPtr(o.ShoppingCartID),
+			ID: o.ID.String(), ShoppingCartID: scid,
 			Retailer: o.Retailer, Source: o.Source,
-			OrderedAt: o.OrderedAt, TotalPrice: float64PtrToFloat32Ptr(o.TotalPrice),
+			OrderedAt: o.OrderedAt, TotalPriceMinor: o.TotalPriceMinor,
+			Currency: o.Currency,
 		},
 	}
 	for _, it := range items {
+		var subFor *string
+		if it.SubstitutedForItemID != nil {
+			s := it.SubstitutedForItemID.String()
+			subFor = &s
+		}
 		out.Items = append(out.Items, httpapi.OrderItemResponse{
-			ID: int(it.ID), OrderID: int(it.OrderID),
-			RetailerProductID: it.RetailerProductID,
+			ID: it.ID.String(), OrderID: it.OrderID.String(),
+			RetailerProductID: it.RetailerProductID.String(),
 			Quantity: float64ToFloat32(it.Quantity), UnitPrice: float64PtrToFloat32Ptr(it.UnitPrice),
-			TotalPrice: float64PtrToFloat32Ptr(it.TotalPrice), SubstitutedForItemID: int64PtrToIntPtr(it.SubstitutedForItemID),
+			TotalPriceMinor: it.TotalPriceMinor, Currency: it.Currency, SubstitutedForItemID: subFor,
 		})
 	}
 	return out, nil
 }
 
-func (a storeAdapter) ListOrderItems(ctx context.Context, orderID int64) ([]httpapi.OrderItemResponse, error) {
-	items, err := a.db.ListOrderItems(ctx, orderID)
+func (a storeAdapter) ListOrderItems(ctx context.Context, orderID string) ([]httpapi.OrderItemResponse, error) {
+	oid, err := domain.ParseOrderID(orderID)
+	if err != nil {
+		return nil, fmt.Errorf("order items list: %w", err)
+	}
+	items, err := a.db.ListOrderItems(ctx, oid)
 	if err != nil {
 		return nil, fmt.Errorf("order items list: %w", err)
 	}
 	out := make([]httpapi.OrderItemResponse, 0, len(items))
 	for _, it := range items {
+		var subFor *string
+		if it.SubstitutedForItemID != nil {
+			s := it.SubstitutedForItemID.String()
+			subFor = &s
+		}
 		out = append(out, httpapi.OrderItemResponse{
-			ID: int(it.ID), OrderID: int(it.OrderID),
-			RetailerProductID: it.RetailerProductID,
+			ID: it.ID.String(), OrderID: it.OrderID.String(),
+			RetailerProductID: it.RetailerProductID.String(),
 			Quantity: float64ToFloat32(it.Quantity), UnitPrice: float64PtrToFloat32Ptr(it.UnitPrice),
-			TotalPrice: float64PtrToFloat32Ptr(it.TotalPrice), SubstitutedForItemID: int64PtrToIntPtr(it.SubstitutedForItemID),
+			TotalPriceMinor: it.TotalPriceMinor, Currency: it.Currency, SubstitutedForItemID: subFor,
 		})
 	}
 	return out, nil

@@ -172,24 +172,32 @@ func (a mcpStoreAdapter) RecordReaction(ctx context.Context, in mcptools.RecordR
 		s := in.Slot
 		slotKind = &s
 	}
-	var eventID int64
+	ref, err := a.db.GetRecipeRefByMealieID(ctx, in.Recipe)
+	if err != nil {
+		return mcptools.RecordReactionResult{}, fmt.Errorf("record reaction: resolve recipe: %w", err)
+	}
+	var eventID domain.MealEventID
 	if slotKind != nil {
-		eventID, err = a.db.CreateMealEventWithSlot(ctx, in.Recipe, servedOn, nil, nil, slotKind)
+		eventID, err = a.db.CreateMealEventWithSlot(ctx, ref.ID, servedOn, nil, nil, slotKind)
 	} else {
-		eventID, err = a.db.CreateMealEvent(ctx, in.Recipe, servedOn, nil, nil)
+		eventID, err = a.db.CreateMealEvent(ctx, ref.ID, servedOn, nil, nil)
 	}
 	if err != nil {
 		return mcptools.RecordReactionResult{}, fmt.Errorf("record reaction: create meal event: %w", err)
 	}
+	pid, perr := domain.ParsePersonID(in.PersonID)
+	if perr != nil {
+		return mcptools.RecordReactionResult{}, fmt.Errorf("record reaction: parse person id: %w", perr)
+	}
 	if err := a.db.AddMealReaction(ctx, persistence.MealReaction{
 		MealEventID: eventID,
-		PersonID:    in.PersonID,
+		PersonID:    pid,
 		Sentiment:   in.Sentiment,
 	}); err != nil {
 		return mcptools.RecordReactionResult{}, fmt.Errorf("record reaction: add reaction: %w", err)
 	}
 	return mcptools.RecordReactionResult{
-		MealEventID: eventID,
+		MealEventID: eventID.String(),
 		Recipe:      in.Recipe,
 		ServedOn:    in.ServedOn,
 		PersonID:    in.PersonID,
@@ -202,14 +210,18 @@ func (a mcpStoreAdapter) RecordReaction(ctx context.Context, in mcptools.RecordR
 func (a mcpStoreAdapter) ShoppingRequirements(ctx context.Context, recipeIDs []string) ([]mcptools.ShoppingRequirement, error) {
 	meals := make([]planning.ChosenMeal, 0, len(recipeIDs))
 	for _, id := range recipeIDs {
-		lines, err := a.db.ListRecipeIngredients(ctx, id)
+		ref, err := a.db.GetRecipeRefByMealieID(ctx, id)
+		if err != nil {
+			return nil, fmt.Errorf("shopping requirements: resolve recipe %q: %w", id, err)
+		}
+		lines, err := a.db.ListRecipeIngredients(ctx, ref.ID)
 		if err != nil {
 			return nil, fmt.Errorf("shopping requirements: list ingredients for %q: %w", id, err)
 		}
 		ings := make([]domain.Ingredient, 0, len(lines))
 		for _, l := range lines {
 			ings = append(ings, domain.Ingredient{
-				IngredientID: l.IngredientID,
+				IngredientID: l.IngredientID.String(),
 				Quantity:     l.Quantity,
 				Unit:         l.Unit,
 			})
@@ -264,13 +276,13 @@ func (a mcpStoreAdapter) loadCandidates(ctx context.Context) ([]domain.Candidate
 	}
 	out := make([]domain.Candidate, 0, len(refs))
 	for _, ref := range refs {
-		lines, err := a.db.ListRecipeIngredients(ctx, ref.MealieRecipeID)
+		lines, err := a.db.ListRecipeIngredients(ctx, ref.ID)
 		if err != nil {
 			return nil, fmt.Errorf("ingredients for %q: %w", ref.MealieRecipeID, err)
 		}
 		ids := make([]string, 0, len(lines))
 		for _, l := range lines {
-			ids = append(ids, l.IngredientID)
+			ids = append(ids, l.IngredientID.String())
 		}
 		out = append(out, domain.Candidate{
 			MealieRecipeID: ref.MealieRecipeID,
@@ -291,12 +303,20 @@ func (a mcpStoreAdapter) loadHousehold(ctx context.Context) ([]domain.Person, []
 	}
 	domainPeople := make([]domain.Person, 0, len(people))
 	for _, p := range people {
-		domainPeople = append(domainPeople, domain.Person{ID: p.ID, Name: p.Name, Weight: p.Weight})
+		pid, err := domain.ParsePersonID(p.ID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("parse person id %q: %w", p.ID, err)
+		}
+		domainPeople = append(domainPeople, domain.Person{ID: pid, Name: p.Name, Weight: p.Weight})
 	}
 
 	var prefs []domain.Preference
 	for _, p := range people {
-		rows, err := a.db.ListPreferences(ctx, p.ID)
+		pid, err := domain.ParsePersonID(p.ID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("parse person id %q: %w", p.ID, err)
+		}
+		rows, err := a.db.ListPreferences(ctx, pid)
 		if err != nil {
 			return nil, nil, fmt.Errorf("preferences for %q: %w", p.ID, err)
 		}
@@ -372,7 +392,10 @@ func (a mcpStoreAdapter) loadSchoolTagsFor(ctx context.Context, date time.Time) 
 func (a mcpStoreAdapter) CreateShoppingList(ctx context.Context, in mcptools.CreateShoppingListInput) (mcptools.CreateShoppingListResult, error) {
 	items := make([]persistence.ShoppingListItem, 0, len(in.Items))
 	for _, item := range in.Items {
-		ingredientID := item.Ingredient
+		ingredientID, err := domain.ParseIngredientID(item.Ingredient)
+		if err != nil {
+			return mcptools.CreateShoppingListResult{}, fmt.Errorf("create shopping list: %w", err)
+		}
 		items = append(items, persistence.ShoppingListItem{
 			IngredientID: &ingredientID,
 			Quantity:     item.Quantity,
@@ -384,7 +407,7 @@ func (a mcpStoreAdapter) CreateShoppingList(ctx context.Context, in mcptools.Cre
 		return mcptools.CreateShoppingListResult{}, fmt.Errorf("create shopping list: %w", err)
 	}
 	return mcptools.CreateShoppingListResult{
-		ListID: listID,
+		ListID: listID.String(),
 		Name:   in.Name,
 		Status: "active",
 		Items:  len(in.Items),
@@ -428,10 +451,14 @@ func (a mcpStoreAdapter) PushToWishlist(ctx context.Context, in mcptools.PushWis
 		return mcptools.PushWishlistResult{}, fmt.Errorf("push wishlist: create: %w", err)
 	}
 	if in.ShoppingListID != nil {
+		slid, err := domain.ParseShoppingListID(*in.ShoppingListID)
+		if err != nil {
+			return mcptools.PushWishlistResult{}, fmt.Errorf("push wishlist: %w", err)
+		}
 		now := time.Now()
 		status := "success"
 		if err := a.db.CreateOrUpdateRetailerListBinding(ctx, persistence.RetailerListBinding{
-			ShoppingListID: *in.ShoppingListID,
+			ShoppingListID: slid,
 			Retailer:       in.Retailer,
 			ExternalListID: created.WishlistID,
 			SyncDirection:  "outbound",

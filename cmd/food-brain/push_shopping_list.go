@@ -17,7 +17,7 @@ import (
 // retailer product, creates (or re-creates) the retailer wishlist, and
 // records the outcome on the shopping_list's retailer_list_binding row. It
 // never fills a cart or checks out — see storeAdapter.ToCart for that step.
-func PushShoppingList(ctx context.Context, db *persistence.Store, listID int64, adapterURL, retailerName string) (*retailer.CreatedList, error) {
+func PushShoppingList(ctx context.Context, db *persistence.Store, listID domain.ShoppingListID, adapterURL, retailerName string) (*retailer.CreatedList, error) {
 	list, err := db.GetShoppingList(ctx, listID)
 	if err != nil {
 		return nil, fmt.Errorf("push shopping list: get list: %w", err)
@@ -40,7 +40,7 @@ func PushShoppingList(ctx context.Context, db *persistence.Store, listID int64, 
 	for _, item := range items {
 		id := ""
 		if item.IngredientID != nil {
-			id = *item.IngredientID
+			id = item.IngredientID.String()
 		} else if item.Label != nil {
 			id = domain.CanonicalIngredientID(*item.Label)
 		}
@@ -91,7 +91,7 @@ func PushShoppingList(ctx context.Context, db *persistence.Store, listID int64, 
 // recordPushFailure marks the binding as failed so GET responses surface the
 // error state rather than silently reusing stale success data. Errors here
 // are swallowed (best-effort) — the caller already has the real error to report.
-func recordPushFailure(ctx context.Context, db *persistence.Store, listID int64, retailerName string) {
+func recordPushFailure(ctx context.Context, db *persistence.Store, listID domain.ShoppingListID, retailerName string) {
 	now := time.Now()
 	status := "error"
 	existing, err := db.GetRetailerListBinding(ctx, listID, retailerName)

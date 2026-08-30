@@ -140,7 +140,7 @@ func errInvalidGTIN(raw, reason string) error {
 // childID is candidateParentID itself, or childID already appears among
 // candidateParentID's ancestors (childID would become an ancestor of its own
 // ancestor).
-func WouldCreateLocationCycle(childID, candidateParentID string, candidateParentAncestors []string) bool {
+func WouldCreateLocationCycle(childID, candidateParentID InventoryLocationID, candidateParentAncestors []InventoryLocationID) bool {
 	if childID == candidateParentID {
 		return true
 	}

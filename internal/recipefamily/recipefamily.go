@@ -59,10 +59,10 @@ type Variant struct {
 // construction. There is deliberately no method that mutates Ingredients or
 // Steps after a Revision is created.
 //
-// ID is int64 to mirror recipe_revision.id BIGSERIAL; Family/Variant ids are
-// string slugs (TEXT) because they are user-facing names, not sequences.
+// ID is a UUIDv7 string to mirror recipe_revision.id UUID; Family/Variant ids
+// are also UUIDv7 strings.
 type Revision struct {
-	ID          int64
+	ID          string
 	VariantID   string
 	Servings    int
 	Description string
@@ -76,21 +76,21 @@ type Revision struct {
 // invariant (no cycles) at edge-insertion time, mirroring the application-layer
 // cycle check the schema cannot express.
 type Graph struct {
-	parents map[int64][]int64 // child -> parents
+	parents map[string][]string // child -> parents
 }
 
 // NewGraph returns an empty lineage graph.
 func NewGraph() *Graph {
-	return &Graph{parents: make(map[int64][]int64)}
+	return &Graph{parents: make(map[string][]string)}
 }
 
 // AddEdge records that child was derived from parent. It is idempotent for an
 // edge that already exists. It rejects a self-edge and any edge that would create
 // a cycle (child already an ancestor of parent), so a Graph can never hold a
 // cycle; in those cases it returns an error and leaves the graph unchanged.
-func (g *Graph) AddEdge(child, parent int64) error {
+func (g *Graph) AddEdge(child, parent string) error {
 	if child == parent {
-		return fmt.Errorf("recipefamily: revision %d cannot be its own parent", child)
+		return fmt.Errorf("recipefamily: revision %s cannot be its own parent", child)
 	}
 	for _, p := range g.parents[child] {
 		if p == parent {
@@ -98,7 +98,7 @@ func (g *Graph) AddEdge(child, parent int64) error {
 		}
 	}
 	if g.isAncestor(child, parent) {
-		return fmt.Errorf("recipefamily: making %d a parent of %d would create a cycle", parent, child)
+		return fmt.Errorf("recipefamily: making %s a parent of %s would create a cycle", parent, child)
 	}
 	g.parents[child] = append(g.parents[child], parent)
 	return nil
@@ -107,17 +107,17 @@ func (g *Graph) AddEdge(child, parent int64) error {
 // Parents returns the direct parent revision IDs of id (nil when it has none).
 // The returned slice is a copy, so callers can never mutate the graph through
 // it.
-func (g *Graph) Parents(id int64) []int64 {
-	return append([]int64(nil), g.parents[id]...)
+func (g *Graph) Parents(id string) []string {
+	return append([]string(nil), g.parents[id]...)
 }
 
 // Ancestors returns every revision that id transitively derives from (its full
-// history), deduplicated and sorted ascending for deterministic output. This is
+// history), deduplicated and sorted for deterministic output. This is
 // the in-memory form of the WITH RECURSIVE ancestor query over
 // recipe_revision_parent.
-func (g *Graph) Ancestors(id int64) []int64 {
-	seen := make(map[int64]bool)
-	var stack []int64
+func (g *Graph) Ancestors(id string) []string {
+	seen := make(map[string]bool)
+	var stack []string
 	stack = append(stack, g.parents[id]...)
 	for len(stack) > 0 {
 		n := stack[len(stack)-1]
@@ -128,17 +128,17 @@ func (g *Graph) Ancestors(id int64) []int64 {
 		seen[n] = true
 		stack = append(stack, g.parents[n]...)
 	}
-	out := make([]int64, 0, len(seen))
+	out := make([]string, 0, len(seen))
 	for n := range seen {
 		out = append(out, n)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	sort.Strings(out)
 	return out
 }
 
 // isAncestor reports whether candidate is an ancestor of id (id transitively
 // derives from candidate).
-func (g *Graph) isAncestor(candidate, id int64) bool {
+func (g *Graph) isAncestor(candidate, id string) bool {
 	for _, a := range g.Ancestors(id) {
 		if a == candidate {
 			return true

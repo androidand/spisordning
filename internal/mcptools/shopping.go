@@ -43,14 +43,14 @@ type PushWishlistInput struct {
 	Items []PushWishlistItem `json:"items"`
 	// ShoppingListID is the spisordning shopping_list to bind the wishlist to.
 	// Optional: when omitted, the wishlist is created but no binding is recorded.
-	ShoppingListID *int64 `json:"shopping_list_id,omitempty"`
+	ShoppingListID *string `json:"shopping_list_id,omitempty"`
 }
 
 // ── Shopping tool outputs ───────────────────────────────────────────────────
 
 // CreateShoppingListResult is the output of the create_shopping_list tool.
 type CreateShoppingListResult struct {
-	ListID int64  `json:"list_id"`
+	ListID string `json:"list_id"`
 	Name   string `json:"name"`
 	Status string `json:"status"`
 	Items  int    `json:"items"`
@@ -88,7 +88,7 @@ type PushWishlistResult struct {
 	WishlistID     string `json:"wishlist_id"`
 	ListName       string `json:"list_name"`
 	Items          int    `json:"items"`
-	ShoppingListID *int64 `json:"shopping_list_id,omitempty"`
+	ShoppingListID *string `json:"shopping_list_id,omitempty"`
 }
 
 // ── Shopping service interfaces ─────────────────────────────────────────────

@@ -17,14 +17,14 @@ type RecipeFamilyIngredient struct {
 
 // RecipeFamilyRevisionResponse is one immutable snapshot of a variant's content.
 type RecipeFamilyRevisionResponse struct {
-	ID          int64                       `json:"id"`
-	VariantID   string                      `json:"variant_id"`
-	Servings    int                         `json:"servings,omitempty"`
-	Description string                      `json:"description,omitempty"`
-	Ingredients []RecipeFamilyIngredient    `json:"ingredients"`
-	Steps       []string                    `json:"steps"`
-	Parents     []int64                     `json:"parents,omitempty"`
-	CreatedAt   time.Time                   `json:"created_at"`
+	ID          string                     `json:"id"`
+	VariantID   string                     `json:"variant_id"`
+	Servings    int                        `json:"servings,omitempty"`
+	Description string                     `json:"description,omitempty"`
+	Ingredients []RecipeFamilyIngredient   `json:"ingredients"`
+	Steps       []string                   `json:"steps"`
+	Parents     []string                   `json:"parents,omitempty"`
+	CreatedAt   time.Time                  `json:"created_at"`
 }
 
 // RecipeFamilyVariantResponse is one recognizable fork of a family.
@@ -70,7 +70,7 @@ type CreateRecipeRevisionInput struct {
 	Steps       []string                 `json:"steps"`
 	// ParentRevisionID, when set, records that this revision derives from an
 	// existing revision (the git-like "commit on top of" relationship).
-	ParentRevisionID int64 `json:"parent_revision_id,omitempty"`
+	ParentRevisionID string `json:"parent_revision_id,omitempty"`
 }
 
 // RecipeFamilyService is the read/write surface the /recipe-families handlers
@@ -83,7 +83,7 @@ type RecipeFamilyService interface {
 	ListVariants(ctx context.Context, familyID string) ([]RecipeFamilyVariantResponse, error)
 	CreateVariant(ctx context.Context, familyID string, in CreateRecipeVariantInput) (RecipeFamilyVariantResponse, error)
 	ListRevisions(ctx context.Context, variantID string) ([]RecipeFamilyRevisionResponse, error)
-	GetRevision(ctx context.Context, revisionID int64) (RecipeFamilyRevisionResponse, error)
+	GetRevision(ctx context.Context, revisionID string) (RecipeFamilyRevisionResponse, error)
 	CreateRevision(ctx context.Context, variantID string, in CreateRecipeRevisionInput) (RecipeFamilyRevisionResponse, error)
 	SetDefaultVariant(ctx context.Context, familyID, variantID string) error
 }

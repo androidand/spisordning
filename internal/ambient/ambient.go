@@ -67,7 +67,7 @@ func Render(s Slot) string {
 //
 // It returns a new slice and never mutates its input, so the caller can decide
 // whether to persist the result.
-func RecordReaction(prefs []domain.Preference, personID string, tags []string, sentiment domain.Sentiment) []domain.Preference {
+func RecordReaction(prefs []domain.Preference, personID domain.PersonID, tags []string, sentiment domain.Sentiment) []domain.Preference {
 	out := make([]domain.Preference, len(prefs))
 	copy(out, prefs)
 

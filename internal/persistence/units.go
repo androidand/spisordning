@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/androidand/spisordning/internal/domain"
 )
 
 // DefineUnitConversion is the ONLY write path to unit_conversion
@@ -28,10 +30,10 @@ func (s *Store) DefineUnitConversion(ctx context.Context, fromUnit, toUnit strin
 // ingredient-specific (possibly cross-dimension) conversion. A duplicate
 // (ingredient, from, to) is a hard error — the caller must not silently
 // overwrite a curated factor.
-func (s *Store) DefineIngredientUnitConversion(ctx context.Context, ingredientID, fromUnit, toUnit string, factor float64) error {
+func (s *Store) DefineIngredientUnitConversion(ctx context.Context, ingredientID domain.IngredientID, fromUnit, toUnit string, factor float64) error {
 	const q = `INSERT INTO ingredient_unit_conversion (ingredient_id, from_unit, to_unit, factor)
 		VALUES ($1, $2, $3, $4)`
-	if _, err := s.db.Exec(ctx, q, ingredientID, fromUnit, toUnit, factor); err != nil {
+	if _, err := s.db.Exec(ctx, q, ingredientID.String(), fromUnit, toUnit, factor); err != nil {
 		return fmt.Errorf("persistence: define ingredient_unit_conversion: %w", err)
 	}
 	return nil
@@ -50,9 +52,9 @@ func (s *Store) CountUnitConversions(ctx context.Context) (int, error) {
 
 // CountIngredientUnitConversions returns the number of ingredient-specific
 // conversion rows for one ingredient.
-func (s *Store) CountIngredientUnitConversions(ctx context.Context, ingredientID string) (int, error) {
+func (s *Store) CountIngredientUnitConversions(ctx context.Context, ingredientID domain.IngredientID) (int, error) {
 	var n int
-	if err := s.db.QueryRow(ctx, `SELECT count(*) FROM ingredient_unit_conversion WHERE ingredient_id = $1`, ingredientID).Scan(&n); err != nil {
+	if err := s.db.QueryRow(ctx, `SELECT count(*) FROM ingredient_unit_conversion WHERE ingredient_id = $1`, ingredientID.String()).Scan(&n); err != nil {
 		return 0, fmt.Errorf("persistence: count ingredient_unit_conversion: %w", err)
 	}
 	return n, nil
@@ -62,10 +64,10 @@ func (s *Store) CountIngredientUnitConversions(ctx context.Context, ingredientID
 // conversion, or found=false when none is defined. Absence is a valid,
 // queryable state per invariant 11 — "no conversion defined yet", never a
 // silent 1:1 default.
-func (s *Store) GetIngredientUnitConversion(ctx context.Context, ingredientID, fromUnit, toUnit string) (factor float64, found bool, err error) {
+func (s *Store) GetIngredientUnitConversion(ctx context.Context, ingredientID domain.IngredientID, fromUnit, toUnit string) (factor float64, found bool, err error) {
 	const q = `SELECT factor FROM ingredient_unit_conversion
 		WHERE ingredient_id = $1 AND from_unit = $2 AND to_unit = $3`
-	err = s.db.QueryRow(ctx, q, ingredientID, fromUnit, toUnit).Scan(&factor)
+	err = s.db.QueryRow(ctx, q, ingredientID.String(), fromUnit, toUnit).Scan(&factor)
 	if err == pgx.ErrNoRows {
 		return 0, false, nil
 	}

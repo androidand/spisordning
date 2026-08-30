@@ -25,7 +25,7 @@ type Store struct {
 
 // StoreOffer is an HTTP-side view of a store_product_offer row.
 type StoreOffer struct {
-	ID                int64     `json:"id"`
+	ID                string    `json:"id"`
 	StoreID           string    `json:"store_id"`
 	RetailerProductID string    `json:"retailer_product_id"`
 	CurrentlyCarried  bool      `json:"currently_carried"`

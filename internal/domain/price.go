@@ -15,7 +15,7 @@ const (
 
 // Retailer is a retail chain (ICA, Willys, Coop, ...). One row per chain.
 type Retailer struct {
-	ID        string
+	ID        RetailerID
 	Name      string
 	CreatedAt time.Time
 }
@@ -27,8 +27,8 @@ type Retailer struct {
 // be known (and carry prices) without a mapped position. The store-locator
 // feature skips geo-less stores when ranking by distance.
 type Store struct {
-	ID          string
-	RetailerID  string
+	ID          StoreID
+	RetailerID  RetailerID
 	Name        string
 	Latitude    *float64
 	Longitude   *float64
@@ -40,9 +40,9 @@ type Store struct {
 // ProductID is nullable: a retailer may list a SKU before the canonical mapping
 // is resolved (the row is flagged for review until mapped).
 type RetailerProduct struct {
-	ID           string
-	RetailerID   string
-	ProductID    string // "" when unmapped
+	ID           RetailerProductID
+	RetailerID   RetailerID
+	ProductID    *ProductID // nil when unmapped
 	RetailerSKU  string
 	DisplayName  string
 	CreatedAt    time.Time
@@ -52,34 +52,34 @@ type RetailerProduct struct {
 // retailer product. Mutable: assortment genuinely changes. The price history
 // for this offer lives in price_observation, not here.
 type StoreProductOffer struct {
-	ID                 int64
-	StoreID            string
-	RetailerProductID  string
-	CurrentlyCarried   bool
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	ID                StoreProductOfferID
+	StoreID           StoreID
+	RetailerProductID RetailerProductID
+	CurrentlyCarried  bool
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // PriceObservation is one timestamped, sourced reading of a store_product_offer's
 // price. Rows are append-only — never UPDATEd or DELETEd. Reading "the current
 // price" is a query over the latest observation(s), never a stored value.
 type PriceObservation struct {
-	ID                   int64
-	StoreProductOfferID  int64
-	ObservedAt           time.Time
-	Price                float64
-	PriceKind            PriceKind
-	Source               string
-	CreatedAt            time.Time
+	ID                  PriceObservationID
+	StoreProductOfferID StoreProductOfferID
+	ObservedAt          time.Time
+	Price               float64
+	PriceKind           PriceKind
+	Source              string
+	CreatedAt           time.Time
 }
 
 // CurrentStoreProductPrice is the read-optimized shape exposed by the
 // current_store_product_price view. Each row is the latest observation for one
 // (offer, price_kind) pair.
 type CurrentStoreProductPrice struct {
-	OfferID             int64
-	StoreID             string
-	RetailerProductID   string
+	OfferID             StoreProductOfferID
+	StoreID             StoreID
+	RetailerProductID   RetailerProductID
 	PriceKind           PriceKind
 	Price               float64
 	ObservedAt          time.Time

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/androidand/spisordning/internal/dto"
@@ -41,12 +40,12 @@ type PlanProgress struct {
 type PlanService interface {
 	ListPlans(ctx context.Context) ([]PlanResponse, error)
 	CreatePlan(ctx context.Context, weekStart time.Time) (PlanResponse, error)
-	GetPlan(ctx context.Context, planID int64) (PlanView, error)
-	UpdatePlan(ctx context.Context, planID int64, status string) (PlanResponse, error)
-	SetDecisions(ctx context.Context, planID int64, decisions []PlanDecisionInput) error
-	ListCandidates(ctx context.Context, planID int64) ([]PlanCandidateResponse, error)
+	GetPlan(ctx context.Context, planID string) (PlanView, error)
+	UpdatePlan(ctx context.Context, planID string, status string) (PlanResponse, error)
+	SetDecisions(ctx context.Context, planID string, decisions []PlanDecisionInput) error
+	ListCandidates(ctx context.Context, planID string) ([]PlanCandidateResponse, error)
 	InsertCandidates(ctx context.Context, candidates []PlanCandidateInput) error
-	ListShoppingRequirements(ctx context.Context, planID int64) ([]ShoppingRequirementResponse, error)
+	ListShoppingRequirements(ctx context.Context, planID string) ([]ShoppingRequirementResponse, error)
 	RunPlan(ctx context.Context, in PlanRunInput) (PlanRunResult, error)
 	// RunPlanWithProgress runs the plan and reports progress via the callback
 	// as each phase completes. The SSE endpoint (POST /plans/run/stream) uses
@@ -56,7 +55,7 @@ type PlanService interface {
 
 // PlanResponse is the JSON view of a meal plan (openapi: components/schemas/MealPlan).
 type PlanResponse struct {
-	ID        int               `json:"id"`
+	ID        string            `json:"id"`
 	WeekStart types.Date        `json:"week_start"`
 	Status    string            `json:"status"`
 	CreatedAt time.Time         `json:"created_at"`
@@ -72,7 +71,7 @@ type PlanView struct {
 
 // PlanCandidateResponse is the JSON view of a candidate (openapi: components/schemas/MealPlanCandidate).
 type PlanCandidateResponse struct {
-	ID        int               `json:"id"`
+	ID        string            `json:"id"`
 	SlotDate  types.Date        `json:"slot_date"`
 	Rank      int               `json:"rank"`
 	Score     float64           `json:"score"`
@@ -90,7 +89,7 @@ type PlanDecisionInput struct {
 
 // PlanDecisionResponse is the JSON view of a decision (openapi: components/schemas/MealPlanDecision).
 type PlanDecisionResponse struct {
-	PlanID         int        `json:"plan_id"`
+	PlanID         string     `json:"plan_id"`
 	SlotDate       types.Date `json:"slot_date"`
 	MealieRecipeID string     `json:"mealie_recipe_id"`
 	DecidedAt      *time.Time `json:"decided_at,omitempty"`
@@ -98,7 +97,7 @@ type PlanDecisionResponse struct {
 
 // PlanCandidateInput is the input for inserting a ranked candidate.
 type PlanCandidateInput struct {
-	PlanID         int64
+	PlanID         string
 	SlotDate       time.Time
 	MealieRecipeID string
 	Score          float64
@@ -110,7 +109,7 @@ type PlanCandidateInput struct {
 // ShoppingRequirementResponse is the JSON view of a shopping requirement
 // (openapi: components/schemas/ShoppingRequirement).
 type ShoppingRequirementResponse struct {
-	ID              int     `json:"id"`
+	ID              string  `json:"id"`
 	IngredientID    string  `json:"ingredient_id"`
 	Quantity        float64 `json:"quantity"`
 	Unit            string  `json:"unit"`
@@ -177,12 +176,7 @@ type planGetHandler struct {
 
 func (h *planGetHandler) getPlan(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("planId")
-	planID, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid planId"})
-		return
-	}
-	out, err := h.svc.GetPlan(r.Context(), planID)
+	out, err := h.svc.GetPlan(r.Context(), idStr)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			writeJSON(w, http.StatusNotFound, errorBody{Message: "plan " + idStr + " not found"})
@@ -200,11 +194,6 @@ type planUpdateHandler struct {
 
 func (h *planUpdateHandler) updatePlan(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("planId")
-	planID, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid planId"})
-		return
-	}
 	var in PlanUpdateInput
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid JSON body: " + err.Error()})
@@ -223,7 +212,7 @@ func (h *planUpdateHandler) updatePlan(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errorBody{Message: "status must be draft, approved, or archived"})
 		return
 	}
-	out, err := h.svc.UpdatePlan(r.Context(), planID, status)
+	out, err := h.svc.UpdatePlan(r.Context(), idStr, status)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			writeJSON(w, http.StatusNotFound, errorBody{Message: "plan " + idStr + " not found"})
@@ -241,22 +230,17 @@ type planDecisionsHandler struct {
 
 func (h *planDecisionsHandler) setDecisions(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("planId")
-	planID, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid planId"})
-		return
-	}
 	var in []PlanDecisionInput
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid JSON body: " + err.Error()})
 		return
 	}
-	if err := h.svc.SetDecisions(r.Context(), planID, in); err != nil {
+	if err := h.svc.SetDecisions(r.Context(), idStr, in); err != nil {
 		writeError(w, http.StatusInternalServerError, "set decisions: "+err.Error())
 		return
 	}
 	// Return the persisted decisions.
-	out, err := h.svc.GetPlan(r.Context(), planID)
+	out, err := h.svc.GetPlan(r.Context(), idStr)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "get plan after set decisions: "+err.Error())
 		return
@@ -270,12 +254,7 @@ type planCandidatesHandler struct {
 
 func (h *planCandidatesHandler) listCandidates(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("planId")
-	planID, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid planId"})
-		return
-	}
-	out, err := h.svc.ListCandidates(r.Context(), planID)
+	out, err := h.svc.ListCandidates(r.Context(), idStr)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "list candidates: "+err.Error())
 		return
@@ -289,12 +268,7 @@ type planShoppingRequirementsHandler struct {
 
 func (h *planShoppingRequirementsHandler) listShoppingRequirements(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("planId")
-	planID, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid planId"})
-		return
-	}
-	out, err := h.svc.ListShoppingRequirements(r.Context(), planID)
+	out, err := h.svc.ListShoppingRequirements(r.Context(), idStr)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "list shopping requirements: "+err.Error())
 		return

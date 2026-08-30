@@ -7,19 +7,19 @@ import (
 
 // PantryLocation is the HTTP-side view of an inventory location.
 type PantryLocation struct {
-	ID               string    `json:"id"`
-	HouseholdID      string    `json:"household_id"`
-	Name             string    `json:"name"`
-	LocationType     string    `json:"location_type"`
-	ParentLocationID string    `json:"parent_location_id"`
-	ArchivedAt       time.Time `json:"archived_at,omitempty"`
+	ID               string     `json:"id"`
+	HouseholdID      string     `json:"household_id"`
+	Name             string     `json:"name"`
+	LocationType     string     `json:"location_type"`
+	ParentLocationID *string    `json:"parent_location_id,omitempty"`
+	ArchivedAt       time.Time  `json:"archived_at,omitempty"`
 }
 
 // PantryLot is the HTTP-side view of an inventory lot.
 type PantryLot struct {
-	ID           int64     `json:"id"`
+	ID           string    `json:"id"`
 	IngredientID string    `json:"ingredient_id"`
-	ProductID    string    `json:"product_id"`
+	ProductID    *string   `json:"product_id,omitempty"`
 	LocationID   string    `json:"location_id"`
 	Quantity     float64   `json:"quantity"`
 	Unit         string    `json:"unit"`
@@ -32,16 +32,16 @@ type PantryLot struct {
 
 // PantryLocationNew is the POST /pantry/locations request body.
 type PantryLocationNew struct {
-	HouseholdID      string `json:"household_id"`
-	Name             string `json:"name"`
-	LocationType     string `json:"location_type"`
-	ParentLocationID string `json:"parent_location_id"`
+	HouseholdID      string  `json:"household_id"`
+	Name             string  `json:"name"`
+	LocationType     string  `json:"location_type"`
+	ParentLocationID *string `json:"parent_location_id,omitempty"`
 }
 
 // PantryPurchaseInput is the POST /pantry/lots/purchase request body.
 type PantryPurchaseInput struct {
 	IngredientID string  `json:"ingredient_id"`
-	ProductID    string  `json:"product_id"`
+	ProductID    *string `json:"product_id,omitempty"`
 	LocationID   string  `json:"location_id"`
 	Quantity     float64 `json:"quantity"`
 	Unit         string  `json:"unit"`
@@ -62,7 +62,7 @@ type PantryService interface {
 	CreateLocation(ctx context.Context, in PantryLocationNew) (PantryLocation, error)
 	ListLots(ctx context.Context, locationID string) ([]PantryLot, error)
 	Purchase(ctx context.Context, in PantryPurchaseInput) (PantryLot, error)
-	Consume(ctx context.Context, lotID int64, in PantryConsumeInput) error
+	Consume(ctx context.Context, lotID string, in PantryConsumeInput) error
 	// ListExpiring returns non-empty lots whose best_before is within the given
 	// window (already expired or expiring soon), most urgent first.
 	ListExpiring(ctx context.Context, within time.Duration) ([]PantryLot, error)

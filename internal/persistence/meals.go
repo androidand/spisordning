@@ -7,52 +7,55 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/androidand/spisordning/internal/domain"
 )
 
 // MealEvent mirrors migrations/0001_init.sql meal_event plus the plan link
 // added by migrations/0010_meals_and_preferences.sql.
 type MealEvent struct {
-	ID                int64
-	MealieRecipeID    string
-	ServedOn          time.Time
-	MealPlanID        *int64     // nil for ad-hoc meals
-	MealPlanSlotDate  *time.Time // nil for ad-hoc meals; paired with MealPlanID
-	MealPlanSlotKind  *string    // nil for ad-hoc meals; paired with MealPlanID
-	CreatedAt         time.Time
+	ID               domain.MealEventID
+	RecipeRefID      domain.RecipeRefID
+	ServedOn         time.Time
+	MealPlanID       *domain.MealPlanID // nil for ad-hoc meals
+	MealPlanSlotDate *time.Time         // nil for ad-hoc meals; paired with MealPlanID
+	MealPlanSlotKind *string            // nil for ad-hoc meals; paired with MealPlanID
+	CreatedAt        time.Time
 }
 
 // CreateMealEvent records that a recipe was served on a day. When planID and
 // planSlotDate are both non-nil they form a composite FK to the specific
 // meal_plan_decision row that produced this meal; both must be nil for ad-hoc
 // (unplanned) meals.
-func (s *Store) CreateMealEvent(ctx context.Context, mealieRecipeID string, servedOn time.Time, planID *int64, planSlotDate *time.Time) (int64, error) {
-	const q = `INSERT INTO meal_event (mealie_recipe_id, served_on, meal_plan_id, meal_plan_slot_date)
-		VALUES ($1, $2, $3, $4) RETURNING id`
-	var id int64
-	if err := s.db.QueryRow(ctx, q, mealieRecipeID, servedOn, planID, planSlotDate).Scan(&id); err != nil {
-		return 0, fmt.Errorf("persistence: create meal_event: %w", err)
+func (s *Store) CreateMealEvent(ctx context.Context, recipeRefID domain.RecipeRefID, servedOn time.Time, planID *domain.MealPlanID, planSlotDate *time.Time) (domain.MealEventID, error) {
+	id := domain.NewMealEventID()
+	const q = `INSERT INTO meal_event (id, recipe_ref_id, served_on, meal_plan_id, meal_plan_slot_date)
+		VALUES ($1, $2, $3, $4, $5) RETURNING id`
+	var returnedID domain.MealEventID
+	if err := s.db.QueryRow(ctx, q, id, recipeRefID, servedOn, planID, planSlotDate).Scan(&returnedID); err != nil {
+		return domain.MealEventID{}, fmt.Errorf("persistence: create meal_event: %w", err)
 	}
-	return id, nil
+	return returnedID, nil
 }
 
 // CreateMealEventWithSlot records that a recipe was served on a day, with an
 // explicit slot_kind. When planID and planSlotDate are both non-nil they form
 // a composite FK to the specific meal_plan_decision row that produced this meal.
-func (s *Store) CreateMealEventWithSlot(ctx context.Context, mealieRecipeID string, servedOn time.Time, planID *int64, planSlotDate *time.Time, planSlotKind *string) (int64, error) {
-	const q = `INSERT INTO meal_event (mealie_recipe_id, served_on, meal_plan_id, meal_plan_slot_date, meal_plan_slot_kind)
-		VALUES ($1, $2, $3, $4, $5) RETURNING id`
-	var id int64
-	if err := s.db.QueryRow(ctx, q, mealieRecipeID, servedOn, planID, planSlotDate, planSlotKind).Scan(&id); err != nil {
-		return 0, fmt.Errorf("persistence: create meal_event with slot: %w", err)
+func (s *Store) CreateMealEventWithSlot(ctx context.Context, recipeRefID domain.RecipeRefID, servedOn time.Time, planID *domain.MealPlanID, planSlotDate *time.Time, planSlotKind *string) (domain.MealEventID, error) {
+	id := domain.NewMealEventID()
+	const q = `INSERT INTO meal_event (id, recipe_ref_id, served_on, meal_plan_id, meal_plan_slot_date, meal_plan_slot_kind)
+		VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`
+	var returnedID domain.MealEventID
+	if err := s.db.QueryRow(ctx, q, id, recipeRefID, servedOn, planID, planSlotDate, planSlotKind).Scan(&returnedID); err != nil {
+		return domain.MealEventID{}, fmt.Errorf("persistence: create meal_event with slot: %w", err)
 	}
-	return id, nil
+	return returnedID, nil
 }
 
 // MealReaction mirrors migrations/0001_init.sql meal_reaction.
 type MealReaction struct {
-	ID          int64
-	MealEventID int64
-	PersonID    string
+	MealEventID domain.MealEventID
+	PersonID    domain.PersonID
 	Sentiment   int // -2..2
 	Note        string
 	CreatedAt   time.Time
@@ -72,8 +75,8 @@ func (s *Store) AddMealReaction(ctx context.Context, r MealReaction) error {
 }
 
 // ListMealReactions returns all reactions for an event.
-func (s *Store) ListMealReactions(ctx context.Context, eventID int64) ([]MealReaction, error) {
-	rows, err := s.db.Query(ctx, `SELECT id, meal_event_id, person_id, sentiment, note, created_at
+func (s *Store) ListMealReactions(ctx context.Context, eventID domain.MealEventID) ([]MealReaction, error) {
+	rows, err := s.db.Query(ctx, `SELECT meal_event_id, person_id, sentiment, note, created_at
 		FROM meal_reaction WHERE meal_event_id = $1 ORDER BY created_at`, eventID)
 	if err != nil {
 		return nil, fmt.Errorf("persistence: list meal_reactions: %w", err)
@@ -83,7 +86,7 @@ func (s *Store) ListMealReactions(ctx context.Context, eventID int64) ([]MealRea
 	for rows.Next() {
 		var r MealReaction
 		var note *string
-		if err := rows.Scan(&r.ID, &r.MealEventID, &r.PersonID, &r.Sentiment, &note, &r.CreatedAt); err != nil {
+		if err := rows.Scan(&r.MealEventID, &r.PersonID, &r.Sentiment, &note, &r.CreatedAt); err != nil {
 			return nil, err
 		}
 		if note != nil {
@@ -96,9 +99,8 @@ func (s *Store) ListMealReactions(ctx context.Context, eventID int64) ([]MealRea
 
 // MealParticipant mirrors migrations/0010_meals_and_preferences.sql meal_participant.
 type MealParticipant struct {
-	ID          int64
-	MealEventID int64
-	PersonID    string
+	MealEventID domain.MealEventID
+	PersonID    domain.PersonID
 	CreatedAt   time.Time
 }
 
@@ -114,8 +116,8 @@ func (s *Store) AddMealParticipant(ctx context.Context, p MealParticipant) error
 }
 
 // ListMealParticipants returns all participants for an event.
-func (s *Store) ListMealParticipants(ctx context.Context, eventID int64) ([]MealParticipant, error) {
-	rows, err := s.db.Query(ctx, `SELECT id, meal_event_id, person_id, created_at
+func (s *Store) ListMealParticipants(ctx context.Context, eventID domain.MealEventID) ([]MealParticipant, error) {
+	rows, err := s.db.Query(ctx, `SELECT meal_event_id, person_id, created_at
 		FROM meal_participant WHERE meal_event_id = $1 ORDER BY created_at`, eventID)
 	if err != nil {
 		return nil, fmt.Errorf("persistence: list meal_participants: %w", err)
@@ -124,7 +126,7 @@ func (s *Store) ListMealParticipants(ctx context.Context, eventID int64) ([]Meal
 	var out []MealParticipant
 	for rows.Next() {
 		var p MealParticipant
-		if err := rows.Scan(&p.ID, &p.MealEventID, &p.PersonID, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.MealEventID, &p.PersonID, &p.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
@@ -134,9 +136,8 @@ func (s *Store) ListMealParticipants(ctx context.Context, eventID int64) ([]Meal
 
 // MealReview mirrors migrations/0010_meals_and_preferences.sql meal_review.
 type MealReview struct {
-	ID          int64
-	MealEventID int64
-	PersonID    string
+	MealEventID domain.MealEventID
+	PersonID    domain.PersonID
 	Rating      int // 1..5
 	Note        string
 	CreatedAt   time.Time
@@ -159,8 +160,8 @@ func (s *Store) UpsertMealReview(ctx context.Context, r MealReview) error {
 }
 
 // ListMealReviews returns all reviews for an event.
-func (s *Store) ListMealReviews(ctx context.Context, eventID int64) ([]MealReview, error) {
-	rows, err := s.db.Query(ctx, `SELECT id, meal_event_id, person_id, rating, note, created_at, updated_at
+func (s *Store) ListMealReviews(ctx context.Context, eventID domain.MealEventID) ([]MealReview, error) {
+	rows, err := s.db.Query(ctx, `SELECT meal_event_id, person_id, rating, note, created_at, updated_at
 		FROM meal_review WHERE meal_event_id = $1 ORDER BY created_at`, eventID)
 	if err != nil {
 		return nil, fmt.Errorf("persistence: list meal_reviews: %w", err)
@@ -170,7 +171,7 @@ func (s *Store) ListMealReviews(ctx context.Context, eventID int64) ([]MealRevie
 	for rows.Next() {
 		var r MealReview
 		var note *string
-		if err := rows.Scan(&r.ID, &r.MealEventID, &r.PersonID, &r.Rating, &note, &r.CreatedAt, &r.UpdatedAt); err != nil {
+		if err := rows.Scan(&r.MealEventID, &r.PersonID, &r.Rating, &note, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return nil, err
 		}
 		if note != nil {
@@ -184,86 +185,67 @@ func (s *Store) ListMealReviews(ctx context.Context, eventID int64) ([]MealRevie
 // RecipeRating is a read-side aggregate of MealReview rows for a recipe.
 // Computed from all reviews across all meal_events that reference the recipe.
 type RecipeRating struct {
-	MealieRecipeID string
-	Average        float64
-	ReviewCount    int
+	RecipeRefID domain.RecipeRefID
+	Average     float64
+	ReviewCount int
 }
 
 // GetRecipeRating computes the weighted average rating for a recipe from its
 // meal_review history. Weighted by each reviewer's person.weight. Returns zero
 // values when the recipe has no reviews.
-func (s *Store) GetRecipeRating(ctx context.Context, mealieRecipeID string) (RecipeRating, error) {
+func (s *Store) GetRecipeRating(ctx context.Context, recipeRefID domain.RecipeRefID) (RecipeRating, error) {
 	const q = `
 		SELECT COALESCE(SUM(p.weight * mr.rating) / NULLIF(SUM(p.weight), 0), 0)::double precision,
 		       COUNT(*)
 		FROM meal_review mr
 		JOIN meal_event me ON me.id = mr.meal_event_id
 		JOIN person p ON p.id = mr.person_id
-		WHERE me.mealie_recipe_id = $1`
+		WHERE me.recipe_ref_id = $1`
 	var rating RecipeRating
-	rating.MealieRecipeID = mealieRecipeID
-	if err := s.db.QueryRow(ctx, q, mealieRecipeID).Scan(&rating.Average, &rating.ReviewCount); err != nil {
+	rating.RecipeRefID = recipeRefID
+	if err := s.db.QueryRow(ctx, q, recipeRefID).Scan(&rating.Average, &rating.ReviewCount); err != nil {
 		return RecipeRating{}, fmt.Errorf("persistence: get recipe rating: %w", err)
 	}
 	return rating, nil
 }
 
 // Favorite mirrors migrations/0010_meals_and_preferences.sql favorite.
+// Uses a bounded scope_type/scope_id discriminator (D7).
 type Favorite struct {
-	ID             int64
-	PersonID       *string // nil when household-scoped
-	HouseholdID    *string // nil when person-scoped
-	MealieRecipeID string
-	CreatedAt      time.Time
+	ScopeType   string // 'person' | 'household'
+	ScopeID     string
+	RecipeRefID domain.RecipeRefID
+	CreatedAt   time.Time
 }
 
 // UpsertFavorite adds or replaces a person- or household-scoped favorite.
-// Exactly one of personID/householdID must be non-nil; they map to the two
-// unique constraints on the table.
-func (s *Store) UpsertFavorite(ctx context.Context, personID, householdID, mealieRecipeID string) error {
-	if personID != "" && householdID != "" {
-		return fmt.Errorf("persistence: favorite: exactly one of person_id/household_id must be set")
+// scopeType must be 'person' or 'household'; scopeID is the corresponding UUID.
+func (s *Store) UpsertFavorite(ctx context.Context, scopeType, scopeID string, recipeRefID domain.RecipeRefID) error {
+	if scopeType != "person" && scopeType != "household" {
+		return fmt.Errorf("persistence: favorite: scope_type must be 'person' or 'household'")
 	}
-	if personID == "" && householdID == "" {
-		return fmt.Errorf("persistence: favorite: either person_id or household_id must be set")
+	if scopeID == "" {
+		return fmt.Errorf("persistence: favorite: scope_id must be set")
 	}
-	var q string
-	var args []interface{}
-	if personID != "" {
-		q = `INSERT INTO favorite (person_id, mealie_recipe_id) VALUES ($1, $2)
-			ON CONFLICT (person_id, mealie_recipe_id) DO NOTHING`
-		args = []interface{}{personID, mealieRecipeID}
-	} else {
-		q = `INSERT INTO favorite (household_id, mealie_recipe_id) VALUES ($1, $2)
-			ON CONFLICT (household_id, mealie_recipe_id) DO NOTHING`
-		args = []interface{}{householdID, mealieRecipeID}
-	}
-	if _, err := s.db.Exec(ctx, q, args...); err != nil {
+	const q = `INSERT INTO favorite (scope_type, scope_id, recipe_ref_id) VALUES ($1, $2, $3)
+		ON CONFLICT (scope_type, scope_id, recipe_ref_id) DO NOTHING`
+	if _, err := s.db.Exec(ctx, q, scopeType, scopeID, recipeRefID); err != nil {
 		return fmt.Errorf("persistence: upsert favorite: %w", err)
 	}
 	return nil
 }
 
 // DeleteFavorite removes a person- or household-scoped favorite.
-// Exactly one of personID/householdID must be non-empty; mirrors UpsertFavorite's
-// validation.
-func (s *Store) DeleteFavorite(ctx context.Context, personID, householdID, mealieRecipeID string) error {
-	if personID != "" && householdID != "" {
-		return fmt.Errorf("persistence: delete favorite: exactly one of person_id/household_id must be set")
+// scopeType must be 'person' or 'household'; scopeID is the corresponding UUID.
+func (s *Store) DeleteFavorite(ctx context.Context, scopeType, scopeID string, recipeRefID domain.RecipeRefID) error {
+	if scopeType != "person" && scopeType != "household" {
+		return fmt.Errorf("persistence: delete favorite: scope_type must be 'person' or 'household'")
 	}
-	if personID == "" && householdID == "" {
-		return fmt.Errorf("persistence: delete favorite: either person_id or household_id must be set")
+	if scopeID == "" {
+		return fmt.Errorf("persistence: delete favorite: scope_id must be set")
 	}
-	var q string
-	var args []interface{}
-	if personID != "" {
-		q = `DELETE FROM favorite WHERE person_id = $1 AND mealie_recipe_id = $2`
-		args = []interface{}{personID, mealieRecipeID}
-	} else {
-		q = `DELETE FROM favorite WHERE household_id = $1 AND mealie_recipe_id = $2`
-		args = []interface{}{householdID, mealieRecipeID}
-	}
-	if _, err := s.db.Exec(ctx, q, args...); err != nil {
+	const q = `DELETE FROM favorite WHERE scope_type = $1 AND scope_id = $2 AND recipe_ref_id = $3`
+	if _, err := s.db.Exec(ctx, q, scopeType, scopeID, recipeRefID); err != nil {
 		return fmt.Errorf("persistence: delete favorite: %w", err)
 	}
 	return nil
@@ -271,9 +253,9 @@ func (s *Store) DeleteFavorite(ctx context.Context, personID, householdID, meali
 
 // ListFavoritesForRecipe returns all favorites (person and household scoped)
 // for a given recipe.
-func (s *Store) ListFavoritesForRecipe(ctx context.Context, mealieRecipeID string) ([]Favorite, error) {
-	rows, err := s.db.Query(ctx, `SELECT id, person_id, household_id, mealie_recipe_id, created_at
-		FROM favorite WHERE mealie_recipe_id = $1 ORDER BY created_at`, mealieRecipeID)
+func (s *Store) ListFavoritesForRecipe(ctx context.Context, recipeRefID domain.RecipeRefID) ([]Favorite, error) {
+	rows, err := s.db.Query(ctx, `SELECT scope_type, scope_id, recipe_ref_id, created_at
+		FROM favorite WHERE recipe_ref_id = $1 ORDER BY created_at`, recipeRefID)
 	if err != nil {
 		return nil, fmt.Errorf("persistence: list favorites: %w", err)
 	}
@@ -281,7 +263,7 @@ func (s *Store) ListFavoritesForRecipe(ctx context.Context, mealieRecipeID strin
 	var out []Favorite
 	for rows.Next() {
 		var f Favorite
-		if err := rows.Scan(&f.ID, &f.PersonID, &f.HouseholdID, &f.MealieRecipeID, &f.CreatedAt); err != nil {
+		if err := rows.Scan(&f.ScopeType, &f.ScopeID, &f.RecipeRefID, &f.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, f)
@@ -290,14 +272,14 @@ func (s *Store) ListFavoritesForRecipe(ctx context.Context, mealieRecipeID strin
 }
 
 // GetMealEvent fetches a meal event by id.
-func (s *Store) GetMealEvent(ctx context.Context, id int64) (MealEvent, error) {
-	const q = `SELECT id, mealie_recipe_id, served_on, meal_plan_id, meal_plan_slot_date, meal_plan_slot_kind, created_at
+func (s *Store) GetMealEvent(ctx context.Context, id domain.MealEventID) (MealEvent, error) {
+	const q = `SELECT id, recipe_ref_id, served_on, meal_plan_id, meal_plan_slot_date, meal_plan_slot_kind, created_at
 		FROM meal_event WHERE id = $1`
 	var m MealEvent
-	var planID *int64
+	var planID *domain.MealPlanID
 	var planSlot *time.Time
 	var planSlotKind *string
-	if err := s.db.QueryRow(ctx, q, id).Scan(&m.ID, &m.MealieRecipeID, &m.ServedOn, &planID, &planSlot, &planSlotKind, &m.CreatedAt); err != nil {
+	if err := s.db.QueryRow(ctx, q, id).Scan(&m.ID, &m.RecipeRefID, &m.ServedOn, &planID, &planSlot, &planSlotKind, &m.CreatedAt); err != nil {
 		return MealEvent{}, fmt.Errorf("persistence: get meal_event: %w", err)
 	}
 	m.MealPlanID = planID
@@ -306,25 +288,25 @@ func (s *Store) GetMealEvent(ctx context.Context, id int64) (MealEvent, error) {
 	return m, nil
 }
 
-// ListMealEvents returns meal events optionally filtered by mealieRecipeID
+// ListMealEvents returns meal events optionally filtered by recipeRefID
 // and/or servedOn (date-only), ordered by served_on descending.
-func (s *Store) ListMealEvents(ctx context.Context, mealieRecipeID, servedOn string) ([]MealEvent, error) {
+func (s *Store) ListMealEvents(ctx context.Context, recipeRefID domain.RecipeRefID, servedOn string) ([]MealEvent, error) {
 	var q string
 	var args []interface{}
-	if mealieRecipeID != "" && servedOn != "" {
-		q = `SELECT id, mealie_recipe_id, served_on, meal_plan_id, meal_plan_slot_date, meal_plan_slot_kind, created_at
-			 FROM meal_event WHERE mealie_recipe_id = $1 AND served_on = $2 ORDER BY served_on DESC`
-		args = []interface{}{mealieRecipeID, servedOn}
-	} else if mealieRecipeID != "" {
-		q = `SELECT id, mealie_recipe_id, served_on, meal_plan_id, meal_plan_slot_date, meal_plan_slot_kind, created_at
-			 FROM meal_event WHERE mealie_recipe_id = $1 ORDER BY served_on DESC`
-		args = []interface{}{mealieRecipeID}
+	if recipeRefID != (domain.RecipeRefID{}) && servedOn != "" {
+		q = `SELECT id, recipe_ref_id, served_on, meal_plan_id, meal_plan_slot_date, meal_plan_slot_kind, created_at
+			 FROM meal_event WHERE recipe_ref_id = $1 AND served_on = $2 ORDER BY served_on DESC`
+		args = []interface{}{recipeRefID, servedOn}
+	} else if recipeRefID != (domain.RecipeRefID{}) {
+		q = `SELECT id, recipe_ref_id, served_on, meal_plan_id, meal_plan_slot_date, meal_plan_slot_kind, created_at
+			 FROM meal_event WHERE recipe_ref_id = $1 ORDER BY served_on DESC`
+		args = []interface{}{recipeRefID}
 	} else if servedOn != "" {
-		q = `SELECT id, mealie_recipe_id, served_on, meal_plan_id, meal_plan_slot_date, meal_plan_slot_kind, created_at
+		q = `SELECT id, recipe_ref_id, served_on, meal_plan_id, meal_plan_slot_date, meal_plan_slot_kind, created_at
 			 FROM meal_event WHERE served_on = $1 ORDER BY served_on DESC`
 		args = []interface{}{servedOn}
 	} else {
-		q = `SELECT id, mealie_recipe_id, served_on, meal_plan_id, meal_plan_slot_date, meal_plan_slot_kind, created_at
+		q = `SELECT id, recipe_ref_id, served_on, meal_plan_id, meal_plan_slot_date, meal_plan_slot_kind, created_at
 			 FROM meal_event ORDER BY served_on DESC`
 	}
 	rows, err := s.db.Query(ctx, q, args...)
@@ -340,10 +322,10 @@ func scanMealEvents(rows pgx.Rows) ([]MealEvent, error) {
 	var out []MealEvent
 	for rows.Next() {
 		var m MealEvent
-		var planID *int64
+		var planID *domain.MealPlanID
 		var planSlot *time.Time
 		var planSlotKind *string
-		if err := rows.Scan(&m.ID, &m.MealieRecipeID, &m.ServedOn, &planID, &planSlot, &planSlotKind, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.RecipeRefID, &m.ServedOn, &planID, &planSlot, &planSlotKind, &m.CreatedAt); err != nil {
 			return nil, err
 		}
 		if planID != nil {
@@ -361,6 +343,7 @@ func scanMealEvents(rows pgx.Rows) ([]MealEvent, error) {
 // TonightMeal is the recipe info + reactions for today's planned meal.
 type TonightMeal struct {
 	ServedOn       time.Time
+	RecipeRefID    domain.RecipeRefID
 	MealieRecipeID string
 	RecipeTitle    string
 	RecipeTags     []string
@@ -373,20 +356,20 @@ type TonightMeal struct {
 // Returns pgx.ErrNoRows when there is no approved plan with a decision for today.
 func (s *Store) GetTonightMeal(ctx context.Context, today time.Time) (TonightMeal, error) {
 	const q = `
-		SELECT me.served_on, me.mealie_recipe_id,
+		SELECT me.served_on, me.recipe_ref_id, rr.mealie_recipe_id,
 		       rr.title, rr.tags, rr.effort,
-		       mr.id, mr.person_id, mr.sentiment, mr.note, mr.created_at
+		       mr.meal_event_id, mr.person_id, mr.sentiment, mr.note, mr.created_at
 		FROM meal_plan mp
 		JOIN meal_plan_decision mpd ON mpd.plan_id = mp.id
-		JOIN meal_event me ON me.served_on = mpd.slot_date AND me.mealie_recipe_id = mpd.mealie_recipe_id
+		JOIN meal_event me ON me.served_on = mpd.slot_date AND me.recipe_ref_id = mpd.recipe_ref_id
 			AND (me.meal_plan_slot_kind IS NULL OR me.meal_plan_slot_kind = mpd.slot_kind)
-		JOIN recipe_ref rr ON rr.mealie_recipe_id = me.mealie_recipe_id
+		JOIN recipe_ref rr ON rr.id = me.recipe_ref_id
 		LEFT JOIN meal_reaction mr ON mr.meal_event_id = me.id
 		WHERE mp.week_start = (SELECT week_start FROM meal_plan WHERE week_start <= $1 ORDER BY week_start DESC LIMIT 1)
 		  AND mp.status = 'approved'
 		  AND mpd.slot_date = $1
 		  AND mpd.slot_kind = 'dinner'
-		ORDER BY mr.id`
+		ORDER BY mr.meal_event_id, mr.person_id`
 	rows, err := s.db.Query(ctx, q, today)
 	if err != nil {
 		return TonightMeal{}, fmt.Errorf("persistence: get tonight meal: %w", err)
@@ -396,52 +379,54 @@ func (s *Store) GetTonightMeal(ctx context.Context, today time.Time) (TonightMea
 	var meal TonightMeal
 	var recipeTags []string
 	var reactions []MealReaction
-	var seenReactionIDs map[int64]bool
+	seenReactions := make(map[string]bool)
 
 	for rows.Next() {
 		var servedOn time.Time
+		var recipeRefID domain.RecipeRefID
 		var mealieRecipeID string
 		var title string
 		var tags []string
 		var effort int
-		var reactionID *int64
-		var personID *string
+		var reactionEventID *domain.MealEventID
+		var personID *domain.PersonID
 		var sentiment *int
 		var note *string
 		var createdAt time.Time
 
-		if err := rows.Scan(&servedOn, &mealieRecipeID, &title, &tags, &effort,
-			&reactionID, &personID, &sentiment, &note, &createdAt); err != nil {
+		if err := rows.Scan(&servedOn, &recipeRefID, &mealieRecipeID, &title, &tags, &effort,
+			&reactionEventID, &personID, &sentiment, &note, &createdAt); err != nil {
 			return TonightMeal{}, err
 		}
 
 		if meal.ServedOn.IsZero() {
 			meal.ServedOn = servedOn
+			meal.RecipeRefID = recipeRefID
 			meal.MealieRecipeID = mealieRecipeID
 			meal.RecipeTitle = title
 			recipeTags = tags
 			meal.RecipeEffort = effort
-			seenReactionIDs = make(map[int64]bool)
-		} else if meal.MealieRecipeID != mealieRecipeID {
-			// Should not happen with the query, but guard against it.
+		} else if meal.RecipeRefID != recipeRefID {
 			continue
 		}
 
-		if reactionID != nil && !seenReactionIDs[*reactionID] {
-			seenReactionIDs[*reactionID] = true
-			r := MealReaction{
-				ID:          *reactionID,
-				MealEventID: 0, // not needed for the response
-				Sentiment:   *sentiment,
-				CreatedAt:   createdAt,
+		if reactionEventID != nil && sentiment != nil {
+			key := reactionEventID.String() + ":" + (func() string { if personID != nil { return personID.String() }; return "" })()
+			if !seenReactions[key] {
+				seenReactions[key] = true
+				r := MealReaction{
+					MealEventID: *reactionEventID,
+					Sentiment:   *sentiment,
+					CreatedAt:   createdAt,
+				}
+				if note != nil {
+					r.Note = *note
+				}
+				if personID != nil {
+					r.PersonID = *personID
+				}
+				reactions = append(reactions, r)
 			}
-			if note != nil {
-				r.Note = *note
-			}
-			if personID != nil {
-				r.PersonID = *personID
-			}
-			reactions = append(reactions, r)
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -459,7 +444,7 @@ func (s *Store) GetTonightMeal(ctx context.Context, today time.Time) (TonightMea
 
 // CreateReaction records one person's reaction to a specific meal event.
 // Returns the created/updated reaction.
-func (s *Store) CreateReaction(ctx context.Context, eventID int64, personID string, sentiment int, note *string) (MealReaction, error) {
+func (s *Store) CreateReaction(ctx context.Context, eventID domain.MealEventID, personID string, sentiment int, note *string) (MealReaction, error) {
 	noteVal := ""
 	if note != nil {
 		noteVal = *note
@@ -468,10 +453,10 @@ func (s *Store) CreateReaction(ctx context.Context, eventID int64, personID stri
 		VALUES ($1, $2, $3, $4)
 		ON CONFLICT (meal_event_id, person_id) DO UPDATE SET sentiment = EXCLUDED.sentiment,
 			note = EXCLUDED.note
-		RETURNING id, meal_event_id, person_id, sentiment, note, created_at`
+		RETURNING meal_event_id, person_id, sentiment, note, created_at`
 	var r MealReaction
 	if err := s.db.QueryRow(ctx, q, eventID, personID, sentiment, noteVal).Scan(
-		&r.ID, &r.MealEventID, &r.PersonID, &r.Sentiment, &r.Note, &r.CreatedAt); err != nil {
+		&r.MealEventID, &r.PersonID, &r.Sentiment, &r.Note, &r.CreatedAt); err != nil {
 		return MealReaction{}, fmt.Errorf("persistence: create reaction: %w", err)
 	}
 	return r, nil
@@ -479,28 +464,28 @@ func (s *Store) CreateReaction(ctx context.Context, eventID int64, personID stri
 
 // GetOrCreateMealEventForToday returns the meal event ID for today's recipe,
 // creating it if none exists yet. This is the entry point for one-tap reactions.
-func (s *Store) GetOrCreateMealEventForToday(ctx context.Context, mealieRecipeID string, today time.Time) (int64, error) {
-	const q = `SELECT id FROM meal_event WHERE mealie_recipe_id = $1 AND served_on = $2 LIMIT 1`
-	var id int64
-	err := s.db.QueryRow(ctx, q, mealieRecipeID, today).Scan(&id)
+func (s *Store) GetOrCreateMealEventForToday(ctx context.Context, recipeRefID domain.RecipeRefID, today time.Time) (domain.MealEventID, error) {
+	const q = `SELECT id FROM meal_event WHERE recipe_ref_id = $1 AND served_on = $2 LIMIT 1`
+	var id domain.MealEventID
+	err := s.db.QueryRow(ctx, q, recipeRefID, today).Scan(&id)
 	if err == nil {
 		return id, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
-		return 0, fmt.Errorf("persistence: find meal event: %w", err)
+		return domain.MealEventID{}, fmt.Errorf("persistence: find meal event: %w", err)
 	}
-	id, err = s.CreateMealEvent(ctx, mealieRecipeID, today, nil, nil)
+	id, err = s.CreateMealEvent(ctx, recipeRefID, today, nil, nil)
 	if err != nil {
-		return 0, fmt.Errorf("persistence: create meal event: %w", err)
+		return domain.MealEventID{}, fmt.Errorf("persistence: create meal event: %w", err)
 	}
 	return id, nil
 }
 
 // GetMealEventWithReactions fetches a meal event and all its reactions.
-func (s *Store) GetMealEventWithReactions(ctx context.Context, eventID int64) (MealEvent, []MealReaction, error) {
-	const q = `SELECT id, mealie_recipe_id, served_on, created_at FROM meal_event WHERE id = $1`
+func (s *Store) GetMealEventWithReactions(ctx context.Context, eventID domain.MealEventID) (MealEvent, []MealReaction, error) {
+	const q = `SELECT id, recipe_ref_id, served_on, created_at FROM meal_event WHERE id = $1`
 	var evt MealEvent
-	if err := s.db.QueryRow(ctx, q, eventID).Scan(&evt.ID, &evt.MealieRecipeID, &evt.ServedOn, &evt.CreatedAt); err != nil {
+	if err := s.db.QueryRow(ctx, q, eventID).Scan(&evt.ID, &evt.RecipeRefID, &evt.ServedOn, &evt.CreatedAt); err != nil {
 		return MealEvent{}, nil, fmt.Errorf("persistence: get meal event: %w", err)
 	}
 	rxns, err := s.ListMealReactions(ctx, eventID)
@@ -529,20 +514,21 @@ func (s *Store) UpsertEffortProfile(ctx context.Context, e EffortProfile) error 
 
 // PlanningConstraint mirrors migrations/0001_init.sql planning_constraint.
 type PlanningConstraint struct {
-	ID     int64
+	ID     string
 	Kind   string
 	Value  string
 	Active bool
 }
 
 // CreatePlanningConstraint inserts one.
-func (s *Store) CreatePlanningConstraint(ctx context.Context, c PlanningConstraint) (int64, error) {
-	const q = `INSERT INTO planning_constraint (kind, value, active) VALUES ($1, $2, $3) RETURNING id`
-	var id int64
-	if err := s.db.QueryRow(ctx, q, c.Kind, c.Value, c.Active).Scan(&id); err != nil {
-		return 0, fmt.Errorf("persistence: create constraint: %w", err)
+func (s *Store) CreatePlanningConstraint(ctx context.Context, c PlanningConstraint) (string, error) {
+	id := domain.NewPlanningConstraintID()
+	const q = `INSERT INTO planning_constraint (id, kind, value, active) VALUES ($1, $2, $3, $4) RETURNING id`
+	var returnedID string
+	if err := s.db.QueryRow(ctx, q, id, c.Kind, c.Value, c.Active).Scan(&returnedID); err != nil {
+		return "", fmt.Errorf("persistence: create constraint: %w", err)
 	}
-	return id, nil
+	return returnedID, nil
 }
 
 // ListPlanningConstraints returns all constraints ordered by id.

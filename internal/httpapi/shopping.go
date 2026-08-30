@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -18,13 +17,13 @@ type ShoppingListService interface {
 	ListShoppingLists(ctx context.Context) ([]ShoppingListResponse, error)
 	CreateShoppingList(ctx context.Context, in ShoppingListInput) (ShoppingListResponse, error)
 	CreateFromChecklist(ctx context.Context, in ShoppingListFromChecklistInput) (ShoppingListFromChecklistResponse, error)
-	GetShoppingList(ctx context.Context, listID int64) (ShoppingListResponse, error)
-	ArchiveShoppingList(ctx context.Context, listID int64) error
+	GetShoppingList(ctx context.Context, listID string) (ShoppingListResponse, error)
+	ArchiveShoppingList(ctx context.Context, listID string) error
 }
 
 // ShoppingListResponse is the JSON view (openapi: components/schemas/ShoppingList).
 type ShoppingListResponse struct {
-	ID            int       `json:"id"`
+	ID            string    `json:"id"`
 	OwnerPersonID *string   `json:"owner_person_id,omitempty"`
 	Name          string    `json:"name"`
 	Status        string    `json:"status"`
@@ -134,14 +133,10 @@ func (h *shoppingListFromChecklistHandler) createFromChecklist(w http.ResponseWr
 }
 
 func (h *shoppingListGetHandler) getShoppingList(w http.ResponseWriter, r *http.Request) {
-	listID, err := strconv.ParseInt(r.PathValue("listId"), 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid listId"})
-		return
-	}
+	listID := r.PathValue("listId")
 	out, err := h.svc.GetShoppingList(r.Context(), listID)
 	if errors.Is(err, ErrNotFound) {
-		writeJSON(w, http.StatusNotFound, errorBody{Message: "shopping list " + r.PathValue("listId") + " not found"})
+		writeJSON(w, http.StatusNotFound, errorBody{Message: "shopping list " + listID + " not found"})
 		return
 	}
 	if err != nil {
@@ -152,14 +147,10 @@ func (h *shoppingListGetHandler) getShoppingList(w http.ResponseWriter, r *http.
 }
 
 func (h *shoppingListArchiveHandler) archiveShoppingList(w http.ResponseWriter, r *http.Request) {
-	listID, err := strconv.ParseInt(r.PathValue("listId"), 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid listId"})
-		return
-	}
+	listID := r.PathValue("listId")
 	if err := h.svc.ArchiveShoppingList(r.Context(), listID); err != nil {
 		if errors.Is(err, ErrNotFound) {
-			writeJSON(w, http.StatusNotFound, errorBody{Message: "shopping list " + r.PathValue("listId") + " not found"})
+			writeJSON(w, http.StatusNotFound, errorBody{Message: "shopping list " + listID + " not found"})
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "archive shopping list: "+err.Error())
@@ -172,29 +163,29 @@ func (h *shoppingListArchiveHandler) archiveShoppingList(w http.ResponseWriter, 
 
 // ShoppingListItemService is the application surface for shopping list items.
 type ShoppingListItemService interface {
-	ListShoppingListItems(ctx context.Context, listID int64) ([]ShoppingListItemResponse, error)
-	AddShoppingListItem(ctx context.Context, listID int64, in ShoppingListItemInput) (ShoppingListItemResponse, error)
-	ToggleShoppingListItem(ctx context.Context, listID, itemID int64, checked bool) (ShoppingListItemResponse, error)
-	DeleteShoppingListItem(ctx context.Context, listID, itemID int64) error
+	ListShoppingListItems(ctx context.Context, listID string) ([]ShoppingListItemResponse, error)
+	AddShoppingListItem(ctx context.Context, listID string, in ShoppingListItemInput) (ShoppingListItemResponse, error)
+	ToggleShoppingListItem(ctx context.Context, listID, itemID string, checked bool) (ShoppingListItemResponse, error)
+	DeleteShoppingListItem(ctx context.Context, listID, itemID string) error
 }
 
 // ShoppingListItemResponse is the JSON view (openapi: components/schemas/ShoppingListItem).
 type ShoppingListItemResponse struct {
-	ID                    int       `json:"id"`
-	ShoppingListID        int       `json:"shopping_list_id"`
-	ShoppingRequirementID *int      `json:"shopping_requirement_id,omitempty"`
-	IngredientID          *string   `json:"ingredient_id,omitempty"`
-	Label                 *string   `json:"label,omitempty"`
-	Quantity              float32   `json:"quantity"`
-	Unit                  string    `json:"unit"`
-	Checked               bool      `json:"checked"`
+	ID                    string  `json:"id"`
+	ShoppingListID        string  `json:"shopping_list_id"`
+	ShoppingRequirementID *string `json:"shopping_requirement_id,omitempty"`
+	IngredientID          *string `json:"ingredient_id,omitempty"`
+	Label                 *string `json:"label,omitempty"`
+	Quantity              float32 `json:"quantity"`
+	Unit                  string  `json:"unit"`
+	Checked               bool    `json:"checked"`
 	AddedAt               time.Time `json:"added_at"`
 }
 
 // ShoppingListItemInput is the body for POST /shopping-lists/{listId}/items
 // (openapi: components/schemas/ShoppingListItemNew).
 type ShoppingListItemInput struct {
-	ShoppingRequirementID *int    `json:"shopping_requirement_id,omitempty"`
+	ShoppingRequirementID *string `json:"shopping_requirement_id,omitempty"`
 	IngredientID          *string `json:"ingredient_id,omitempty"`
 	Label                 *string `json:"label,omitempty"`
 	Quantity              float32 `json:"quantity"`
@@ -207,11 +198,7 @@ type shoppingItemToggleHandler struct{ svc ShoppingListItemService }
 type shoppingItemDeleteHandler struct{ svc ShoppingListItemService }
 
 func (h *shoppingItemListHandler) listShoppingListItems(w http.ResponseWriter, r *http.Request) {
-	listID, err := strconv.ParseInt(r.PathValue("listId"), 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid listId"})
-		return
-	}
+	listID := r.PathValue("listId")
 	out, err := h.svc.ListShoppingListItems(r.Context(), listID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "list shopping list items: "+err.Error())
@@ -221,11 +208,7 @@ func (h *shoppingItemListHandler) listShoppingListItems(w http.ResponseWriter, r
 }
 
 func (h *shoppingItemCreateHandler) addShoppingListItem(w http.ResponseWriter, r *http.Request) {
-	listID, err := strconv.ParseInt(r.PathValue("listId"), 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid listId"})
-		return
-	}
+	listID := r.PathValue("listId")
 	var in ShoppingListItemInput
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid JSON body: " + err.Error()})
@@ -252,16 +235,8 @@ func (h *shoppingItemCreateHandler) addShoppingListItem(w http.ResponseWriter, r
 }
 
 func (h *shoppingItemToggleHandler) toggleShoppingListItem(w http.ResponseWriter, r *http.Request) {
-	listID, err := strconv.ParseInt(r.PathValue("listId"), 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid listId"})
-		return
-	}
-	itemID, err := strconv.ParseInt(r.PathValue("itemId"), 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid itemId"})
-		return
-	}
+	listID := r.PathValue("listId")
+	itemID := r.PathValue("itemId")
 	var in struct {
 		Checked bool `json:"checked"`
 	}
@@ -271,7 +246,7 @@ func (h *shoppingItemToggleHandler) toggleShoppingListItem(w http.ResponseWriter
 	}
 	out, err := h.svc.ToggleShoppingListItem(r.Context(), listID, itemID, in.Checked)
 	if errors.Is(err, ErrNotFound) {
-		writeJSON(w, http.StatusNotFound, errorBody{Message: "shopping list item " + r.PathValue("itemId") + " not found"})
+		writeJSON(w, http.StatusNotFound, errorBody{Message: "shopping list item " + itemID + " not found"})
 		return
 	}
 	if err != nil {
@@ -282,19 +257,11 @@ func (h *shoppingItemToggleHandler) toggleShoppingListItem(w http.ResponseWriter
 }
 
 func (h *shoppingItemDeleteHandler) deleteShoppingListItem(w http.ResponseWriter, r *http.Request) {
-	listID, err := strconv.ParseInt(r.PathValue("listId"), 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid listId"})
-		return
-	}
-	itemID, err := strconv.ParseInt(r.PathValue("itemId"), 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid itemId"})
-		return
-	}
+	listID := r.PathValue("listId")
+	itemID := r.PathValue("itemId")
 	if err := h.svc.DeleteShoppingListItem(r.Context(), listID, itemID); err != nil {
 		if errors.Is(err, ErrNotFound) {
-			writeJSON(w, http.StatusNotFound, errorBody{Message: "shopping list item " + r.PathValue("itemId") + " not found"})
+			writeJSON(w, http.StatusNotFound, errorBody{Message: "shopping list item " + itemID + " not found"})
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "delete shopping list item: "+err.Error())
@@ -307,15 +274,14 @@ func (h *shoppingItemDeleteHandler) deleteShoppingListItem(w http.ResponseWriter
 
 // ShoppingPushService is the application surface for pushing a list and creating carts.
 type ShoppingPushService interface {
-	PushShoppingList(ctx context.Context, listID int64, retailer string) (RetailerListBindingResponse, error)
-	ListShoppingCarts(ctx context.Context, listID int64) ([]ShoppingCartResponse, error)
-	ToCart(ctx context.Context, listID int64, retailer string) (ShoppingCartResponse, error)
+	PushShoppingList(ctx context.Context, listID string, retailer string) (RetailerListBindingResponse, error)
+	ListShoppingCarts(ctx context.Context, listID string) ([]ShoppingCartResponse, error)
+	ToCart(ctx context.Context, listID string, retailer string) (ShoppingCartResponse, error)
 }
 
 // RetailerListBindingResponse is the JSON view (openapi: components/schemas/RetailerListBinding).
 type RetailerListBindingResponse struct {
-	ID             int                                `json:"id"`
-	ShoppingListID int                                `json:"shopping_list_id"`
+	ShoppingListID string                             `json:"shopping_list_id"`
 	Retailer       string                             `json:"retailer"`
 	ExternalListID string                             `json:"external_list_id"`
 	SyncDirection  string                             `json:"sync_direction"`
@@ -332,20 +298,20 @@ const (
 
 // ShoppingCartResponse is the JSON view (openapi: components/schemas/ShoppingCart).
 type ShoppingCartResponse struct {
-	ID                    int       `json:"id"`
-	RetailerListBindingID int       `json:"retailer_list_binding_id"`
-	CreatedAt             time.Time `json:"created_at"`
-	Status                string    `json:"status"`
+	ID        string    `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	Status    string    `json:"status"`
 }
 
 // ShoppingCartItemResponse is the JSON view (openapi: components/schemas/ShoppingCartItem).
 type ShoppingCartItemResponse struct {
-	ID                int     `json:"id"`
-	ShoppingCartID    int     `json:"shopping_cart_id"`
-	RetailerProductID string  `json:"retailer_product_id"`
-	Quantity          float32 `json:"quantity"`
-	Unit              string  `json:"unit"`
-	ResolvedPrice     *float32 `json:"resolved_price,omitempty"`
+	ShoppingCartID     string   `json:"shopping_cart_id"`
+	LineNo             int      `json:"line_no"`
+	RetailerProductID  string   `json:"retailer_product_id"`
+	Quantity           float32  `json:"quantity"`
+	Unit               string   `json:"unit"`
+	ResolvedPriceMinor *int64   `json:"resolved_price_minor,omitempty"`
+	Currency           string   `json:"currency"`
 }
 
 type pushShoppingListHandler struct{ svc ShoppingPushService }
@@ -353,18 +319,14 @@ type listShoppingCartsHandler struct{ svc ShoppingPushService }
 type toCartHandler struct{ svc ShoppingPushService }
 
 func (h *pushShoppingListHandler) pushShoppingList(w http.ResponseWriter, r *http.Request) {
-	listID, err := strconv.ParseInt(r.PathValue("listId"), 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid listId"})
-		return
-	}
+	listID := r.PathValue("listId")
 	retailer := r.URL.Query().Get("retailer")
 	if retailer == "" {
 		retailer = "willys"
 	}
 	out, err := h.svc.PushShoppingList(r.Context(), listID, retailer)
 	if errors.Is(err, ErrNotFound) {
-		writeJSON(w, http.StatusNotFound, errorBody{Message: "shopping list " + r.PathValue("listId") + " not found"})
+		writeJSON(w, http.StatusNotFound, errorBody{Message: "shopping list " + listID + " not found"})
 		return
 	}
 	if err != nil {
@@ -375,11 +337,7 @@ func (h *pushShoppingListHandler) pushShoppingList(w http.ResponseWriter, r *htt
 }
 
 func (h *listShoppingCartsHandler) listShoppingCarts(w http.ResponseWriter, r *http.Request) {
-	listID, err := strconv.ParseInt(r.PathValue("listId"), 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid listId"})
-		return
-	}
+	listID := r.PathValue("listId")
 	out, err := h.svc.ListShoppingCarts(r.Context(), listID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "list shopping carts: "+err.Error())
@@ -389,18 +347,14 @@ func (h *listShoppingCartsHandler) listShoppingCarts(w http.ResponseWriter, r *h
 }
 
 func (h *toCartHandler) toCart(w http.ResponseWriter, r *http.Request) {
-	listID, err := strconv.ParseInt(r.PathValue("listId"), 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid listId"})
-		return
-	}
+	listID := r.PathValue("listId")
 	retailer := r.URL.Query().Get("retailer")
 	if retailer == "" {
 		retailer = "willys"
 	}
 	out, err := h.svc.ToCart(r.Context(), listID, retailer)
 	if errors.Is(err, ErrNotFound) {
-		writeJSON(w, http.StatusNotFound, errorBody{Message: "shopping list " + r.PathValue("listId") + " not found"})
+		writeJSON(w, http.StatusNotFound, errorBody{Message: "shopping list " + listID + " not found"})
 		return
 	}
 	if err != nil {
@@ -414,19 +368,20 @@ func (h *toCartHandler) toCart(w http.ResponseWriter, r *http.Request) {
 
 // OrderService is the application surface for orders.
 type OrderService interface {
-	ListOrders(ctx context.Context, retailer *string, cartID *int64) ([]OrderResponse, error)
-	GetOrder(ctx context.Context, orderID int64) (OrderViewResponse, error)
-	ListOrderItems(ctx context.Context, orderID int64) ([]OrderItemResponse, error)
+	ListOrders(ctx context.Context, retailer *string, cartID *string) ([]OrderResponse, error)
+	GetOrder(ctx context.Context, orderID string) (OrderViewResponse, error)
+	ListOrderItems(ctx context.Context, orderID string) ([]OrderItemResponse, error)
 }
 
 // OrderResponse is the JSON view (openapi: components/schemas/Order).
 type OrderResponse struct {
-	ID               int       `json:"id"`
-	ShoppingCartID   *int      `json:"shopping_cart_id,omitempty"`
+	ID               string    `json:"id"`
+	ShoppingCartID   *string   `json:"shopping_cart_id,omitempty"`
 	Retailer         string    `json:"retailer"`
 	Source           string    `json:"source"`
 	OrderedAt        time.Time `json:"ordered_at"`
-	TotalPrice       *float32  `json:"total_price,omitempty"`
+	TotalPriceMinor  *int64    `json:"total_price_minor,omitempty"`
+	Currency         string    `json:"currency"`
 }
 
 // OrderViewResponse is the JSON view (openapi: components/schemas/OrderView).
@@ -437,13 +392,14 @@ type OrderViewResponse struct {
 
 // OrderItemResponse is the JSON view (openapi: components/schemas/OrderItem).
 type OrderItemResponse struct {
-	ID                   int     `json:"id"`
-	OrderID              int     `json:"order_id"`
-	RetailerProductID    string  `json:"retailer_product_id"`
-	Quantity             float32 `json:"quantity"`
+	ID                   string   `json:"id"`
+	OrderID              string   `json:"order_id"`
+	RetailerProductID    string   `json:"retailer_product_id"`
+	Quantity             float32  `json:"quantity"`
 	UnitPrice            *float32 `json:"unit_price,omitempty"`
-	TotalPrice           *float32 `json:"total_price,omitempty"`
-	SubstitutedForItemID *int     `json:"substituted_for_item_id,omitempty"`
+	TotalPriceMinor      *int64   `json:"total_price_minor,omitempty"`
+	Currency             string   `json:"currency"`
+	SubstitutedForItemID *string  `json:"substituted_for_item_id,omitempty"`
 }
 
 type listOrdersHandler struct{ svc OrderService }
@@ -455,11 +411,9 @@ func (h *listOrdersHandler) listOrders(w http.ResponseWriter, r *http.Request) {
 	if v := r.URL.Query().Get("retailer"); v != "" {
 		retailer = &v
 	}
-	var cartID *int64
+	var cartID *string
 	if v := r.URL.Query().Get("cartId"); v != "" {
-		if id, err := strconv.ParseInt(v, 10, 64); err == nil {
-			cartID = &id
-		}
+		cartID = &v
 	}
 	out, err := h.svc.ListOrders(r.Context(), retailer, cartID)
 	if err != nil {
@@ -470,14 +424,10 @@ func (h *listOrdersHandler) listOrders(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *getOrderHandler) getOrder(w http.ResponseWriter, r *http.Request) {
-	orderID, err := strconv.ParseInt(r.PathValue("orderId"), 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid orderId"})
-		return
-	}
+	orderID := r.PathValue("orderId")
 	out, err := h.svc.GetOrder(r.Context(), orderID)
 	if errors.Is(err, ErrNotFound) {
-		writeJSON(w, http.StatusNotFound, errorBody{Message: "order " + r.PathValue("orderId") + " not found"})
+		writeJSON(w, http.StatusNotFound, errorBody{Message: "order " + orderID + " not found"})
 		return
 	}
 	if err != nil {
@@ -488,11 +438,7 @@ func (h *getOrderHandler) getOrder(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *listOrderItemsHandler) listOrderItems(w http.ResponseWriter, r *http.Request) {
-	orderID, err := strconv.ParseInt(r.PathValue("orderId"), 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid orderId"})
-		return
-	}
+	orderID := r.PathValue("orderId")
 	out, err := h.svc.ListOrderItems(r.Context(), orderID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "list order items: "+err.Error())

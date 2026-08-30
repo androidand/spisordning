@@ -33,10 +33,10 @@ type PlanningConstraintService interface {
 
 // PlanningConstraintResponse is the JSON view (openapi: components/schemas/PlanningConstraint).
 type PlanningConstraintResponse struct {
-	ID     int  `json:"id"`
+	ID     string `json:"id"`
 	Kind   string `json:"kind"`
 	Value  string `json:"value"`
-	Active bool `json:"active"`
+	Active bool   `json:"active"`
 }
 
 // PlanningConstraintInput is the request body for POST /constraints

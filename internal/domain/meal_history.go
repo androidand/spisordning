@@ -6,10 +6,9 @@ import "time"
 // meal_event. Distinct from MealReaction (who reacted and how) — a person can
 // attend without reacting, and a reaction can exist without recorded attendance.
 type MealParticipant struct {
-	ID         int64
-	MealEventID int64
-	PersonID   string
-	CreatedAt  time.Time
+	MealEventID MealEventID
+	PersonID    PersonID
+	CreatedAt   time.Time
 }
 
 // MealReview is a person's considered, post-meal rating of one specific
@@ -20,9 +19,8 @@ type MealParticipant struct {
 // Recipe-level rating is an aggregate computed from MealReview rows, not
 // stored as a denormalized column on any entity.
 type MealReview struct {
-	ID          int64
-	MealEventID int64
-	PersonID    string
+	MealEventID MealEventID
+	PersonID    PersonID
 	Rating      int // 1..5
 	Note        string
 	CreatedAt   time.Time
@@ -39,19 +37,18 @@ type FavoriteRating struct {
 
 // Favorite is an explicit, person- or household-scoped preference marker on a
 // recipe. Created only by an explicit action — never derived from ratings or
-// reactions. Exactly one of PersonID or HouseholdID is non-empty.
+// reactions. Exactly one of ScopeType values is set.
 type Favorite struct {
-	ID             int64
-	PersonID       string // empty when household-scoped
-	HouseholdID    string // empty when person-scoped
+	ScopeType      string // 'person' | 'household'
+	ScopeID        string   // person_id or household_id
 	MealieRecipeID string
 	CreatedAt      time.Time
 }
 
 // IsPersonScoped returns true when this favorite is scoped to a person rather
 // than a household.
-func (f Favorite) IsPersonScoped() bool { return f.PersonID != "" }
+func (f Favorite) IsPersonScoped() bool { return f.ScopeType == "person" }
 
 // IsHouseholdScoped returns true when this favorite is scoped to a household
 // rather than a person.
-func (f Favorite) IsHouseholdScoped() bool { return f.HouseholdID != "" }
+func (f Favorite) IsHouseholdScoped() bool { return f.ScopeType == "household" }

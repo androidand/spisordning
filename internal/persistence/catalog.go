@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/androidand/spisordning/internal/domain"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -12,25 +14,26 @@ import (
 // Deliberately minimal: no account/membership modeling — see that migration's
 // header comment and establish-household-and-catalog's own, larger scope.
 type Household struct {
-	ID        string
+	ID        domain.HouseholdID
+	Slug      string
 	Name      string
 	CreatedAt time.Time
 }
 
 // CreateHousehold inserts a household.
 func (s *Store) CreateHousehold(ctx context.Context, h Household) error {
-	const q = `INSERT INTO household (id, name) VALUES ($1, $2)`
-	if _, err := s.db.Exec(ctx, q, h.ID, h.Name); err != nil {
+	const q = `INSERT INTO household (id, slug, name) VALUES ($1, $2, $3)`
+	if _, err := s.db.Exec(ctx, q, h.ID, h.Slug, h.Name); err != nil {
 		return fmt.Errorf("persistence: create household: %w", err)
 	}
 	return nil
 }
 
 // GetHousehold fetches one household by id.
-func (s *Store) GetHousehold(ctx context.Context, id string) (Household, error) {
-	const q = `SELECT id, name, created_at FROM household WHERE id = $1`
+func (s *Store) GetHousehold(ctx context.Context, id domain.HouseholdID) (Household, error) {
+	const q = `SELECT id, slug, name, created_at FROM household WHERE id = $1`
 	var h Household
-	if err := s.db.QueryRow(ctx, q, id).Scan(&h.ID, &h.Name, &h.CreatedAt); err != nil {
+	if err := s.db.QueryRow(ctx, q, id).Scan(&h.ID, &h.Slug, &h.Name, &h.CreatedAt); err != nil {
 		return Household{}, fmt.Errorf("persistence: get household: %w", err)
 	}
 	return h, nil
@@ -40,7 +43,8 @@ func (s *Store) GetHousehold(ctx context.Context, id string) (Household, error) 
 // concrete, purchasable good, distinct from the canonical Ingredient it may
 // (optionally) map to.
 type Product struct {
-	ID          string
+	ID          domain.ProductID
+	Slug        string
 	Name        string
 	Brand       string
 	PackageSize string
@@ -49,21 +53,21 @@ type Product struct {
 
 // CreateProduct inserts a product.
 func (s *Store) CreateProduct(ctx context.Context, p Product) error {
-	const q = `INSERT INTO product (id, name, brand, package_size) VALUES ($1, $2, $3, $4)`
+	const q = `INSERT INTO product (id, slug, name, brand, package_size) VALUES ($1, $2, $3, $4, $5)`
 	brand := nullableText(p.Brand)
 	pkg := nullableText(p.PackageSize)
-	if _, err := s.db.Exec(ctx, q, p.ID, p.Name, brand, pkg); err != nil {
+	if _, err := s.db.Exec(ctx, q, p.ID, p.Slug, p.Name, brand, pkg); err != nil {
 		return fmt.Errorf("persistence: create product: %w", err)
 	}
 	return nil
 }
 
 // GetProduct fetches one product by id.
-func (s *Store) GetProduct(ctx context.Context, id string) (Product, error) {
-	const q = `SELECT id, name, brand, package_size, created_at FROM product WHERE id = $1`
+func (s *Store) GetProduct(ctx context.Context, id domain.ProductID) (Product, error) {
+	const q = `SELECT id, slug, name, brand, package_size, created_at FROM product WHERE id = $1`
 	var p Product
 	var brand, pkg *string
-	if err := s.db.QueryRow(ctx, q, id).Scan(&p.ID, &p.Name, &brand, &pkg, &p.CreatedAt); err != nil {
+	if err := s.db.QueryRow(ctx, q, id).Scan(&p.ID, &p.Slug, &p.Name, &brand, &pkg, &p.CreatedAt); err != nil {
 		return Product{}, fmt.Errorf("persistence: get product: %w", err)
 	}
 	if brand != nil {
@@ -80,7 +84,7 @@ func (s *Store) GetProduct(ctx context.Context, id string) (Product, error) {
 // name-match fallback rather than calling this. Exposed for potential
 // future catalog-browse UI.
 func (s *Store) ListProducts(ctx context.Context) ([]Product, error) {
-	const q = `SELECT id, name, brand, package_size, created_at FROM product ORDER BY id`
+	const q = `SELECT id, slug, name, brand, package_size, created_at FROM product ORDER BY id`
 	rows, err := s.db.Query(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("persistence: list products: %w", err)
@@ -90,7 +94,7 @@ func (s *Store) ListProducts(ctx context.Context) ([]Product, error) {
 	for rows.Next() {
 		var p Product
 		var brand, pkg *string
-		if err := rows.Scan(&p.ID, &p.Name, &brand, &pkg, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.Slug, &p.Name, &brand, &pkg, &p.CreatedAt); err != nil {
 			return nil, err
 		}
 		if brand != nil {
@@ -108,9 +112,9 @@ func (s *Store) ListProducts(ctx context.Context) ([]Product, error) {
 // already-known GTIN to a different product overwrites the link — barcode
 // resolution (implement-pantry-inventory design.md D6) always wants the
 // latest confirmed match, never a stale one.
-func (s *Store) UpsertProductIdentifier(ctx context.Context, productID, gtin string) error {
-	const q = `INSERT INTO product_identifier (product_id, gtin) VALUES ($1, $2)
-		ON CONFLICT (gtin) DO UPDATE SET product_id = EXCLUDED.product_id`
+func (s *Store) UpsertProductIdentifier(ctx context.Context, productID domain.ProductID, gtin string) error {
+	const q = `INSERT INTO product_identifier (scheme, value, product_id) VALUES ('GTIN', $2, $1)
+		ON CONFLICT (scheme, value) DO UPDATE SET product_id = EXCLUDED.product_id`
 	if _, err := s.db.Exec(ctx, q, productID, gtin); err != nil {
 		return fmt.Errorf("persistence: upsert product_identifier: %w", err)
 	}
@@ -121,15 +125,15 @@ func (s *Store) UpsertProductIdentifier(ctx context.Context, productID, gtin str
 // product_identifier. Returns "", nil (not an error) when no identifier row
 // matches — the caller (LookupBarcode) is responsible for falling through to
 // the rest of D6's resolution chain.
-func (s *Store) LookupProductByGTIN(ctx context.Context, gtin string) (string, error) {
-	const q = `SELECT product_id FROM product_identifier WHERE gtin = $1`
-	var productID string
+func (s *Store) LookupProductByGTIN(ctx context.Context, gtin string) (domain.ProductID, error) {
+	const q = `SELECT product_id FROM product_identifier WHERE scheme = 'GTIN' AND value = $1`
+	var productID domain.ProductID
 	err := s.db.QueryRow(ctx, q, gtin).Scan(&productID)
 	if err == pgx.ErrNoRows {
-		return "", nil
+		return domain.ProductID{}, nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("persistence: lookup product_identifier: %w", err)
+		return domain.ProductID{}, fmt.Errorf("persistence: lookup product_identifier: %w", err)
 	}
 	return productID, nil
 }
@@ -139,8 +143,8 @@ func (s *Store) LookupProductByGTIN(ctx context.Context, gtin string) (string, e
 // (e.g. a spice mix); absence of any row for a product_id means "unmapped,
 // flagged for review" (ingredient-catalog spec) — never invented.
 type ProductIngredientMapping struct {
-	ProductID    string
-	IngredientID string
+	ProductID    domain.ProductID
+	IngredientID domain.IngredientID
 	Quantity     *float64
 }
 
@@ -161,8 +165,8 @@ func (s *Store) SetProductIngredientMapping(ctx context.Context, m ProductIngred
 // ingredientID, ordered by product id. This is the primary (mapped) source
 // ListCandidateProductsForIngredient (internal/persistence/pantry.go) reads
 // from before falling back to a name match.
-func (s *Store) ListProductsForIngredient(ctx context.Context, ingredientID string) ([]Product, error) {
-	const q = `SELECT p.id, p.name, p.brand, p.package_size, p.created_at
+func (s *Store) ListProductsForIngredient(ctx context.Context, ingredientID domain.IngredientID) ([]Product, error) {
+	const q = `SELECT p.id, p.slug, p.name, p.brand, p.package_size, p.created_at
 		FROM product p
 		JOIN product_ingredient_mapping m ON m.product_id = p.id
 		WHERE m.ingredient_id = $1
@@ -176,7 +180,7 @@ func (s *Store) ListProductsForIngredient(ctx context.Context, ingredientID stri
 	for rows.Next() {
 		var p Product
 		var brand, pkg *string
-		if err := rows.Scan(&p.ID, &p.Name, &brand, &pkg, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.Slug, &p.Name, &brand, &pkg, &p.CreatedAt); err != nil {
 			return nil, err
 		}
 		if brand != nil {
@@ -194,7 +198,7 @@ func (s *Store) ListProductsForIngredient(ctx context.Context, ingredientID stri
 // household's nickname for an ingredient to the canonical ingredient id.
 // HouseholdID is "" for a global alias (NULL in the DB).
 type IngredientAlias struct {
-	ID           int64
+	ID           string
 	HouseholdID  string // "" = global
 	Alias        string
 	IngredientID string
@@ -205,10 +209,11 @@ type IngredientAlias struct {
 // ingredient mapping. The unique (household_id, alias) key makes this
 // idempotent: re-adding the same alias updates the ingredient it points at.
 func (s *Store) UpsertIngredientAlias(ctx context.Context, a IngredientAlias) error {
-	const q = `INSERT INTO ingredient_alias (household_id, alias, ingredient_id)
-		VALUES ($1, $2, $3)
+	id := uuid.New().String()
+	const q = `INSERT INTO ingredient_alias (id, household_id, alias, ingredient_id)
+		VALUES ($1, $2, $3, $4)
 		ON CONFLICT (household_id, alias) DO UPDATE SET ingredient_id = EXCLUDED.ingredient_id`
-	_, err := s.db.Exec(ctx, q, nullableText(a.HouseholdID), a.Alias, a.IngredientID)
+	_, err := s.db.Exec(ctx, q, id, nullableText(a.HouseholdID), a.Alias, a.IngredientID)
 	if err != nil {
 		return fmt.Errorf("persistence: upsert ingredient_alias: %w", err)
 	}

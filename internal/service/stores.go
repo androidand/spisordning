@@ -7,6 +7,7 @@ import (
 	"math"
 	"sort"
 
+	"github.com/androidand/spisordning/internal/domain"
 	"github.com/androidand/spisordning/internal/dto"
 	"github.com/androidand/spisordning/internal/ingredients"
 )
@@ -46,7 +47,7 @@ func (s *Stores) LocateStores(ctx context.Context, input dto.LocateStoresInput) 
 	}
 	retailerNames := make(map[string]string, len(retailers))
 	for _, r := range retailers {
-		retailerNames[r.ID] = r.Name
+		retailerNames[r.ID.String()] = r.Name
 	}
 
 	hasOrigin := input.Latitude != nil && input.Longitude != nil
@@ -54,9 +55,9 @@ func (s *Stores) LocateStores(ctx context.Context, input dto.LocateStoresInput) 
 	out := make([]dto.Store, 0, len(rows))
 	for _, st := range rows {
 		loc := dto.Store{
-			ID:           st.ID,
-			RetailerID:   st.RetailerID,
-			RetailerName: retailerNames[st.RetailerID],
+			ID:           st.ID.String(),
+			RetailerID:   st.RetailerID.String(),
+			RetailerName: retailerNames[st.RetailerID.String()],
 			Name:         st.Name,
 			Latitude:     st.Latitude,
 			Longitude:    st.Longitude,
@@ -110,16 +111,20 @@ func haversineKm(lat1, lon1, lat2, lon2 float64) float64 {
 
 // ListStoreOffers returns the store_product_offer rows for one store.
 func (s *Stores) ListStoreOffers(ctx context.Context, storeID string) ([]dto.StoreOffer, error) {
-	rows, err := s.db.ListStoreProductOffers(ctx, storeID)
+	sid, err := domain.ParseStoreID(storeID)
+	if err != nil {
+		return nil, fmt.Errorf("service: list store offers: %w", err)
+	}
+	rows, err := s.db.ListStoreProductOffers(ctx, sid)
 	if err != nil {
 		return nil, fmt.Errorf("service: list store offers: %w", err)
 	}
 	out := make([]dto.StoreOffer, 0, len(rows))
 	for _, o := range rows {
 		out = append(out, dto.StoreOffer{
-			ID:                o.ID,
-			StoreID:           o.StoreID,
-			RetailerProductID: o.RetailerProductID,
+			ID:                o.ID.String(),
+			StoreID:           o.StoreID.String(),
+			RetailerProductID: o.RetailerProductID.String(),
 			CurrentlyCarried:  o.CurrentlyCarried,
 			UpdatedAt:         o.UpdatedAt,
 		})

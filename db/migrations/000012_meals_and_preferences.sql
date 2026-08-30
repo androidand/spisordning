@@ -26,7 +26,7 @@
 -- any column of a composite FK is NULL, so (NULL, NULL) is valid for unplanned
 -- meals.
 ALTER TABLE meal_event
-    ADD COLUMN meal_plan_id     BIGINT,
+    ADD COLUMN meal_plan_id     UUID,
     ADD COLUMN meal_plan_slot_date DATE;
 CREATE INDEX ON meal_event (meal_plan_id, meal_plan_slot_date);
 ALTER TABLE meal_event
@@ -40,11 +40,10 @@ ALTER TABLE meal_event
 -- exist without a recorded participant row (e.g. someone reviews a meal
 -- they watched someone else cook).
 CREATE TABLE meal_participant (
-    id            BIGSERIAL PRIMARY KEY,
-    meal_event_id BIGINT NOT NULL REFERENCES meal_event(id) ON DELETE CASCADE,
-    person_id     TEXT NOT NULL REFERENCES person(id) ON DELETE CASCADE,
+    meal_event_id UUID NOT NULL REFERENCES meal_event(id) ON DELETE CASCADE,
+    person_id     UUID NOT NULL REFERENCES person(id) ON DELETE CASCADE,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (meal_event_id, person_id)
+    PRIMARY KEY (meal_event_id, person_id)
 );
 CREATE INDEX ON meal_participant (person_id);
 
@@ -53,37 +52,30 @@ CREATE INDEX ON meal_participant (person_id);
 -- review is considered/post-meal (1..5). Recipe-level rating is an aggregate
 -- computed read-side from these rows, never stored as a denormalized column.
 CREATE TABLE meal_review (
-    id             BIGSERIAL PRIMARY KEY,
-    meal_event_id  BIGINT NOT NULL REFERENCES meal_event(id) ON DELETE CASCADE,
-    person_id      TEXT NOT NULL REFERENCES person(id) ON DELETE CASCADE,
+    meal_event_id UUID NOT NULL REFERENCES meal_event(id) ON DELETE CASCADE,
+    person_id     UUID NOT NULL REFERENCES person(id) ON DELETE CASCADE,
     rating         SMALLINT NOT NULL CHECK (rating BETWEEN 1 AND 5),
     note           TEXT,
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (meal_event_id, person_id)
+    PRIMARY KEY (meal_event_id, person_id)
 );
 CREATE INDEX ON meal_review (person_id);
 CREATE INDEX ON meal_review (meal_event_id);
 
 -- Explicit person- or household-scoped preference for a recipe. Never
 -- derived automatically from ratings or reactions — always created by an
--- explicit action. Exactly one of person_id / household_id must be non-NULL.
+-- explicit action. Uses a bounded scope_type/scope_id discriminator (D7):
+-- scope_type is 'person' or 'household', scope_id is the corresponding UUID.
 CREATE TABLE favorite (
-    id               BIGSERIAL PRIMARY KEY,
-    person_id        TEXT REFERENCES person(id) ON DELETE CASCADE,
-    household_id     TEXT REFERENCES household(id) ON DELETE CASCADE,
-    mealie_recipe_id TEXT NOT NULL REFERENCES recipe_ref(mealie_recipe_id),
-    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (person_id, mealie_recipe_id),
-    UNIQUE (household_id, mealie_recipe_id),
-    CHECK (
-        (person_id IS NOT NULL AND household_id IS NULL) OR
-        (household_id IS NOT NULL AND person_id IS NULL)
-    )
+    scope_type        TEXT NOT NULL CHECK (scope_type IN ('person','household')),
+    scope_id          UUID NOT NULL,
+    recipe_ref_id     UUID NOT NULL REFERENCES recipe_ref(id),
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (scope_type, scope_id, recipe_ref_id)
 );
-CREATE INDEX ON favorite (mealie_recipe_id);
-CREATE INDEX ON favorite (person_id);
-CREATE INDEX ON favorite (household_id);
+CREATE INDEX ON favorite (recipe_ref_id);
+CREATE INDEX ON favorite (scope_id);
 
 -- +goose Down
 DROP TABLE IF EXISTS favorite CASCADE;

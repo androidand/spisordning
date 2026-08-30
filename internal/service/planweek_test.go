@@ -24,7 +24,7 @@ func (e persistErrSentinel) Error() string { return string(e) }
 // persistWeek never calls anything else.
 type fakePersistStore struct {
 	Store
-	planID         int64
+	planID         domain.MealPlanID
 	getOrCreateErr error
 	insCandErr     error
 	setDecErr      error
@@ -40,6 +40,9 @@ func (f *fakePersistStore) GetOrCreateMealPlan(ctx context.Context, weekStart ti
 		return persistence.MealPlan{}, f.getOrCreateErr
 	}
 	return persistence.MealPlan{ID: f.planID, WeekStart: weekStart, Status: "draft"}, nil
+}
+func (f *fakePersistStore) GetRecipeRefByMealieID(ctx context.Context, mealieRecipeID string) (persistence.RecipeRef, error) {
+	return persistence.RecipeRef{ID: domain.NewRecipeRefID(), MealieRecipeID: mealieRecipeID}, nil
 }
 func (f *fakePersistStore) InsertCandidate(ctx context.Context, c persistence.MealPlanCandidate) error {
 	if f.insCandErr != nil {
@@ -82,7 +85,8 @@ func testSlots() []planning.PlannedSlot {
 
 func TestPersistWeek_HappyPath(t *testing.T) {
 	ctx := context.Background()
-	store := &fakePersistStore{planID: 7}
+	planID := domain.NewMealPlanID()
+	store := &fakePersistStore{planID: planID}
 	sl := testSlots()
 	reqs := []domain.ShoppingRequirement{
 		{IngredientID: "pasta", Quantity: 400, Unit: "g"},
@@ -97,7 +101,7 @@ func TestPersistWeek_HappyPath(t *testing.T) {
 		t.Errorf("candidates = %d, want 2", len(store.candidates))
 	}
 	for _, c := range store.candidates {
-		if c.PlanID != 7 || c.MealieRecipeID == "" || c.Score == 0 {
+		if c.PlanID != planID || c.RecipeRefID == (domain.RecipeRefID{}) || c.Score == 0 {
 			t.Errorf("unexpected candidate: %+v", c)
 		}
 	}
@@ -108,9 +112,10 @@ func TestPersistWeek_HappyPath(t *testing.T) {
 		t.Errorf("requirements = %d, want 2", len(store.requirements))
 	}
 	// PreferredForm must become a non-nil *string; empty stays nil.
+	ostID := domain.IngredientIDForName("ost")
 	var ost *persistence.ShoppingRequirement
 	for i := range store.requirements {
-		if store.requirements[i].IngredientID == "ost" {
+		if store.requirements[i].IngredientID == ostID {
 			ost = &store.requirements[i]
 		}
 	}
@@ -133,7 +138,7 @@ func TestPersistWeek_ErrorsPropagate(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			store := &fakePersistStore{planID: 1}
+			store := &fakePersistStore{planID: domain.NewMealPlanID()}
 			c.field(store)
 			err := persistWeek(ctx, store, time.Now(), testSlots(), []domain.ShoppingRequirement{{IngredientID: "x"}})
 			if err == nil {
@@ -148,7 +153,7 @@ func TestPersistWeek_ErrorsPropagate(t *testing.T) {
 
 func TestPersistWeek_EmptyPlannedStillCreatesPlan(t *testing.T) {
 	ctx := context.Background()
-	store := &fakePersistStore{planID: 3}
+	store := &fakePersistStore{planID: domain.NewMealPlanID()}
 	// No slots, no requirements — the meal_plan row should still be created.
 	if err := persistWeek(ctx, store, time.Now(), nil, nil); err != nil {
 		t.Fatalf("persistWeek: %v", err)
@@ -180,13 +185,13 @@ func TestPlanWeek_Orchestrates(t *testing.T) {
 	}))
 	t.Cleanup(fakeMealie.Close)
 
-	store := &fakePersistStore{planID: 42}
+	store := &fakePersistStore{planID: domain.NewMealPlanID()}
 	svc := NewPlanning(store, mealie.New(fakeMealie.URL, "tok"))
 
 	res, err := svc.PlanWeek(context.Background(), PlanWeekInput{
 		WeekStart: time.Date(2026, 8, 24, 0, 0, 0, 0, time.UTC),
 		Days:      7,
-		People:    []domain.Person{{ID: "p1", Name: "Andreas", Weight: 1.0}},
+		People:    []domain.Person{{ID: domain.NewPersonID(), Name: "Andreas", Weight: 1.0}},
 	})
 	if err != nil {
 		t.Fatalf("PlanWeek: %v", err)

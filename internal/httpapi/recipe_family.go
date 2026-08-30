@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strconv"
 
 	"github.com/androidand/spisordning/internal/dto"
 )
@@ -100,11 +99,7 @@ func (h *recipeFamilyHandler) listRevisions(w http.ResponseWriter, r *http.Reque
 }
 
 func (h *recipeFamilyHandler) getRevision(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("revisionId"), 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, errorBody{Message: "revision id must be an integer"})
-		return
-	}
+	id := r.PathValue("revisionId")
 	out, serr := h.svc.GetRevision(r.Context(), id)
 	if errors.Is(serr, dto.ErrNotFound) {
 		writeJSON(w, http.StatusNotFound, errorBody{Message: "recipe revision " + r.PathValue("revisionId") + " not found"})

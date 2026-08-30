@@ -15,7 +15,7 @@ import (
 
 func TestListPlans_HappyPath(t *testing.T) {
 	svc := &fakePlansSvc{
-		plans: []PlanResponse{{ID: 1, WeekStart: types.Date{Time: time.Date(2026, 8, 25, 0, 0, 0, 0, time.UTC)}, Status: "draft"}},
+		plans: []PlanResponse{{ID: "plan-1", WeekStart: types.Date{Time: time.Date(2026, 8, 25, 0, 0, 0, 0, time.UTC)}, Status: "draft"}},
 	}
 	mux := newMux(t, Dependencies{Plans: svc})
 	rec := doGet(t, mux, "/plans")
@@ -24,7 +24,7 @@ func TestListPlans_HappyPath(t *testing.T) {
 	}
 	var got []PlanResponse
 	mustJSON(t, rec.Body.Bytes(), &got)
-	if len(got) != 1 || got[0].ID != 1 {
+	if len(got) != 1 || got[0].ID != "plan-1" {
 		t.Fatalf("unexpected plans: %+v", got)
 	}
 }
@@ -48,7 +48,7 @@ func TestCreatePlan_HappyPath(t *testing.T) {
 	}
 	var got PlanResponse
 	mustJSON(t, rec.Body.Bytes(), &got)
-	if got.ID != 1 || got.Status != "draft" {
+	if got.ID != "plan-1" || got.Status != "draft" {
 		t.Fatalf("unexpected plan: %+v", got)
 	}
 }
@@ -66,9 +66,9 @@ func TestCreatePlan_InvalidWeekStart(t *testing.T) {
 func TestGetPlan_HappyPath(t *testing.T) {
 	svc := &fakePlansSvc{
 		planView: PlanView{
-			Plan: PlanResponse{ID: 1, WeekStart: types.Date{Time: time.Date(2026, 8, 25, 0, 0, 0, 0, time.UTC)}, Status: "draft"},
+			Plan: PlanResponse{ID: "plan-1", WeekStart: types.Date{Time: time.Date(2026, 8, 25, 0, 0, 0, 0, time.UTC)}, Status: "draft"},
 			Candidates: []PlanCandidateResponse{
-				{ID: 1, SlotDate: types.Date{Time: time.Date(2026, 8, 25, 0, 0, 0, 0, time.UTC)}, Rank: 1, Score: 0.9, Feasible: true},
+				{ID: "cand-1", SlotDate: types.Date{Time: time.Date(2026, 8, 25, 0, 0, 0, 0, time.UTC)}, Rank: 1, Score: 0.9, Feasible: true},
 			},
 		},
 	}
@@ -79,7 +79,7 @@ func TestGetPlan_HappyPath(t *testing.T) {
 	}
 	var got PlanView
 	mustJSON(t, rec.Body.Bytes(), &got)
-	if got.Plan.ID != 1 || len(got.Candidates) != 1 {
+	if got.Plan.ID != "plan-1" || len(got.Candidates) != 1 {
 		t.Fatalf("unexpected view: %+v", got)
 	}
 }
@@ -131,8 +131,8 @@ func TestUpdatePlan_NotFound(t *testing.T) {
 func TestSetDecisions_HappyPath(t *testing.T) {
 	svc := &fakePlansSvc{
 		planView: PlanView{
-			Plan:    PlanResponse{ID: 1, Status: "draft"},
-			Decisions: &[]PlanDecisionResponse{{PlanID: 1, SlotDate: types.Date{Time: time.Date(2026, 8, 25, 0, 0, 0, 0, time.UTC)}, MealieRecipeID: "r-1"}},
+			Plan:    PlanResponse{ID: "plan-1", Status: "draft"},
+			Decisions: &[]PlanDecisionResponse{{PlanID: "plan-1", SlotDate: types.Date{Time: time.Date(2026, 8, 25, 0, 0, 0, 0, time.UTC)}, MealieRecipeID: "r-1"}},
 		},
 	}
 	mux := newMux(t, Dependencies{Plans: svc})
@@ -146,7 +146,7 @@ func TestSetDecisions_HappyPath(t *testing.T) {
 func TestListCandidates_HappyPath(t *testing.T) {
 	svc := &fakePlansSvc{
 		candidates: []PlanCandidateResponse{
-			{ID: 1, SlotDate: types.Date{Time: time.Date(2026, 8, 25, 0, 0, 0, 0, time.UTC)}, Rank: 1, Score: 0.9, Feasible: true},
+			{ID: "cand-1", SlotDate: types.Date{Time: time.Date(2026, 8, 25, 0, 0, 0, 0, time.UTC)}, Rank: 1, Score: 0.9, Feasible: true},
 		},
 	}
 	mux := newMux(t, Dependencies{Plans: svc})
@@ -163,7 +163,7 @@ func TestListCandidates_HappyPath(t *testing.T) {
 
 func TestListShoppingRequirements_HappyPath(t *testing.T) {
 	svc := &fakePlansSvc{
-		shoppingReqs: []ShoppingRequirementResponse{{ID: 1, IngredientID: "pasta", Quantity: 500, Unit: "g"}},
+		shoppingReqs: []ShoppingRequirementResponse{{ID: "req-1", IngredientID: "pasta", Quantity: 500, Unit: "g"}},
 	}
 	mux := newMux(t, Dependencies{Plans: svc})
 	rec := doGet(t, mux, "/plans/1/shopping-requirements")
@@ -219,7 +219,7 @@ func TestUpsertEffortProfile_InvalidEnergy(t *testing.T) {
 
 func TestListPlanningConstraints_HappyPath(t *testing.T) {
 	svc := &fakeConstraintSvc{
-		constraints: []PlanningConstraintResponse{{ID: 1, Kind: "avoid_tag", Value: "seafood", Active: true}},
+		constraints: []PlanningConstraintResponse{{ID: "con-1", Kind: "avoid_tag", Value: "seafood", Active: true}},
 	}
 	mux := newMux(t, Dependencies{PlanningConstraints: svc})
 	rec := doGet(t, mux, "/constraints")
@@ -243,7 +243,7 @@ func TestCreatePlanningConstraint_HappyPath(t *testing.T) {
 	}
 	var got PlanningConstraintResponse
 	mustJSON(t, rec.Body.Bytes(), &got)
-	if got.ID != 1 || got.Kind != "max_effort" {
+	if got.ID != "con-1" || got.Kind != "max_effort" {
 		t.Fatalf("unexpected constraint: %+v", got)
 	}
 }
@@ -323,5 +323,5 @@ func (f *fakeConstraintSvc) ListPlanningConstraints(ctx context.Context) ([]Plan
 }
 
 func (f *fakeConstraintSvc) CreatePlanningConstraint(ctx context.Context, in PlanningConstraintInput) (PlanningConstraintResponse, error) {
-	return PlanningConstraintResponse{ID: 1, Kind: in.Kind, Value: in.Value, Active: in.Active}, f.err
+	return PlanningConstraintResponse{ID: "con-1", Kind: in.Kind, Value: in.Value, Active: in.Active}, f.err
 }

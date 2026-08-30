@@ -162,12 +162,13 @@ func TestPlanSimpleSlot_NoSchoolLunchPenalty(t *testing.T) {
 		{MealieRecipeID: "fisk", Title: "Fisk", Tags: []string{"fisk", "mellanmål"}, Effort: domain.EffortLow},
 		{MealieRecipeID: "yoghurt", Title: "Yoghurt", Tags: []string{"mellanmål"}, Effort: domain.EffortLow},
 	}
+	kidID := domain.NewPersonID()
 	cfg := WeekConfig{
 		People: []domain.Person{
-			{ID: "kid", Name: "Kid", Weight: 1},
+			{ID: kidID, Name: "Kid", Weight: 1},
 		},
 		Preferences: []domain.Preference{
-			{PersonID: "kid", Tag: "fisk", Sentiment: domain.Likes, Confidence: 1.0},
+			{PersonID: kidID, Tag: "fisk", Sentiment: domain.Likes, Confidence: 1.0},
 		},
 	}
 	date := time.Date(2026, 7, 20, 0, 0, 0, 0, time.UTC)
@@ -191,9 +192,10 @@ func TestPlanSimpleSlot_NoEffortFiltering(t *testing.T) {
 	candidates := []domain.Candidate{
 		{MealieRecipeID: "project", Title: "Projekt", Tags: []string{"mellanmål"}, Effort: domain.EffortHigh},
 	}
+	mumID := domain.NewPersonID()
 	cfg := WeekConfig{
 		People: []domain.Person{
-			{ID: "mum", Name: "Mum", Weight: 1},
+			{ID: mumID, Name: "Mum", Weight: 1},
 		},
 	}
 	date := time.Date(2026, 7, 20, 0, 0, 0, 0, time.UTC)
@@ -216,10 +218,11 @@ func TestPlanWeekAllSlots_PlanAllThreeSlots(t *testing.T) {
 	snackCandidates := []domain.Candidate{
 		{MealieRecipeID: "yogurt", Title: "Yoghurt", Tags: []string{"mellanmål"}, Effort: domain.EffortLow},
 	}
+	mumID := domain.NewPersonID()
 	cfg := WeekConfig{
 		Candidates: dinnerCandidates,
 		People: []domain.Person{
-			{ID: "mum", Name: "Mum", Weight: 1},
+			{ID: mumID, Name: "Mum", Weight: 1},
 		},
 	}
 	monday := time.Date(2026, 7, 20, 0, 0, 0, 0, time.UTC)
@@ -245,10 +248,11 @@ func TestPlanWeekAllSlots_SkipsBreakfastWhenNoCandidates(t *testing.T) {
 	dinnerCandidates := []domain.Candidate{
 		{MealieRecipeID: "pasta", Title: "Pasta", Tags: []string{"pasta"}, Effort: domain.EffortLow},
 	}
+	mumID := domain.NewPersonID()
 	cfg := WeekConfig{
 		Candidates: dinnerCandidates,
 		People: []domain.Person{
-			{ID: "mum", Name: "Mum", Weight: 1},
+			{ID: mumID, Name: "Mum", Weight: 1},
 		},
 	}
 	monday := time.Date(2026, 7, 20, 0, 0, 0, 0, time.UTC)

@@ -9,7 +9,7 @@ import (
 // membership, preferences, and the cookbook. Mutable (rename); never hard-deleted
 // while it has history (establish-household-and-catalog design.md Step 4).
 type Household struct {
-	ID   string
+	ID   HouseholdID
 	Name string
 }
 
@@ -19,7 +19,7 @@ type Household struct {
 // household; a HouseholdMembership is. A Person may exist with no Account (a
 // child), and deleting an Account never deletes a Person or their history.
 type Account struct {
-	ID    string
+	ID    AccountID
 	Email string
 }
 
@@ -28,8 +28,8 @@ type Account struct {
 // on leaving, never deleted (invariant 10 — "who was in the household when this
 // meal was rated" must stay answerable).
 type HouseholdMembership struct {
-	HouseholdID string
-	PersonID    string
+	HouseholdID HouseholdID
+	PersonID    PersonID
 	JoinedAt    time.Time
 	// EndedAt is the zero time while the membership is active.
 	EndedAt time.Time
@@ -61,7 +61,7 @@ func (k RestrictionKind) Valid() bool {
 // Confidence, so it can never be fed into preference scoring. Set and cleared
 // only by an explicit, attributed command.
 type PersonRestriction struct {
-	PersonID   string
+	PersonID   PersonID
 	Tag        string
 	Kind       RestrictionKind
 	Note       string
@@ -76,12 +76,12 @@ type PersonRestriction struct {
 // NewPersonRestriction validates a restriction at construction: the kind must be
 // one of the two classes (invariant 2) and the change must be attributed to an
 // actor (invariant 3 — safety-critical, so who recorded it is required).
-func NewPersonRestriction(personID, tag string, kind RestrictionKind, note, recordedBy string, at time.Time) (PersonRestriction, error) {
+func NewPersonRestriction(personID PersonID, tag string, kind RestrictionKind, note, recordedBy string, at time.Time) (PersonRestriction, error) {
+	if personID.String() == "00000000-0000-0000-0000-000000000000" {
+		return PersonRestriction{}, fmt.Errorf("domain: restriction requires a non-zero person id")
+	}
 	if !kind.Valid() {
 		return PersonRestriction{}, fmt.Errorf("domain: invalid restriction kind %q", kind)
-	}
-	if personID == "" {
-		return PersonRestriction{}, fmt.Errorf("domain: restriction requires a person id")
 	}
 	if tag == "" {
 		return PersonRestriction{}, fmt.Errorf("domain: restriction requires a tag")

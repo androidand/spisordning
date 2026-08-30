@@ -54,7 +54,17 @@ func runTonight(args []string) error {
 		if err != nil {
 			return err
 		}
-		fam.Preferences = ambient.RecordReaction(fam.Preferences, *person, slot.Tags, s)
+		var personID domain.PersonID
+		for _, p := range fam.People {
+			if p.Name == *person {
+				personID = p.ID
+				break
+			}
+		}
+		if personID.String() == "" {
+			return fmt.Errorf("tonight: person %q not found in family", *person)
+		}
+		fam.Preferences = ambient.RecordReaction(fam.Preferences, personID, slot.Tags, s)
 		if err := saveFamily(*family, fam); err != nil {
 			return err
 		}

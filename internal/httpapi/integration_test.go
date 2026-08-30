@@ -14,14 +14,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/androidand/spisordning/internal/domain"
 	"github.com/androidand/spisordning/internal/dto"
 	"github.com/androidand/spisordning/internal/persistence"
-	"github.com/jackc/pgx/v5"
 	"github.com/oapi-codegen/runtime/types"
 )
 
@@ -136,7 +135,7 @@ func (a dbAdapter) CreatePerson(ctx context.Context, in dto.PersonInput) (dto.Pe
 
 func (a dbAdapter) UpdatePerson(ctx context.Context, id string, in dto.PersonUpdate) (dto.PersonResponse, error) {
 	if err := a.store.UpdatePerson(ctx, persistence.Person{ID: id, Name: in.Name, Weight: in.Weight}); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, persistence.ErrNoRows) {
 			return dto.PersonResponse{}, fmt.Errorf("%w: person %s not found", dto.ErrNotFound, id)
 		}
 		return dto.PersonResponse{}, err
@@ -145,14 +144,22 @@ func (a dbAdapter) UpdatePerson(ctx context.Context, id string, in dto.PersonUpd
 }
 
 func (a dbAdapter) ListPreferences(ctx context.Context, personID string) ([]dto.PersonPreferenceResponse, error) {
-	prefs, err := a.store.ListPreferences(ctx, personID)
+	var pid domain.PersonID
+	if personID != "" {
+		var err error
+		pid, err = domain.ParsePersonID(personID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	prefs, err := a.store.ListPreferences(ctx, pid)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]dto.PersonPreferenceResponse, 0, len(prefs))
 	for _, p := range prefs {
 		out = append(out, dto.PersonPreferenceResponse{
-			PersonID: p.PersonID, Tag: p.Tag, Sentiment: int(p.Sentiment),
+			PersonID: p.PersonID.String(), Tag: p.Tag, Sentiment: int(p.Sentiment),
 			Confidence: p.Confidence, UpdatedAt: p.UpdatedAt,
 		})
 	}
@@ -169,19 +176,23 @@ func (a dbAdapter) SetPreference(ctx context.Context, in dto.SetPreferenceInput)
 	if in.Confidence < 0 || in.Confidence > 1 {
 		return dto.PersonPreferenceResponse{}, fmt.Errorf("%w: confidence must be in [0, 1]", dto.ErrInvalidPreference)
 	}
+	pid, err := domain.ParsePersonID(in.PersonID)
+	if err != nil {
+		return dto.PersonPreferenceResponse{}, err
+	}
 	if err := a.store.UpsertPreference(ctx, persistence.PersonPreference{
-		PersonID: in.PersonID, Tag: in.Tag, Sentiment: in.Sentiment, Confidence: in.Confidence,
+		PersonID: pid, Tag: in.Tag, Sentiment: in.Sentiment, Confidence: in.Confidence,
 	}); err != nil {
 		return dto.PersonPreferenceResponse{}, err
 	}
-	prefs, err := a.store.ListPreferences(ctx, in.PersonID)
+	prefs, err := a.store.ListPreferences(ctx, pid)
 	if err != nil {
 		return dto.PersonPreferenceResponse{}, err
 	}
 	for _, p := range prefs {
 		if p.Tag == in.Tag {
 			return dto.PersonPreferenceResponse{
-				PersonID: p.PersonID, Tag: p.Tag, Sentiment: int(p.Sentiment),
+				PersonID: p.PersonID.String(), Tag: p.Tag, Sentiment: int(p.Sentiment),
 				Confidence: p.Confidence, UpdatedAt: p.UpdatedAt,
 			}, nil
 		}
@@ -205,7 +216,11 @@ func (a dbAdapter) ListRecipes(ctx context.Context) ([]dto.RecipeRefResponse, er
 }
 
 func (a dbAdapter) GetRecipe(ctx context.Context, id string) (dto.RecipeRefResponse, error) {
-	r, err := a.store.GetRecipeRef(ctx, id)
+	refID, err := domain.ParseRecipeRefID(id)
+	if err != nil {
+		return dto.RecipeRefResponse{}, ErrNotFound
+	}
+	r, err := a.store.GetRecipeRef(ctx, refID)
 	if err != nil {
 		return dto.RecipeRefResponse{}, ErrNotFound
 	}
@@ -220,7 +235,7 @@ func (a dbAdapter) Suggest(ctx context.Context) ([]dto.InspirationSuggestion, er
 	if err != nil {
 		return nil, err
 	}
-	pantrySet := make(map[string]bool, len(pantryIDs))
+	pantrySet := make(map[domain.IngredientID]bool, len(pantryIDs))
 	for _, id := range pantryIDs {
 		pantrySet[id] = true
 	}
@@ -228,17 +243,17 @@ func (a dbAdapter) Suggest(ctx context.Context) ([]dto.InspirationSuggestion, er
 	if err != nil {
 		return nil, err
 	}
-	refByID := make(map[string]persistence.RecipeRef, len(refs))
+	refByID := make(map[domain.RecipeRefID]persistence.RecipeRef, len(refs))
 	for _, r := range refs {
-		refByID[r.MealieRecipeID] = r
+		refByID[r.ID] = r
 	}
 	lines, err := a.store.ListAllRecipeIngredients(ctx)
 	if err != nil {
 		return nil, err
 	}
-	byRecipe := make(map[string][]string)
+	byRecipe := make(map[domain.RecipeRefID][]domain.IngredientID)
 	for _, line := range lines {
-		byRecipe[line.MealieRecipeID] = append(byRecipe[line.MealieRecipeID], line.IngredientID)
+		byRecipe[line.RecipeRefID] = append(byRecipe[line.RecipeRefID], line.IngredientID)
 	}
 	var out []dto.InspirationSuggestion
 	for recipeID, ingredientIDs := range byRecipe {
@@ -250,9 +265,9 @@ func (a dbAdapter) Suggest(ctx context.Context) ([]dto.InspirationSuggestion, er
 		missing := make([]string, 0, len(ingredientIDs))
 		for _, id := range ingredientIDs {
 			if pantrySet[id] {
-				matched = append(matched, id)
+				matched = append(matched, id.String())
 			} else {
-				missing = append(missing, id)
+				missing = append(missing, id.String())
 			}
 		}
 		if len(matched) == 0 {
@@ -263,7 +278,7 @@ func (a dbAdapter) Suggest(ctx context.Context) ([]dto.InspirationSuggestion, er
 			ratio = float64(len(matched)) / float64(len(ingredientIDs))
 		}
 		out = append(out, dto.InspirationSuggestion{
-			MealieRecipeID: recipeID, Title: ref.Title, Tags: ref.Tags,
+			MealieRecipeID: ref.MealieRecipeID, Title: ref.Title, Tags: ref.Tags,
 			Effort: int(ref.Effort), TotalIngredients: len(ingredientIDs),
 			MatchedIngredientIDs: matched, MissingIngredientIDs: missing, MatchRatio: ratio,
 		})
@@ -277,8 +292,16 @@ func (a dbAdapter) Suggest(ctx context.Context) ([]dto.InspirationSuggestion, er
 	return out, nil
 }
 
-func (a dbAdapter) GetMeal(ctx context.Context, id int64) (dto.MealEventResponse, error) {
-	event, err := a.store.GetMealEvent(ctx, id)
+func (a dbAdapter) GetMeal(ctx context.Context, id string) (dto.MealEventResponse, error) {
+	eventID, err := domain.ParseMealEventID(id)
+	if err != nil {
+		return dto.MealEventResponse{}, err
+	}
+	event, err := a.store.GetMealEvent(ctx, eventID)
+	if err != nil {
+		return dto.MealEventResponse{}, err
+	}
+	ref, err := a.store.GetRecipeRef(ctx, event.RecipeRefID)
 	if err != nil {
 		return dto.MealEventResponse{}, err
 	}
@@ -287,36 +310,48 @@ func (a dbAdapter) GetMeal(ctx context.Context, id int64) (dto.MealEventResponse
 		return dto.MealEventResponse{}, err
 	}
 	out := dto.MealEventResponse{
-		ID: event.ID, MealieRecipeID: event.MealieRecipeID,
+		ID: event.ID.String(), MealieRecipeID: ref.MealieRecipeID,
 		ServedOn:  event.ServedOn.Format("2006-01-02"),
 		CreatedAt: event.CreatedAt,
 		Reactions: make([]dto.MealReactionResponse, 0, len(rxns)),
 	}
 	for _, r := range rxns {
-		out.Reactions = append(out.Reactions, dto.MealReactionResponse{PersonID: r.PersonID, Sentiment: r.Sentiment})
+		out.Reactions = append(out.Reactions, dto.MealReactionResponse{PersonID: r.PersonID.String(), Sentiment: r.Sentiment})
 	}
 	return out, nil
 }
 
 func (a dbAdapter) ListMeals(ctx context.Context, mealieRecipeID, servedOn string) ([]dto.MealEventResponse, error) {
-	events, err := a.store.ListMealEvents(ctx, mealieRecipeID, servedOn)
+	var recipeRefID domain.RecipeRefID
+	if mealieRecipeID != "" {
+		ref, err := a.store.GetRecipeRefByMealieID(ctx, mealieRecipeID)
+		if err != nil {
+			return nil, err
+		}
+		recipeRefID = ref.ID
+	}
+	events, err := a.store.ListMealEvents(ctx, recipeRefID, servedOn)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]dto.MealEventResponse, 0, len(events))
 	for _, event := range events {
+		ref, err := a.store.GetRecipeRef(ctx, event.RecipeRefID)
+		if err != nil {
+			return nil, err
+		}
 		rxns, err := a.store.ListMealReactions(ctx, event.ID)
 		if err != nil {
 			return nil, err
 		}
 		resp := dto.MealEventResponse{
-			ID: event.ID, MealieRecipeID: event.MealieRecipeID,
+			ID: event.ID.String(), MealieRecipeID: ref.MealieRecipeID,
 			ServedOn:  event.ServedOn.Format("2006-01-02"),
 			CreatedAt: event.CreatedAt,
 			Reactions: make([]dto.MealReactionResponse, 0, len(rxns)),
 		}
 		for _, r := range rxns {
-			resp.Reactions = append(resp.Reactions, dto.MealReactionResponse{PersonID: r.PersonID, Sentiment: r.Sentiment})
+			resp.Reactions = append(resp.Reactions, dto.MealReactionResponse{PersonID: r.PersonID.String(), Sentiment: r.Sentiment})
 		}
 		out = append(out, resp)
 	}
@@ -328,13 +363,21 @@ func (a dbAdapter) CreateMealEvent(ctx context.Context, in dto.MealEventNew) (dt
 	if err != nil {
 		return dto.MealEventResponse{}, err
 	}
-	eventID, err := a.store.CreateMealEvent(ctx, in.MealieRecipeID, servedOn, nil, nil)
+	ref, err := a.store.GetRecipeRefByMealieID(ctx, in.MealieRecipeID)
+	if err != nil {
+		return dto.MealEventResponse{}, err
+	}
+	eventID, err := a.store.CreateMealEvent(ctx, ref.ID, servedOn, nil, nil)
 	if err != nil {
 		return dto.MealEventResponse{}, err
 	}
 	for _, rx := range in.Reactions {
+		pid, perr := domain.ParsePersonID(rx.PersonID)
+		if perr != nil {
+			return dto.MealEventResponse{}, perr
+		}
 		if err := a.store.AddMealReaction(ctx, persistence.MealReaction{
-			MealEventID: eventID, PersonID: rx.PersonID, Sentiment: rx.Sentiment,
+			MealEventID: eventID, PersonID: pid, Sentiment: rx.Sentiment,
 		}); err != nil {
 			return dto.MealEventResponse{}, err
 		}
@@ -344,12 +387,12 @@ func (a dbAdapter) CreateMealEvent(ctx context.Context, in dto.MealEventNew) (dt
 		return dto.MealEventResponse{}, err
 	}
 	out := dto.MealEventResponse{
-		ID: eventID, MealieRecipeID: in.MealieRecipeID, ServedOn: in.ServedOn,
+		ID: eventID.String(), MealieRecipeID: in.MealieRecipeID, ServedOn: in.ServedOn,
 		CreatedAt: time.Now(), Reactions: make([]dto.MealReactionResponse, 0, len(rxns)),
 	}
 	for _, r := range rxns {
 		out.Reactions = append(out.Reactions, dto.MealReactionResponse{
-			PersonID: r.PersonID, Sentiment: r.Sentiment,
+			PersonID: r.PersonID.String(), Sentiment: r.Sentiment,
 		})
 	}
 	return out, nil
@@ -362,39 +405,64 @@ func (a dbAdapter) ListLocations(ctx context.Context, householdID string) ([]dto
 	}
 	out := make([]dto.PantryLocation, 0, len(locs))
 	for _, l := range locs {
+		var parent *string
+		if l.ParentLocationID != nil {
+			p := l.ParentLocationID.String()
+			parent = &p
+		}
 		out = append(out, dto.PantryLocation{
-			ID: l.ID, HouseholdID: l.HouseholdID, Name: l.Name,
-			LocationType: l.LocationType, ParentLocationID: l.ParentLocationID,
+			ID: l.ID.String(), HouseholdID: l.HouseholdID.String(), Name: l.Name,
+			LocationType: l.LocationType, ParentLocationID: parent,
 		})
 	}
 	return out, nil
 }
 
 func (a dbAdapter) CreateLocation(ctx context.Context, in dto.PantryLocationNew) (dto.PantryLocation, error) {
-	id := "loc-" + strings.ReplaceAll(time.Now().Format("20060102150405.000000"), ".", "")
+	hhID, err := domain.ParseHouseholdID(in.HouseholdID)
+	if err != nil {
+		return dto.PantryLocation{}, err
+	}
+	var parent *domain.InventoryLocationID
+	if in.ParentLocationID != nil && *in.ParentLocationID != "" {
+		p, perr := domain.ParseInventoryLocationID(*in.ParentLocationID)
+		if perr != nil {
+			return dto.PantryLocation{}, perr
+		}
+		parent = &p
+	}
 	l := persistence.InventoryLocation{
-		ID: id, HouseholdID: in.HouseholdID, Name: in.Name,
-		LocationType: in.LocationType, ParentLocationID: in.ParentLocationID,
+		ID: domain.NewInventoryLocationID(), HouseholdID: hhID, Name: in.Name,
+		LocationType: in.LocationType, ParentLocationID: parent,
 	}
 	if err := a.store.CreateInventoryLocation(ctx, l); err != nil {
 		return dto.PantryLocation{}, err
 	}
 	return dto.PantryLocation{
-		ID: id, HouseholdID: in.HouseholdID, Name: in.Name,
+		ID: l.ID.String(), HouseholdID: in.HouseholdID, Name: in.Name,
 		LocationType: in.LocationType, ParentLocationID: in.ParentLocationID,
 	}, nil
 }
 
 func (a dbAdapter) ListLots(ctx context.Context, locationID string) ([]dto.PantryLot, error) {
-	lots, err := a.store.ListLotsUnderLocation(ctx, locationID)
+	locID, err := domain.ParseInventoryLocationID(locationID)
+	if err != nil {
+		return nil, err
+	}
+	lots, err := a.store.ListLotsUnderLocation(ctx, locID)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]dto.PantryLot, 0, len(lots))
 	for _, l := range lots {
+		var productID *string
+		if l.ProductID != nil {
+			p := l.ProductID.String()
+			productID = &p
+		}
 		out = append(out, dto.PantryLot{
-			ID: l.ID, IngredientID: l.IngredientID, ProductID: l.ProductID,
-			LocationID: l.LocationID, Quantity: l.Quantity, Unit: l.Unit,
+			ID: l.ID.String(), IngredientID: l.IngredientID.String(), ProductID: productID,
+			LocationID: l.LocationID.String(), Quantity: l.Quantity, Unit: l.Unit,
 			Confidence: string(l.Confidence), CreatedAt: l.CreatedAt,
 		})
 	}
@@ -410,7 +478,20 @@ func (a dbAdapter) Purchase(ctx context.Context, in dto.PantryPurchaseInput) (dt
 		}
 		bestBefore = &bb
 	}
-	lotID, err := a.store.RecordPurchase(ctx, in.IngredientID, in.ProductID, in.LocationID, in.Quantity, in.Unit, bestBefore, in.Source)
+	ingredientID := domain.IngredientIDForName(in.IngredientID)
+	locID, err := domain.ParseInventoryLocationID(in.LocationID)
+	if err != nil {
+		return dto.PantryLot{}, err
+	}
+	var productID *domain.ProductID
+	if in.ProductID != nil && *in.ProductID != "" {
+		p, perr := domain.ParseProductID(*in.ProductID)
+		if perr != nil {
+			return dto.PantryLot{}, perr
+		}
+		productID = &p
+	}
+	lotID, err := a.store.RecordPurchase(ctx, ingredientID, productID, locID, in.Quantity, in.Unit, bestBefore, in.Source)
 	if err != nil {
 		return dto.PantryLot{}, err
 	}
@@ -418,15 +499,24 @@ func (a dbAdapter) Purchase(ctx context.Context, in dto.PantryPurchaseInput) (dt
 	if err != nil {
 		return dto.PantryLot{}, err
 	}
+	var lotProductID *string
+	if lot.ProductID != nil {
+		p := lot.ProductID.String()
+		lotProductID = &p
+	}
 	return dto.PantryLot{
-		ID: lot.ID, IngredientID: lot.IngredientID, ProductID: lot.ProductID,
-		LocationID: lot.LocationID, Quantity: lot.Quantity, Unit: lot.Unit,
+		ID: lot.ID.String(), IngredientID: lot.IngredientID.String(), ProductID: lotProductID,
+		LocationID: lot.LocationID.String(), Quantity: lot.Quantity, Unit: lot.Unit,
 		Confidence: string(lot.Confidence), CreatedAt: lot.CreatedAt,
 	}, nil
 }
 
-func (a dbAdapter) Consume(ctx context.Context, lotID int64, in dto.PantryConsumeInput) error {
-	return a.store.RecordConsume(ctx, lotID, in.Quantity, in.Estimated, in.Source)
+func (a dbAdapter) Consume(ctx context.Context, lotID string, in dto.PantryConsumeInput) error {
+	id, err := domain.ParseInventoryLotID(lotID)
+	if err != nil {
+		return err
+	}
+	return a.store.RecordConsume(ctx, id, in.Quantity, in.Estimated, in.Source)
 }
 
 func (a dbAdapter) ListExpiring(ctx context.Context, within time.Duration) ([]dto.PantryLot, error) {
@@ -443,9 +533,14 @@ func (a dbAdapter) ListExpiring(ctx context.Context, within time.Duration) ([]dt
 		if l.OpenedAt != nil {
 			openedAt = *l.OpenedAt
 		}
+		var productID *string
+		if l.ProductID != nil {
+			p := l.ProductID.String()
+			productID = &p
+		}
 		out = append(out, dto.PantryLot{
-			ID: l.ID, IngredientID: l.IngredientID, ProductID: l.ProductID,
-			LocationID: l.LocationID, Quantity: l.Quantity, Unit: l.Unit,
+			ID: l.ID.String(), IngredientID: l.IngredientID.String(), ProductID: productID,
+			LocationID: l.LocationID.String(), Quantity: l.Quantity, Unit: l.Unit,
 			Confidence: string(l.Confidence), BestBefore: bestBefore,
 			OpenedAt: openedAt, CreatedAt: l.CreatedAt, UpdatedAt: l.UpdatedAt,
 		})
@@ -473,7 +568,7 @@ func (a *testAdapter) GetTonight(ctx context.Context) (dto.TonightView, error) {
 	}
 	for _, r := range meal.Reactions {
 		out.Reactions = append(out.Reactions, dto.MealReactionResponse{
-			PersonID: r.PersonID, Sentiment: r.Sentiment,
+			PersonID: r.PersonID.String(), Sentiment: r.Sentiment,
 		})
 	}
 	return out, nil
@@ -489,7 +584,7 @@ func (a *testAdapter) CreateReaction(ctx context.Context, in ReactionNew) (dto.M
 	if err != nil {
 		return dto.MealReactionResponse{}, err
 	}
-	eventID, err := a.db.GetOrCreateMealEventForToday(ctx, meal.MealieRecipeID, today)
+	eventID, err := a.db.GetOrCreateMealEventForToday(ctx, meal.RecipeRefID, today)
 	if err != nil {
 		return dto.MealReactionResponse{}, err
 	}
@@ -497,7 +592,7 @@ func (a *testAdapter) CreateReaction(ctx context.Context, in ReactionNew) (dto.M
 	if err != nil {
 		return dto.MealReactionResponse{}, err
 	}
-	return dto.MealReactionResponse{PersonID: r.PersonID, Sentiment: r.Sentiment}, nil
+	return dto.MealReactionResponse{PersonID: r.PersonID.String(), Sentiment: r.Sentiment}, nil
 }
 
 func (a *testAdapter) RunPlan(ctx context.Context, in PlanRunInput) (PlanRunResult, error) {
@@ -515,7 +610,7 @@ func (a *testAdapter) ListPlans(ctx context.Context) ([]PlanResponse, error) {
 	}
 	out := make([]PlanResponse, 0, len(plans))
 	for _, p := range plans {
-		out = append(out, PlanResponse{ID: int(p.ID), WeekStart: types.Date{Time: p.WeekStart}, Status: p.Status, CreatedAt: p.CreatedAt})
+		out = append(out, PlanResponse{ID: p.ID.String(), WeekStart: types.Date{Time: p.WeekStart}, Status: p.Status, CreatedAt: p.CreatedAt})
 	}
 	return out, nil
 }
@@ -529,91 +624,128 @@ func (a *testAdapter) CreatePlan(ctx context.Context, weekStart time.Time) (Plan
 	if err != nil {
 		return PlanResponse{}, err
 	}
-	return PlanResponse{ID: int(p.ID), WeekStart: types.Date{Time: p.WeekStart}, Status: p.Status, CreatedAt: p.CreatedAt}, nil
+	return PlanResponse{ID: p.ID.String(), WeekStart: types.Date{Time: p.WeekStart}, Status: p.Status, CreatedAt: p.CreatedAt}, nil
 }
 
-func (a *testAdapter) GetPlan(ctx context.Context, planID int64) (PlanView, error) {
-	plan, err := a.db.GetMealPlan(ctx, planID)
+func (a *testAdapter) GetPlan(ctx context.Context, planID string) (PlanView, error) {
+	parsedPlanID, err := domain.ParseMealPlanID(planID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		return PlanView{}, ErrNotFound
+	}
+	plan, err := a.db.GetMealPlan(ctx, parsedPlanID)
+	if err != nil {
+		if errors.Is(err, persistence.ErrNoRows) {
 			return PlanView{}, ErrNotFound
 		}
 		return PlanView{}, err
 	}
-	candidates, _ := a.db.ListCandidates(ctx, planID)
-	decisions, _ := a.db.ListDecisions(ctx, planID)
+	candidates, _ := a.db.ListCandidates(ctx, parsedPlanID)
+	decisions, _ := a.db.ListDecisions(ctx, parsedPlanID)
 	view := PlanView{
-		Plan: PlanResponse{ID: int(plan.ID), WeekStart: types.Date{Time: plan.WeekStart}, Status: plan.Status, CreatedAt: plan.CreatedAt},
+		Plan: PlanResponse{ID: plan.ID.String(), WeekStart: types.Date{Time: plan.WeekStart}, Status: plan.Status, CreatedAt: plan.CreatedAt},
 		Candidates: make([]PlanCandidateResponse, 0, len(candidates)),
 	}
 	for _, c := range candidates {
 		view.Candidates = append(view.Candidates, PlanCandidateResponse{
-			ID: int(c.ID), SlotDate: types.Date{Time: c.SlotDate}, Rank: c.Rank, Score: c.Score,
+			ID: c.ID.String(), SlotDate: types.Date{Time: c.SlotDate}, Rank: c.Rank, Score: c.Score,
 			Breakdown: c.Breakdown, Feasible: c.Feasible,
 		})
 	}
 	if len(decisions) > 0 {
 		ds := make([]PlanDecisionResponse, 0, len(decisions))
 		for _, d := range decisions {
-			ds = append(ds, PlanDecisionResponse{PlanID: int(d.PlanID), SlotDate: types.Date{Time: d.SlotDate}, MealieRecipeID: d.MealieRecipeID, DecidedAt: &d.DecidedAt})
+			ref, _ := a.db.GetRecipeRef(ctx, d.RecipeRefID)
+			var mealieRecipeID string
+			if ref.MealieRecipeID != "" {
+				mealieRecipeID = ref.MealieRecipeID
+			}
+			ds = append(ds, PlanDecisionResponse{PlanID: d.PlanID.String(), SlotDate: types.Date{Time: d.SlotDate}, MealieRecipeID: mealieRecipeID, DecidedAt: &d.DecidedAt})
 		}
 		view.Decisions = &ds
 	}
 	return view, nil
 }
 
-func (a *testAdapter) UpdatePlan(ctx context.Context, planID int64, status string) (PlanResponse, error) {
-	if err := a.db.SetMealPlanStatus(ctx, planID, status); err != nil {
+func (a *testAdapter) UpdatePlan(ctx context.Context, planID string, status string) (PlanResponse, error) {
+	parsedPlanID, err := domain.ParseMealPlanID(planID)
+	if err != nil {
+		return PlanResponse{}, ErrNotFound
+	}
+	if err := a.db.SetMealPlanStatus(ctx, parsedPlanID, status); err != nil {
 		if strings.Contains(err.Error(), "meal_plan not found") {
 			return PlanResponse{}, ErrNotFound
 		}
 		return PlanResponse{}, err
 	}
-	p, err := a.db.GetMealPlan(ctx, planID)
+	p, err := a.db.GetMealPlan(ctx, parsedPlanID)
 	if err != nil {
 		return PlanResponse{}, err
 	}
-	return PlanResponse{ID: int(p.ID), WeekStart: types.Date{Time: p.WeekStart}, Status: p.Status, CreatedAt: p.CreatedAt}, nil
+	return PlanResponse{ID: p.ID.String(), WeekStart: types.Date{Time: p.WeekStart}, Status: p.Status, CreatedAt: p.CreatedAt}, nil
 }
 
-func (a *testAdapter) SetDecisions(ctx context.Context, planID int64, decisions []PlanDecisionInput) error {
+func (a *testAdapter) SetDecisions(ctx context.Context, planID string, decisions []PlanDecisionInput) error {
+	parsedPlanID, err := domain.ParseMealPlanID(planID)
+	if err != nil {
+		return err
+	}
 	for _, d := range decisions {
-		if err := a.db.SetDecision(ctx, persistence.MealPlanDecision{PlanID: planID, SlotDate: d.SlotDate.Time, MealieRecipeID: d.MealieRecipeID}); err != nil {
+		ref, err := a.db.GetRecipeRefByMealieID(ctx, d.MealieRecipeID)
+		if err != nil {
+			return err
+		}
+		if err := a.db.SetDecision(ctx, persistence.MealPlanDecision{PlanID: parsedPlanID, SlotDate: d.SlotDate.Time, RecipeRefID: ref.ID}); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (a *testAdapter) ListCandidates(ctx context.Context, planID int64) ([]PlanCandidateResponse, error) {
-	candidates, err := a.db.ListCandidates(ctx, planID)
+func (a *testAdapter) ListCandidates(ctx context.Context, planID string) ([]PlanCandidateResponse, error) {
+	parsedPlanID, err := domain.ParseMealPlanID(planID)
+	if err != nil {
+		return nil, err
+	}
+	candidates, err := a.db.ListCandidates(ctx, parsedPlanID)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]PlanCandidateResponse, 0, len(candidates))
 	for _, c := range candidates {
-		out = append(out, PlanCandidateResponse{ID: int(c.ID), SlotDate: types.Date{Time: c.SlotDate}, Rank: c.Rank, Score: c.Score, Breakdown: c.Breakdown, Feasible: c.Feasible})
+		out = append(out, PlanCandidateResponse{ID: c.ID.String(), SlotDate: types.Date{Time: c.SlotDate}, Rank: c.Rank, Score: c.Score, Breakdown: c.Breakdown, Feasible: c.Feasible})
 	}
 	return out, nil
 }
 
 func (a *testAdapter) InsertCandidates(ctx context.Context, candidates []PlanCandidateInput) error {
 	for _, c := range candidates {
-		if err := a.db.InsertCandidate(ctx, persistence.MealPlanCandidate{PlanID: c.PlanID, SlotDate: c.SlotDate, MealieRecipeID: c.MealieRecipeID, Score: c.Score, Breakdown: c.Breakdown, Feasible: c.Feasible, Rank: c.Rank}); err != nil {
+		parsedPlanID, err := domain.ParseMealPlanID(c.PlanID)
+		if err != nil {
+			return err
+		}
+		ref, err := a.db.GetRecipeRefByMealieID(ctx, c.MealieRecipeID)
+		if err != nil {
+			return err
+		}
+		if err := a.db.InsertCandidate(ctx, persistence.MealPlanCandidate{PlanID: parsedPlanID, SlotDate: c.SlotDate, RecipeRefID: ref.ID, Score: c.Score, Breakdown: c.Breakdown, Feasible: c.Feasible, Rank: c.Rank}); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (a *testAdapter) ListShoppingRequirements(ctx context.Context, planID int64) ([]ShoppingRequirementResponse, error) {
-	reqs, err := a.db.ListShoppingRequirements(ctx, planID)
+func (a *testAdapter) ListShoppingRequirements(ctx context.Context, planID string) ([]ShoppingRequirementResponse, error) {
+	parsedPlanID, err := domain.ParseMealPlanID(planID)
+	if err != nil {
+		return nil, err
+	}
+	reqs, err := a.db.ListShoppingRequirements(ctx, parsedPlanID)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]ShoppingRequirementResponse, 0, len(reqs))
 	for _, r := range reqs {
-		out = append(out, ShoppingRequirementResponse{ID: int(r.ID), IngredientID: r.IngredientID, Quantity: r.Quantity, Unit: r.Unit, AcceptableForms: r.AcceptableForms, PreferredForm: r.PreferredForm})
+		out = append(out, ShoppingRequirementResponse{ID: r.ID.String(), IngredientID: r.IngredientID.String(), Quantity: r.Quantity, Unit: r.Unit, AcceptableForms: r.AcceptableForms, PreferredForm: r.PreferredForm})
 	}
 	return out, nil
 }
@@ -641,7 +773,7 @@ func (a *testAdapter) ListPlanningConstraints(ctx context.Context) ([]PlanningCo
 	}
 	out := make([]PlanningConstraintResponse, 0, len(constraints))
 	for _, c := range constraints {
-		out = append(out, PlanningConstraintResponse{ID: int(c.ID), Kind: c.Kind, Value: c.Value, Active: c.Active})
+		out = append(out, PlanningConstraintResponse{ID: c.ID, Kind: c.Kind, Value: c.Value, Active: c.Active})
 	}
 	return out, nil
 }
@@ -651,7 +783,7 @@ func (a *testAdapter) CreatePlanningConstraint(ctx context.Context, in PlanningC
 	if err != nil {
 		return PlanningConstraintResponse{}, err
 	}
-	return PlanningConstraintResponse{ID: int(id), Kind: in.Kind, Value: in.Value, Active: in.Active}, nil
+	return PlanningConstraintResponse{ID: id, Kind: in.Kind, Value: in.Value, Active: in.Active}, nil
 }
 
 func TestIntegration_TonightNotFound(t *testing.T) {
@@ -886,11 +1018,11 @@ func TestAPI_PlanRoundTrip(t *testing.T) {
 		}
 	}
 	if !planFound {
-		t.Fatalf("created plan %d not found in list of %d plans", plan.ID, len(plans))
+		t.Fatalf("created plan %s not found in list of %d plans", plan.ID, len(plans))
 	}
 
 	// Get plan.
-	rec = serverDoGet(server, "/plans/"+strconv.FormatInt(plan.ID, 10))
+	rec = serverDoGet(server, "/plans/"+plan.ID)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /plans/{id}: status = %d", rec.Code)
 	}
@@ -902,14 +1034,15 @@ func TestAPI_PantryRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	truncateTables(t, store, "household", "inventory_lot", "inventory_location")
 	// inventory_location has an FK to household, so seed one.
-	if err := store.CreateHousehold(ctx, persistence.Household{ID: "h1", Name: "Test Household"}); err != nil {
+	hhID := domain.NewHouseholdID()
+	if err := store.CreateHousehold(ctx, persistence.Household{ID: hhID, Name: "Test Household"}); err != nil {
 		t.Fatalf("CreateHousehold: %v", err)
 	}
 	server := newTestServer(t, store)
 	defer server.Close()
 
 	// Create a location.
-	rec := serverDoPost(server, "/pantry/locations", `{"name":"Kitchen","household_id":"h1"}`)
+	rec := serverDoPost(server, "/pantry/locations", `{"name":"Kitchen","household_id":"`+hhID.String()+`"}`)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("POST /pantry/locations: status = %d, body = %s", rec.Code, rec.Body.String())
 	}

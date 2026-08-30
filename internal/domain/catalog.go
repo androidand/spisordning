@@ -195,7 +195,7 @@ func Substitutable(edges []IngredientSubstitution, from, to string) (IngredientS
 // Ingredient. RetailerProduct/StoreOffer (Epic F) attach a specific retailer SKU
 // and price to a Product; they are out of scope here.
 type Product struct {
-	ID          string
+	ID          ProductID
 	Name        string
 	Brand       string
 	PackageSize string
@@ -204,9 +204,9 @@ type Product struct {
 // NewProduct validates a product's identity: it must have an id and a name. A
 // product may be unmapped (no ProductIngredientMapping) — that is a valid,
 // queryable "flagged for review" state, not an error (invariant 5).
-func NewProduct(id, name, brand, packageSize string) (Product, error) {
-	if id == "" {
-		return Product{}, fmt.Errorf("domain: product requires an id")
+func NewProduct(id ProductID, name, brand, packageSize string) (Product, error) {
+	if id.String() == "00000000-0000-0000-0000-000000000000" {
+		return Product{}, fmt.Errorf("domain: product requires a non-zero id")
 	}
 	if name == "" {
 		return Product{}, fmt.Errorf("domain: product requires a name")

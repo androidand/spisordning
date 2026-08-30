@@ -52,7 +52,7 @@ migration chain is edited in place and must apply cleanly to an empty PostgreSQL
 | Human address | `slug TEXT UNIQUE NOT NULL` alongside the UUID | `person.slug`, `ingredient.slug` |
 | Foreign system | external-reference table `(provider, external_id, <entity>_id)`; no polymorphic `entity_type`/`entity_id` | `ingredient_external_ref` |
 | Pure relationship | composite PK of the parent keys, no surrogate | `meal_participant(meal_event_id, person_id)` |
-| Stable code | small named registry keyed by a human code | `effort_profile(weekday)`, `external_recipe_source` (validated) |
+| Stable code | small named registry keyed by a human code | `effort_profile(weekday)`, `external_recipe_source` (D6) |
 
 Rationale: UUIDv7 gives time-ordered, collision-free, Go-generated identity for high-volume
 entities. Slugs stay on the few entities humans address by name. Foreign systems are never
@@ -128,6 +128,85 @@ ingredient_external_ref (
 
 `provider='mealie'` carries the former `mealie_food_id` values. Real FKs are preserved.
 
+### D6 — `external_recipe_source` stays a stable-code PK
+
+`external_recipe_source` is a small named registry (a handful of rows: `ica`, `koket`, `arls`,
+…), each addressed by a short human code. It has no independent lifecycle beyond "registered or
+not", no high-volume inserts, and no need for time-ordered identity. It therefore follows the
+**stable-code** rule (D1, row 5) — the same rule as `effort_profile(weekday)` — rather than the
+UUIDv7 domain-entity rule.
+
+Decision: **keep `id TEXT` as the primary key** (the stable code, e.g. `'ica'`). Do **not**
+convert to UUIDv7 + slug. Consequences:
+
+- `recipe_import_candidate.source_id` stays `TEXT NOT NULL REFERENCES external_recipe_source(id)`.
+- No Go typed-ID is introduced for this table; `recipeimport.Source.ID` remains a `string`.
+- The table is listed under "F. Stable code (kept)" in the schema diff, alongside
+  `effort_profile`.
+
+Rationale: a UUIDv7 PK + slug would add a surrogate and a redundant slug column for a registry
+that humans and code already address by its short code. The stable code *is* the identity here;
+introducing a UUID would obscure it without benefit. This is the same reasoning that keeps
+`effort_profile` keyed by `weekday`.
+
+### D7 — `favorite` uses a bounded scope discriminator
+
+`favorite` is an explicit, person- or household-scoped preference marker on a recipe. Exactly one
+of `person_id` / `household_id` is non-NULL (enforced by a CHECK). Two candidate shapes were
+considered:
+
+- **(a) Bounded `scope_type`/`scope_id` discriminator** — one table, `scope_type TEXT CHECK IN
+  ('person','household')`, `scope_id UUID`, `mealie_recipe_id TEXT`, PK
+  `(scope_type, scope_id, mealie_recipe_id)`.
+- **(b) Split `person_favorite` + `household_favorite`** — two tables, each with a simple
+  composite PK.
+
+Decision: **(a) bounded discriminator.** Rationale:
+
+- One table keeps the read path simple (a single query for "all favorites for this recipe" across
+  both scopes). Splitting doubles the surface (two tables, two queries, two sets of indexes) for
+  a concept that is fundamentally one: "someone marked this recipe as a favorite."
+- The discriminator is **bounded** (`CHECK IN ('person','household')`), not a generic
+  polymorphic `entity_type`/`entity_id`. This is a mild, documented form of polymorphism that
+  stays within the two scopes the domain actually has. It does not violate the "no generic
+  polymorphic `entity_type`/`entity_id`" rule because the set of scope types is closed and small,
+  and the column is named `scope_type` (not `entity_type`).
+- The recipe reference (`mealie_recipe_id TEXT`) stays transitional until
+  `rebaseline-recipe-domain` rewrites it to a canonical UUID FK. The PK uses the transitional
+  `mealie_recipe_id TEXT` for now; the recipe change will retype it.
+
+Target shape:
+
+```
+favorite (
+    scope_type        TEXT NOT NULL CHECK (scope_type IN ('person','household')),
+    scope_id          UUID NOT NULL,   -- person_id or household_id, per scope_type
+    mealie_recipe_id  TEXT NOT NULL,   -- transitional; canonical in rebaseline-recipe-domain
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (scope_type, scope_id, mealie_recipe_id)
+)
+```
+
+- `scope_id` is a plain `UUID` (not a typed FK) because it references either `person(id)` or
+  `household(id)` depending on `scope_type`. A partial FK or application-layer check enforces
+  referential integrity; a single FK cannot express the XOR.
+- The Go `Favorite` struct gains `ScopeType string` and `ScopeID uuid.UUID`; `PersonID`/
+  `HouseholdID` are derived accessors.
+
+### D8 — Borderline tables confirmed as composite PKs
+
+The four borderline tables are confirmed as composite PKs (no independent identity):
+
+| Table | Target PK | Rationale |
+|---|---|---|
+| `meal_reaction` | `(meal_event_id UUID, person_id UUID)` | One reaction per (meal, person); `sentiment SMALLINT`, `note` (M). No independent lifecycle — a reaction is defined by *who* reacted to *which* meal. |
+| `meal_review` | `(meal_event_id UUID, person_id UUID)` | One considered rating per (meal, person); `rating SMALLINT 1..5`, `note`, `updated_at` (M). Same reasoning as `meal_reaction`. |
+| `retailer_list_binding` | `(shopping_list_id UUID, retailer TEXT)` | One binding per (list, retailer). The sync lifecycle columns (`last_pushed_at`, `last_push_status`, `sync_direction`) are mutable state *on* the binding, not evidence of independent identity. The binding is defined by *which* list is bound to *which* retailer. |
+| `shopping_cart_item` | `(shopping_cart_id UUID, line_no INT)` | Snapshot line for reconciliation; no external references today. A `line_no INT` preserves the cart's line ordering. If remote line IDs appear in a future change, this table can be revisited. |
+
+All four drop their `BIGSERIAL` surrogate. The `UNIQUE` constraints that previously enforced
+one-row-per-parent become the primary key itself.
+
 ## Schema diff (database-review checkpoint)
 
 Current source: `migrations/0001`–`0010` (read in full). Target shapes below. "Id" = canonical
@@ -143,9 +222,13 @@ identity; "Ext" = external identity; "M" = mutable columns; "I" = immutable colu
 | `product` | `id TEXT` | `id UUIDv7` | `id UUID PK`, `slug TEXT NOT NULL UNIQUE`, `name`, `brand`, `package_size`, `created_at` (I) |
 | `inventory_location` | `id TEXT` | `id UUIDv7` | `id UUID PK`, `slug TEXT NOT NULL UNIQUE`, `household_id UUID NOT NULL FK`, `name`, `location_type CHECK`, `parent_location_id UUID FK`, `archived_at` |
 
-`external_recipe_source`: **validate** — leaning stable-code PK (small named registry: `ica`,
-`koket`, `arls`). If kept, `id TEXT` stays the PK (no UUID); `recipe_import_candidate.source_id`
-stays `TEXT`. Decision recorded as a task in this change.
+`external_recipe_source`: **confirmed stable-code PK** (D6). It is a small named registry of
+external recipe sources (`ica`, `koket`, `arls`, …) — a handful of rows, each addressed by a
+short human code, with no independent lifecycle beyond "registered or not". It matches the
+`effort_profile` stable-code rule, not the UUIDv7 domain-entity rule. `id TEXT` stays the PK
+(no UUID, no slug); `recipe_import_candidate.source_id` stays `TEXT NOT NULL REFERENCES
+external_recipe_source(id)`. The Go `Source.ID` is already a `string` (the stable code), so no
+Go type change is needed for this table.
 
 ### B. BIGSERIAL to UUIDv7 (independent entities)
 
@@ -173,15 +256,15 @@ stays `TEXT`. Decision recorded as a task in this change.
 | `meal_participant` | `id BIGSERIAL` + `UNIQUE(meal_event_id, person_id)` | `(meal_event_id UUID, person_id UUID)` | attendance; one row per (meal, person); no independent lifecycle |
 | `recipe_import_candidate_ingredient` | `id BIGSERIAL` + `UNIQUE(candidate_id, line_no)` | `(candidate_id UUID, line_no INT)` | ordered lines of a candidate; no independent lifecycle |
 
-### D. Borderline tables (re-review; decision recorded per table)
+### D. Borderline tables (confirmed composite PKs, D8)
 
-| Table | Current | Leaning target | Open question |
+| Table | Current | Target PK | Notes |
 |---|---|---|---|
-| `meal_reaction` | `id BIGSERIAL` + `UNIQUE(meal_event_id, person_id)` | composite `(meal_event_id UUID, person_id UUID)` | one reaction per (meal, person); `sentiment SMALLINT`, `note` (M). Confirm no independent identity needed. |
-| `meal_review` | `id BIGSERIAL` + `UNIQUE(meal_event_id, person_id)` | composite `(meal_event_id UUID, person_id UUID)` | considered rating, one per (meal, person); `rating SMALLINT 1..5`, `note`, `updated_at` (M). Confirm. |
-| `retailer_list_binding` | `id BIGSERIAL` + `UNIQUE(shopping_list_id, retailer)` | composite `(shopping_list_id UUID, retailer TEXT)` | has sync lifecycle (`last_pushed_at`, `last_push_status`, `sync_direction`) but one per (list, retailer). Confirm composite vs UUID. |
-| `shopping_cart_item` | `id BIGSERIAL` | composite `(shopping_cart_id UUID, line_no INT)` | snapshot line for reconciliation; no external references today. Confirm vs UUID if remote line IDs appear. |
-| `favorite` | `id BIGSERIAL` + `UNIQUE(person_id, recipe)` + `UNIQUE(household_id, recipe)` + CHECK | composite on (scope, recipe) | person-XOR-household scoping. Two candidate shapes: (a) bounded `scope_type`/`scope_id` discriminator + recipe ref, PK `(scope_type, scope_id, recipe_ref)`; (b) split `person_favorite` + `household_favorite`. Recipe ref moves to canonical in recipe change. Decide shape here; wire recipe ref in recipe change. |
+| `meal_reaction` | `id BIGSERIAL` + `UNIQUE(meal_event_id, person_id)` | `(meal_event_id UUID, person_id UUID)` | `sentiment SMALLINT`, `note` (M). Confirmed composite (D8). |
+| `meal_review` | `id BIGSERIAL` + `UNIQUE(meal_event_id, person_id)` | `(meal_event_id UUID, person_id UUID)` | `rating SMALLINT 1..5`, `note`, `updated_at` (M). Confirmed composite (D8). |
+| `retailer_list_binding` | `id BIGSERIAL` + `UNIQUE(shopping_list_id, retailer)` | `(shopping_list_id UUID, retailer TEXT)` | `last_pushed_at`, `last_push_status`, `sync_direction` (M). Confirmed composite (D8). |
+| `shopping_cart_item` | `id BIGSERIAL` | `(shopping_cart_id UUID, line_no INT)` | `retailer_product_id TEXT`, `quantity numeric(12,3)`, `unit`, `resolved_price` → minor+currency. Confirmed composite (D8). |
+| `favorite` | `id BIGSERIAL` + XOR CHECK | `(scope_type TEXT, scope_id UUID, mealie_recipe_id TEXT)` | Bounded discriminator (D7). `scope_type CHECK IN ('person','household')`; `mealie_recipe_id` transitional. |
 
 ### E. Composite PKs (already correct — kept)
 
@@ -196,6 +279,7 @@ stays `TEXT`. Decision recorded as a task in this change.
 | Table | PK | Change |
 |---|---|---|
 | `effort_profile` | `weekday SMALLINT (0-6)` | none (stable code) |
+| `external_recipe_source` | `id TEXT` (the stable code, e.g. `'ica'`) | none (stable code, D6); `recipe_import_candidate.source_id` stays `TEXT` |
 
 ### G. Foreign-key retypes (consequence of A–E)
 
@@ -228,7 +312,10 @@ All `*_id` FK columns that reference a converted PK are retyped `TEXT`/`BIGINT` 
 
 ## Open Questions
 
-1. `external_recipe_source`: keep stable-code PK or convert to UUIDv7 + slug? (leaning stable code)
-2. `favorite`: bounded discriminator vs split tables?
-3. Confirm `meal_reaction`, `meal_review`, `retailer_list_binding`, `shopping_cart_item` as
-   composite (no independent identity).
+1. ~~`external_recipe_source`: keep stable-code PK or convert to UUIDv7 + slug?~~ **Resolved
+   (D6): keep the stable-code PK.** It is a small named registry, not a domain entity.
+2. ~~`favorite`: bounded discriminator vs split tables?~~ **Resolved (D7): bounded
+   `scope_type`/`scope_id` discriminator.** One table, `scope_type CHECK IN ('person','household')`,
+   `scope_id UUID`, PK `(scope_type, scope_id, mealie_recipe_id)`.
+3. ~~Confirm `meal_reaction`, `meal_review`, `retailer_list_binding`, `shopping_cart_item` as
+   composite (no independent identity).~~ **Resolved (D8): all four confirmed as composite PKs.**

@@ -127,13 +127,13 @@ func TestSubstitutableIsDirectional(t *testing.T) {
 }
 
 func TestNewProduct(t *testing.T) {
-	if _, err := NewProduct("p1", "Garant Kycklingfilé 900g", "Garant", "900g"); err != nil {
+	if _, err := NewProduct(NewProductID(), "Garant Kycklingfilé 900g", "Garant", "900g"); err != nil {
 		t.Errorf("NewProduct: %v", err)
 	}
-	if _, err := NewProduct("", "x", "", ""); err == nil {
+	if _, err := NewProduct(ProductID{}, "x", "", ""); err == nil {
 		t.Error("expected an error for a missing product id")
 	}
-	if _, err := NewProduct("p1", "", "", ""); err == nil {
+	if _, err := NewProduct(NewProductID(), "", "", ""); err == nil {
 		t.Error("expected an error for a missing product name")
 	}
 }

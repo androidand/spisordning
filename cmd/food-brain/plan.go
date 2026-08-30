@@ -276,7 +276,8 @@ func RunPlan(ctx context.Context, in RunPlanInput) (RunPlanResult, error) {
 				fmt.Fprintf(os.Stderr, "  ⚠ bad EAN %q: %v (skipped)\n", ean, nerr)
 				continue
 			}
-			if err := store.UpsertProductIdentifier(ctx, ean, gtin); err != nil {
+			productID := domain.NewProductID()
+			if err := store.UpsertProductIdentifier(ctx, productID, gtin); err != nil {
 				fmt.Fprintf(os.Stderr, "  ⚠ upsert product_identifier for %s: %v\n", gtin, err)
 				continue
 			}

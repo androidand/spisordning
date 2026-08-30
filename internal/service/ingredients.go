@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/androidand/spisordning/internal/domain"
 	"github.com/androidand/spisordning/internal/dto"
 	"github.com/androidand/spisordning/internal/ingredients"
 	"github.com/androidand/spisordning/internal/persistence"
@@ -139,9 +140,13 @@ func (s *Ingredients) SearchMatpriskollen(ctx context.Context, query string) ([]
 }
 
 func (s *Ingredients) ResolveMapping(ctx context.Context, mealieFoodID string, in dto.IngredientMappingResolve) (dto.IngredientMapping, error) {
+	ingredientID, err := domain.ParseIngredientID(in.IngredientID)
+	if err != nil {
+		return dto.IngredientMapping{}, fmt.Errorf("service: resolve mapping: %w", err)
+	}
 	m := persistence.IngredientMapping{
 		MealieFoodID: mealieFoodID,
-		IngredientID: in.IngredientID,
+		IngredientID: ingredientID,
 		DefaultForm:  ptrToString(in.PreferredForm),
 		NeedsReview:  false,
 	}
@@ -149,7 +154,7 @@ func (s *Ingredients) ResolveMapping(ctx context.Context, mealieFoodID string, i
 		return dto.IngredientMapping{}, fmt.Errorf("service: resolve mapping: %w", err)
 	}
 	return dto.IngredientMapping{
-		MealieFoodID: m.MealieFoodID, IngredientID: m.IngredientID,
+		MealieFoodID: m.MealieFoodID, IngredientID: m.IngredientID.String(),
 		NeedsReview: m.NeedsReview, UpdatedAt: m.UpdatedAt,
 	}, nil
 }
@@ -160,7 +165,7 @@ func (s *Ingredients) GetMapping(ctx context.Context, mealieFoodID string) (dto.
 		return dto.IngredientMapping{}, fmt.Errorf("service: get mapping: %w", err)
 	}
 	return dto.IngredientMapping{
-		MealieFoodID: m.MealieFoodID, IngredientID: m.IngredientID,
+		MealieFoodID: m.MealieFoodID, IngredientID: m.IngredientID.String(),
 		NeedsReview: m.NeedsReview, UpdatedAt: m.UpdatedAt,
 	}, nil
 }

@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/androidand/spisordning/internal/mcptools"
@@ -16,13 +18,15 @@ import (
 type fakeShoppingList struct {
 	calls  int
 	last   mcptools.CreateShoppingListInput
-	nextID int64
+	nextID string
 }
 
 func (f *fakeShoppingList) CreateShoppingList(_ context.Context, in mcptools.CreateShoppingListInput) (mcptools.CreateShoppingListResult, error) {
 	f.calls++
 	f.last = in
-	f.nextID++
+	if f.nextID == "" {
+		f.nextID = uuid.New().String()
+	}
 	return mcptools.CreateShoppingListResult{
 		ListID: f.nextID,
 		Name:   in.Name,
@@ -112,7 +116,7 @@ func TestIntegration_ShoppingRoundTrip(t *testing.T) {
 		t.Fatalf("unexpected tool error: %+v", res)
 	}
 	created := structured[mcptools.CreateShoppingListResult](t, res)
-	if created.ListID != 1 || created.Name != "Vecka 34" || created.Items != 1 {
+	if created.ListID == "" || created.Name != "Vecka 34" || created.Items != 1 {
 		t.Fatalf("unexpected create result: %+v", created)
 	}
 	if shoppingList.calls != 1 || shoppingList.last.Name != "Vecka 34" || len(shoppingList.last.Items) != 1 {
@@ -189,7 +193,7 @@ func TestIntegration_ShoppingRoundTrip(t *testing.T) {
 		t.Fatalf("unexpected push side effect: %+v", wishlist.last)
 	}
 	if wishlist.last.ShoppingListID == nil || *wishlist.last.ShoppingListID != listID {
-		t.Fatalf("expected push to bind to list %d, got %+v", listID, wishlist.last.ShoppingListID)
+		t.Fatalf("expected push to bind to list %s, got %+v", listID, wishlist.last.ShoppingListID)
 	}
 	if len(wishlist.last.Items) != 1 || wishlist.last.Items[0].ProductCode != "101233931_ST" || wishlist.last.Items[0].Quantity != 2 {
 		t.Fatalf("unexpected push item: %+v", wishlist.last.Items[0])

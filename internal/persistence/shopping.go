@@ -6,47 +6,50 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/androidand/spisordning/internal/domain"
 )
 
 // ShoppingList mirrors migrations/0004_shopping_list.sql.
 type ShoppingList struct {
-	ID              int64
-	OwnerPersonID   *string
-	Name            string
-	Status          string // 'active' | 'archived'
-	CreatedAt       time.Time
+	ID            domain.ShoppingListID
+	OwnerPersonID *domain.PersonID
+	Name          string
+	Status        string // 'active' | 'archived'
+	CreatedAt     time.Time
 }
 
 // Shared INSERT statements for shopping lists and their items. They live at
 // package level so the single-statement methods and the transactional
 // CreateShoppingListWithItems below issue identical SQL.
 const (
-	createShoppingListSQL = `INSERT INTO shopping_list (owner_person_id, name, status)
-		VALUES ($1, $2, $3) RETURNING id`
+	createShoppingListSQL = `INSERT INTO shopping_list (id, owner_person_id, name, status)
+		VALUES ($1, $2, $3, $4) RETURNING id`
 
 	createShoppingListItemSQL = `INSERT INTO shopping_list_item
-		(shopping_list_id, shopping_requirement_id, ingredient_id, label, quantity, unit, checked)
-		VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`
+		(id, shopping_list_id, shopping_requirement_id, ingredient_id, label, quantity, unit, checked)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`
 )
 
 // CreateShoppingList inserts a new shopping_list and returns its id. An empty
 // status defaults to "active" (the column's CHECK only allows active/archived,
 // and the schema default does not apply when a value is supplied).
-func (s *Store) CreateShoppingList(ctx context.Context, l ShoppingList) (int64, error) {
+func (s *Store) CreateShoppingList(ctx context.Context, l ShoppingList) (domain.ShoppingListID, error) {
 	status := l.Status
 	if status == "" {
 		status = "active"
 	}
-	var id int64
-	err := s.db.QueryRow(ctx, createShoppingListSQL, l.OwnerPersonID, l.Name, status).Scan(&id)
+	id := domain.NewShoppingListID()
+	var returnedID domain.ShoppingListID
+	err := s.db.QueryRow(ctx, createShoppingListSQL, id, l.OwnerPersonID, l.Name, status).Scan(&returnedID)
 	if err != nil {
-		return 0, fmt.Errorf("persistence: create shopping_list: %w", err)
+		return domain.ShoppingListID{}, fmt.Errorf("persistence: create shopping_list: %w", err)
 	}
-	return id, nil
+	return returnedID, nil
 }
 
 // GetShoppingList fetches one shopping_list by id.
-func (s *Store) GetShoppingList(ctx context.Context, id int64) (ShoppingList, error) {
+func (s *Store) GetShoppingList(ctx context.Context, id domain.ShoppingListID) (ShoppingList, error) {
 	const q = `SELECT id, owner_person_id, name, status, created_at FROM shopping_list WHERE id = $1`
 	var l ShoppingList
 	if err := s.db.QueryRow(ctx, q, id).Scan(&l.ID, &l.OwnerPersonID, &l.Name, &l.Status, &l.CreatedAt); err != nil {
@@ -79,7 +82,7 @@ func scanShoppingLists(rows pgx.Rows) ([]ShoppingList, error) {
 }
 
 // UpdateShoppingListStatus updates the status of a shopping_list.
-func (s *Store) UpdateShoppingListStatus(ctx context.Context, id int64, status string) error {
+func (s *Store) UpdateShoppingListStatus(ctx context.Context, id domain.ShoppingListID, status string) error {
 	const q = `UPDATE shopping_list SET status = $1 WHERE id = $2`
 	if _, err := s.db.Exec(ctx, q, status, id); err != nil {
 		return fmt.Errorf("persistence: update shopping_list status: %w", err)
@@ -91,10 +94,10 @@ func (s *Store) UpdateShoppingListStatus(ctx context.Context, id int64, status s
 
 // ShoppingListItem mirrors migrations/0004_shopping_list.sql shopping_list_item.
 type ShoppingListItem struct {
-	ID                    int64
-	ShoppingListID        int64
-	ShoppingRequirementID *int64
-	IngredientID          *string
+	ID                    domain.ShoppingListItemID
+	ShoppingListID        domain.ShoppingListID
+	ShoppingRequirementID *domain.ShoppingRequirementID
+	IngredientID          *domain.IngredientID
 	Label                 *string
 	Quantity              float64
 	Unit                  string
@@ -103,23 +106,24 @@ type ShoppingListItem struct {
 }
 
 // CreateShoppingListItem inserts a new item and returns its id.
-func (s *Store) CreateShoppingListItem(ctx context.Context, item ShoppingListItem) (int64, error) {
-	var id int64
-	err := s.db.QueryRow(ctx, createShoppingListItemSQL, item.ShoppingListID, item.ShoppingRequirementID, item.IngredientID,
-		item.Label, item.Quantity, item.Unit, item.Checked).Scan(&id)
+func (s *Store) CreateShoppingListItem(ctx context.Context, item ShoppingListItem) (domain.ShoppingListItemID, error) {
+	id := domain.NewShoppingListItemID()
+	var returnedID domain.ShoppingListItemID
+	err := s.db.QueryRow(ctx, createShoppingListItemSQL, id, item.ShoppingListID, item.ShoppingRequirementID, item.IngredientID,
+		item.Label, item.Quantity, item.Unit, item.Checked).Scan(&returnedID)
 	if err != nil {
-		return 0, fmt.Errorf("persistence: create shopping_list_item: %w", err)
+		return domain.ShoppingListItemID{}, fmt.Errorf("persistence: create shopping_list_item: %w", err)
 	}
-	return id, nil
+	return returnedID, nil
 }
 
 // CreateShoppingListWithItems inserts a shopping list and its line items in a
 // single transaction, so a failure partway leaves no partial list behind. It
 // returns the list id and the created item ids (in input order).
-func (s *Store) CreateShoppingListWithItems(ctx context.Context, l ShoppingList, items []ShoppingListItem) (int64, []int64, error) {
+func (s *Store) CreateShoppingListWithItems(ctx context.Context, l ShoppingList, items []ShoppingListItem) (domain.ShoppingListID, []domain.ShoppingListItemID, error) {
 	tx, err := s.BeginTx(ctx)
 	if err != nil {
-		return 0, nil, fmt.Errorf("persistence: begin shopping_list tx: %w", err)
+		return domain.ShoppingListID{}, nil, fmt.Errorf("persistence: begin shopping_list tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }() // no-op once committed
 
@@ -127,32 +131,33 @@ func (s *Store) CreateShoppingListWithItems(ctx context.Context, l ShoppingList,
 	if status == "" {
 		status = "active"
 	}
-	var listID int64
-	if err := tx.QueryRow(ctx, createShoppingListSQL, l.OwnerPersonID, l.Name, status).Scan(&listID); err != nil {
-		return 0, nil, fmt.Errorf("persistence: create shopping_list: %w", err)
+	listID := domain.NewShoppingListID()
+	if err := tx.QueryRow(ctx, createShoppingListSQL, listID, l.OwnerPersonID, l.Name, status).Scan(&listID); err != nil {
+		return domain.ShoppingListID{}, nil, fmt.Errorf("persistence: create shopping_list: %w", err)
 	}
 
-	itemIDs := make([]int64, 0, len(items))
+	itemIDs := make([]domain.ShoppingListItemID, 0, len(items))
 	for _, item := range items {
-		var id int64
-		if err := tx.QueryRow(ctx, createShoppingListItemSQL, listID, item.ShoppingRequirementID, item.IngredientID,
-			item.Label, item.Quantity, item.Unit, item.Checked).Scan(&id); err != nil {
-			return 0, nil, fmt.Errorf("persistence: create shopping_list_item: %w", err)
+		id := domain.NewShoppingListItemID()
+		var returnedID domain.ShoppingListItemID
+		if err := tx.QueryRow(ctx, createShoppingListItemSQL, id, listID, item.ShoppingRequirementID, item.IngredientID,
+			item.Label, item.Quantity, item.Unit, item.Checked).Scan(&returnedID); err != nil {
+			return domain.ShoppingListID{}, nil, fmt.Errorf("persistence: create shopping_list_item: %w", err)
 		}
-		itemIDs = append(itemIDs, id)
+		itemIDs = append(itemIDs, returnedID)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return 0, nil, fmt.Errorf("persistence: commit shopping_list tx: %w", err)
+		return domain.ShoppingListID{}, nil, fmt.Errorf("persistence: commit shopping_list tx: %w", err)
 	}
 	return listID, itemIDs, nil
 }
 
 // ListShoppingListItems returns all items for a list, ordered by added_at.
-func (s *Store) ListShoppingListItems(ctx context.Context, listID int64) ([]ShoppingListItem, error) {
+func (s *Store) ListShoppingListItems(ctx context.Context, listID domain.ShoppingListID) ([]ShoppingListItem, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT id, shopping_list_id, shopping_requirement_id, ingredient_id, label,
-		       quantity, unit, checked, added_at
+			quantity, unit, checked, added_at
 		FROM shopping_list_item WHERE shopping_list_id = $1 ORDER BY added_at`, listID)
 	if err != nil {
 		return nil, fmt.Errorf("persistence: list shopping_list_items: %w", err)
@@ -177,7 +182,7 @@ func scanShoppingListItems(rows pgx.Rows) ([]ShoppingListItem, error) {
 }
 
 // UpdateShoppingListItemChecked toggles the checked flag on an item.
-func (s *Store) UpdateShoppingListItemChecked(ctx context.Context, id int64, checked bool) error {
+func (s *Store) UpdateShoppingListItemChecked(ctx context.Context, id domain.ShoppingListItemID, checked bool) error {
 	const q = `UPDATE shopping_list_item SET checked = $1 WHERE id = $2`
 	if _, err := s.db.Exec(ctx, q, checked, id); err != nil {
 		return fmt.Errorf("persistence: update shopping_list_item checked: %w", err)
@@ -186,7 +191,7 @@ func (s *Store) UpdateShoppingListItemChecked(ctx context.Context, id int64, che
 }
 
 // DeleteShoppingListItem removes an item row (hard delete; requirement is unaffected).
-func (s *Store) DeleteShoppingListItem(ctx context.Context, id int64) error {
+func (s *Store) DeleteShoppingListItem(ctx context.Context, id domain.ShoppingListItemID) error {
 	const q = `DELETE FROM shopping_list_item WHERE id = $1`
 	if _, err := s.db.Exec(ctx, q, id); err != nil {
 		return fmt.Errorf("persistence: delete shopping_list_item: %w", err)
@@ -195,7 +200,7 @@ func (s *Store) DeleteShoppingListItem(ctx context.Context, id int64) error {
 }
 
 // GetShoppingRequirement fetches one shopping_requirement by id.
-func (s *Store) GetShoppingRequirement(ctx context.Context, id int64) (ShoppingRequirement, error) {
+func (s *Store) GetShoppingRequirement(ctx context.Context, id domain.ShoppingRequirementID) (ShoppingRequirement, error) {
 	const q = `SELECT id, plan_id, ingredient_id, quantity, unit, acceptable_forms, preferred_form
 		FROM shopping_requirement WHERE id = $1`
 	var r ShoppingRequirement
@@ -210,8 +215,7 @@ func (s *Store) GetShoppingRequirement(ctx context.Context, id int64) (ShoppingR
 
 // RetailerListBinding mirrors migrations/0005_retailer_list_binding.sql.
 type RetailerListBinding struct {
-	ID             int64
-	ShoppingListID int64
+	ShoppingListID domain.ShoppingListID
 	Retailer       string
 	ExternalListID string
 	SyncDirection  string // 'outbound' in v1
@@ -239,13 +243,13 @@ func (s *Store) CreateOrUpdateRetailerListBinding(ctx context.Context, b Retaile
 }
 
 // GetRetailerListBinding fetches the binding for a shopping_list + retailer pair.
-func (s *Store) GetRetailerListBinding(ctx context.Context, shoppingListID int64, retailer string) (RetailerListBinding, error) {
-	const q = `SELECT id, shopping_list_id, retailer, external_list_id, sync_direction,
+func (s *Store) GetRetailerListBinding(ctx context.Context, shoppingListID domain.ShoppingListID, retailer string) (RetailerListBinding, error) {
+	const q = `SELECT shopping_list_id, retailer, external_list_id, sync_direction,
 		last_pushed_at, last_push_status
 		FROM retailer_list_binding WHERE shopping_list_id = $1 AND retailer = $2`
 	var b RetailerListBinding
 	if err := s.db.QueryRow(ctx, q, shoppingListID, retailer).Scan(
-		&b.ID, &b.ShoppingListID, &b.Retailer, &b.ExternalListID, &b.SyncDirection,
+		&b.ShoppingListID, &b.Retailer, &b.ExternalListID, &b.SyncDirection,
 		&b.LastPushedAt, &b.LastPushStatus); err != nil {
 		return RetailerListBinding{}, fmt.Errorf("persistence: get retailer_list_binding: %w", err)
 	}
@@ -253,9 +257,9 @@ func (s *Store) GetRetailerListBinding(ctx context.Context, shoppingListID int64
 }
 
 // ListRetailerListBindings returns all bindings for a shopping_list.
-func (s *Store) ListRetailerListBindings(ctx context.Context, shoppingListID int64) ([]RetailerListBinding, error) {
+func (s *Store) ListRetailerListBindings(ctx context.Context, shoppingListID domain.ShoppingListID) ([]RetailerListBinding, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT id, shopping_list_id, retailer, external_list_id, sync_direction,
+		SELECT shopping_list_id, retailer, external_list_id, sync_direction,
 		       last_pushed_at, last_push_status
 		FROM retailer_list_binding WHERE shopping_list_id = $1`, shoppingListID)
 	if err != nil {
@@ -270,7 +274,7 @@ func scanRetailerListBindings(rows pgx.Rows) ([]RetailerListBinding, error) {
 	var out []RetailerListBinding
 	for rows.Next() {
 		var b RetailerListBinding
-		if err := rows.Scan(&b.ID, &b.ShoppingListID, &b.Retailer, &b.ExternalListID,
+		if err := rows.Scan(&b.ShoppingListID, &b.Retailer, &b.ExternalListID,
 			&b.SyncDirection, &b.LastPushedAt, &b.LastPushStatus); err != nil {
 			return nil, err
 		}

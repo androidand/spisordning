@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/androidand/spisordning/internal/domain"
 )
 
 // Store wraps the Postgres connection pool and exposes the repository methods
@@ -22,9 +23,14 @@ type Store struct {
 }
 
 // BeginTx starts a new transaction on the underlying pool. Callers are
-// responsible for committing or rolling back.
-func (s *Store) BeginTx(ctx context.Context) (pgx.Tx, error) {
-	return s.db.Begin(ctx)
+// responsible for committing or rolling back. The returned Tx is wrapped
+// so that the service layer never needs to import pgx directly.
+func (s *Store) BeginTx(ctx context.Context) (Tx, error) {
+	pgxTx, err := s.db.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return txAdapter{inner: pgxTx}, nil
 }
 
 // New opens a pooled connection to Postgres using cfg.
@@ -44,7 +50,7 @@ func (s *Store) Ping(ctx context.Context) error { return s.db.Ping(ctx) }
 
 // MealPlan is a planned week (one row of migrations/0001_init.sql meal_plan).
 type MealPlan struct {
-	ID        int64
+	ID        domain.MealPlanID
 	WeekStart time.Time // PostgreSQL DATE → Go time.Time at midnight UTC
 	Status    string    // 'draft' | 'approved' | 'archived'
 	CreatedAt time.Time
@@ -53,19 +59,20 @@ type MealPlan struct {
 // CreateMealPlan inserts a plan for weekStart and returns its id. The UNIQUE
 // week_start constraint makes this idempotent: on conflict the no-op DO UPDATE
 // still yields a row, so the existing plan's id is returned rather than erroring.
-func (s *Store) CreateMealPlan(ctx context.Context, weekStart time.Time) (int64, error) {
-	const q = `INSERT INTO meal_plan (week_start, status) VALUES ($1, 'draft')
+func (s *Store) CreateMealPlan(ctx context.Context, weekStart time.Time) (domain.MealPlanID, error) {
+	id := domain.NewMealPlanID()
+	const q = `INSERT INTO meal_plan (id, week_start, status) VALUES ($1, $2, 'draft')
 		ON CONFLICT (week_start) DO UPDATE SET week_start = EXCLUDED.week_start RETURNING id`
-	var id int64
-	err := s.db.QueryRow(ctx, q, weekStart).Scan(&id)
+	var returnedID domain.MealPlanID
+	err := s.db.QueryRow(ctx, q, id, weekStart).Scan(&returnedID)
 	if err != nil {
-		return 0, fmt.Errorf("persistence: create meal_plan: %w", err)
+		return domain.MealPlanID{}, fmt.Errorf("persistence: create meal_plan: %w", err)
 	}
-	return id, nil
+	return returnedID, nil
 }
 
 // GetMealPlan fetches a plan by id.
-func (s *Store) GetMealPlan(ctx context.Context, id int64) (MealPlan, error) {
+func (s *Store) GetMealPlan(ctx context.Context, id domain.MealPlanID) (MealPlan, error) {
 	const q = `SELECT id, week_start, status, created_at FROM meal_plan WHERE id = $1`
 	var m MealPlan
 	if err := s.db.QueryRow(ctx, q, id).Scan(&m.ID, &m.WeekStart, &m.Status, &m.CreatedAt); err != nil {
@@ -103,29 +110,29 @@ func (s *Store) GetOrCreateMealPlan(ctx context.Context, weekStart time.Time) (M
 }
 
 // SetMealPlanStatus updates a plan's status.
-func (s *Store) SetMealPlanStatus(ctx context.Context, id int64, status string) error {
+func (s *Store) SetMealPlanStatus(ctx context.Context, id domain.MealPlanID, status string) error {
 	const q = `UPDATE meal_plan SET status = $1 WHERE id = $2`
 	c, err := s.db.Exec(ctx, q, status, id)
 	if err != nil {
 		return fmt.Errorf("persistence: set meal_plan status: %w", err)
 	}
 	if c.RowsAffected() == 0 {
-		return notFound("meal_plan", id)
+		return fmt.Errorf("persistence: meal_plan not found (id %s)", id)
 	}
 	return nil
 }
 
 // MealPlanCandidate mirrors migrations/0001_init.sql meal_plan_candidate.
 type MealPlanCandidate struct {
-	ID             int64
-	PlanID         int64
-	SlotDate       time.Time
-	SlotKind       string // 'dinner' | 'breakfast' | 'snack'
-	MealieRecipeID string
-	Score          float64
-	Breakdown      map[string]float64 // JSONB; nil-safe
-	Feasible       bool
-	Rank           int
+	ID          domain.MealPlanCandidateID
+	PlanID      domain.MealPlanID
+	SlotDate    time.Time
+	SlotKind    string // 'dinner' | 'breakfast' | 'snack'
+	RecipeRefID domain.RecipeRefID
+	Score       float64
+	Breakdown   map[string]float64 // JSONB; nil-safe
+	Feasible    bool
+	Rank        int
 }
 
 // InsertCandidate writes one ranked candidate for a plan/slot.
@@ -137,18 +144,21 @@ func (s *Store) InsertCandidate(ctx context.Context, c MealPlanCandidate) error 
 	if c.SlotKind == "" {
 		c.SlotKind = "dinner"
 	}
+	if c.ID == (domain.MealPlanCandidateID{}) {
+		c.ID = domain.NewMealPlanCandidateID()
+	}
 	const q = `INSERT INTO meal_plan_candidate
-		(plan_id, slot_date, slot_kind, mealie_recipe_id, score, breakdown, feasible, rank)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`
-	if _, err := s.db.Exec(ctx, q, c.PlanID, c.SlotDate, c.SlotKind, c.MealieRecipeID, c.Score, breakdown, c.Feasible, c.Rank); err != nil {
+		(id, plan_id, slot_date, slot_kind, recipe_ref_id, score, breakdown, feasible, rank)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`
+	if _, err := s.db.Exec(ctx, q, c.ID, c.PlanID, c.SlotDate, c.SlotKind, c.RecipeRefID, c.Score, breakdown, c.Feasible, c.Rank); err != nil {
 		return fmt.Errorf("persistence: insert candidate: %w", err)
 	}
 	return nil
 }
 
 // ListCandidates returns a plan's candidates ordered by (slot_date, slot_kind, rank).
-func (s *Store) ListCandidates(ctx context.Context, planID int64) ([]MealPlanCandidate, error) {
-	const q = `SELECT id, plan_id, slot_date, slot_kind, mealie_recipe_id, score, breakdown, feasible, rank
+func (s *Store) ListCandidates(ctx context.Context, planID domain.MealPlanID) ([]MealPlanCandidate, error) {
+	const q = `SELECT id, plan_id, slot_date, slot_kind, recipe_ref_id, score, breakdown, feasible, rank
 		FROM meal_plan_candidate WHERE plan_id = $1 ORDER BY slot_date, slot_kind, rank`
 	rows, err := s.db.Query(ctx, q, planID)
 	if err != nil {
@@ -159,7 +169,7 @@ func (s *Store) ListCandidates(ctx context.Context, planID int64) ([]MealPlanCan
 	for rows.Next() {
 		var c MealPlanCandidate
 		var breakdown map[string]float64
-		if err := rows.Scan(&c.ID, &c.PlanID, &c.SlotDate, &c.SlotKind, &c.MealieRecipeID, &c.Score, &breakdown, &c.Feasible, &c.Rank); err != nil {
+		if err := rows.Scan(&c.ID, &c.PlanID, &c.SlotDate, &c.SlotKind, &c.RecipeRefID, &c.Score, &breakdown, &c.Feasible, &c.Rank); err != nil {
 			return nil, err
 		}
 		c.Breakdown = breakdown
@@ -170,11 +180,11 @@ func (s *Store) ListCandidates(ctx context.Context, planID int64) ([]MealPlanCan
 
 // MealPlanDecision mirrors migrations/0001_init.sql meal_plan_decision.
 type MealPlanDecision struct {
-	PlanID         int64
-	SlotDate       time.Time
-	SlotKind       string // 'dinner' | 'breakfast' | 'snack'
-	MealieRecipeID string
-	DecidedAt      time.Time
+	PlanID      domain.MealPlanID
+	SlotDate    time.Time
+	SlotKind    string // 'dinner' | 'breakfast' | 'snack'
+	RecipeRefID domain.RecipeRefID
+	DecidedAt   time.Time
 }
 
 // SetDecision upserts the chosen recipe for a plan/slot.
@@ -182,18 +192,18 @@ func (s *Store) SetDecision(ctx context.Context, d MealPlanDecision) error {
 	if d.SlotKind == "" {
 		d.SlotKind = "dinner"
 	}
-	const q = `INSERT INTO meal_plan_decision (plan_id, slot_date, slot_kind, mealie_recipe_id)
+	const q = `INSERT INTO meal_plan_decision (plan_id, slot_date, slot_kind, recipe_ref_id)
 		VALUES ($1, $2, $3, $4)
-		ON CONFLICT (plan_id, slot_date, slot_kind) DO UPDATE SET mealie_recipe_id = EXCLUDED.mealie_recipe_id`
-	if _, err := s.db.Exec(ctx, q, d.PlanID, d.SlotDate, d.SlotKind, d.MealieRecipeID); err != nil {
+		ON CONFLICT (plan_id, slot_date, slot_kind) DO UPDATE SET recipe_ref_id = EXCLUDED.recipe_ref_id`
+	if _, err := s.db.Exec(ctx, q, d.PlanID, d.SlotDate, d.SlotKind, d.RecipeRefID); err != nil {
 		return fmt.Errorf("persistence: set decision: %w", err)
 	}
 	return nil
 }
 
 // ListDecisions returns a plan's decisions ordered by (slot_date, slot_kind).
-func (s *Store) ListDecisions(ctx context.Context, planID int64) ([]MealPlanDecision, error) {
-	const q = `SELECT plan_id, slot_date, slot_kind, mealie_recipe_id, decided_at
+func (s *Store) ListDecisions(ctx context.Context, planID domain.MealPlanID) ([]MealPlanDecision, error) {
+	const q = `SELECT plan_id, slot_date, slot_kind, recipe_ref_id, decided_at
 		FROM meal_plan_decision WHERE plan_id = $1 ORDER BY slot_date, slot_kind`
 	rows, err := s.db.Query(ctx, q, planID)
 	if err != nil {
@@ -203,7 +213,7 @@ func (s *Store) ListDecisions(ctx context.Context, planID int64) ([]MealPlanDeci
 	var out []MealPlanDecision
 	for rows.Next() {
 		var d MealPlanDecision
-		if err := rows.Scan(&d.PlanID, &d.SlotDate, &d.SlotKind, &d.MealieRecipeID, &d.DecidedAt); err != nil {
+		if err := rows.Scan(&d.PlanID, &d.SlotDate, &d.SlotKind, &d.RecipeRefID, &d.DecidedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, d)
@@ -215,9 +225,9 @@ func (s *Store) ListDecisions(ctx context.Context, planID int64) ([]MealPlanDeci
 // (Distinct from the retailer-independent domain.ShoppingRequirement value:
 // this struct carries the persistence row's id and plan_id.)
 type ShoppingRequirement struct {
-	ID              int64
-	PlanID          int64
-	IngredientID    string
+	ID              domain.ShoppingRequirementID
+	PlanID          domain.MealPlanID
+	IngredientID    domain.IngredientID
 	Quantity        float64
 	Unit            string
 	AcceptableForms []string
@@ -228,23 +238,26 @@ type ShoppingRequirement struct {
 // decisions. Duplicate (plan_id, ingredient_id) rows merge by summing
 // quantity, matching the schema's UNIQUE constraint.
 func (s *Store) InsertShoppingRequirement(ctx context.Context, r ShoppingRequirement) error {
+	if r.ID == (domain.ShoppingRequirementID{}) {
+		r.ID = domain.NewShoppingRequirementID()
+	}
 	const q = `INSERT INTO shopping_requirement
-		(plan_id, ingredient_id, quantity, unit, acceptable_forms, preferred_form)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		(id, plan_id, ingredient_id, quantity, unit, acceptable_forms, preferred_form)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT (plan_id, ingredient_id) DO UPDATE
 		SET quantity = shopping_requirement.quantity + EXCLUDED.quantity`
 	forms := r.AcceptableForms
 	if forms == nil {
 		forms = []string{}
 	}
-	if _, err := s.db.Exec(ctx, q, r.PlanID, r.IngredientID, r.Quantity, r.Unit, forms, r.PreferredForm); err != nil {
+	if _, err := s.db.Exec(ctx, q, r.ID, r.PlanID, r.IngredientID, r.Quantity, r.Unit, forms, r.PreferredForm); err != nil {
 		return fmt.Errorf("persistence: insert shopping_requirement: %w", err)
 	}
 	return nil
 }
 
 // ListShoppingRequirements returns a plan's requirements, sorted.
-func (s *Store) ListShoppingRequirements(ctx context.Context, planID int64) ([]ShoppingRequirement, error) {
+func (s *Store) ListShoppingRequirements(ctx context.Context, planID domain.MealPlanID) ([]ShoppingRequirement, error) {
 	const q = `SELECT id, plan_id, ingredient_id, quantity, unit, acceptable_forms, preferred_form
 		FROM shopping_requirement WHERE plan_id = $1 ORDER BY ingredient_id, unit`
 	rows, err := s.db.Query(ctx, q, planID)
@@ -283,14 +296,10 @@ func (s *Store) ListMealPlans(ctx context.Context) ([]MealPlan, error) {
 }
 
 // DeleteCandidatesForPlan removes all candidates for a plan.
-func (s *Store) DeleteCandidatesForPlan(ctx context.Context, planID int64) error {
+func (s *Store) DeleteCandidatesForPlan(ctx context.Context, planID domain.MealPlanID) error {
 	const q = `DELETE FROM meal_plan_candidate WHERE plan_id = $1`
 	if _, err := s.db.Exec(ctx, q, planID); err != nil {
 		return fmt.Errorf("persistence: delete candidates: %w", err)
 	}
 	return nil
-}
-
-func notFound(table string, id int64) error {
-	return fmt.Errorf("persistence: %s not found (id %s)", table, strconv.FormatInt(id, 10))
 }

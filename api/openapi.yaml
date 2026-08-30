@@ -852,7 +852,7 @@ paths:
       - name: revisionId
         in: path
         required: true
-        schema: { type: integer }
+        schema: { type: string }
     get:
       summary: Fetch one revision
       operationId: getRecipeRevision
@@ -1464,6 +1464,22 @@ components:
         unit: { type: string }
         best_before: { type: string, format: date-time, nullable: true }
 
+    PantryLot:
+      type: object
+      required: [id, ingredient_id, product_id, location_id, quantity, unit, confidence, created_at, updated_at]
+      properties:
+        id: { type: string }
+        ingredient_id: { type: string }
+        product_id: { type: string }
+        location_id: { type: string }
+        quantity: { type: number }
+        unit: { type: string }
+        confidence: { type: string }
+        best_before: { type: string, format: date-time, nullable: true }
+        opened_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
     StoreOffer:
       type: object
       required: [id, store_id, retailer_product_id, currently_carried, updated_at]
@@ -1806,7 +1822,7 @@ components:
       type: object
       required: [id, variant_id, ingredients, steps, created_at]
       properties:
-        id: { type: integer }
+        id: { type: string }
         variant_id: { type: string }
         servings: { type: integer, nullable: true }
         description: { type: string, nullable: true }
@@ -1818,7 +1834,7 @@ components:
           items: { type: string }
         parents:
           type: array
-          items: { type: integer }
+          items: { type: string }
         created_at: { type: string, format: date-time }
 
     RecipeRevisionNew:
@@ -1833,7 +1849,7 @@ components:
         steps:
           type: array
           items: { type: string }
-        parent_revision_id: { type: integer, nullable: true, description: derive from this revision }
+        parent_revision_id: { type: string, nullable: true, description: derive from this revision }
 
     RecipeIngredient:
       type: object

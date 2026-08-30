@@ -4,18 +4,20 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/androidand/spisordning/internal/domain"
 )
 
 // createCartForOrder sets up the shopping_list → binding → cart chain and returns
 // the cart id (which order.shopping_cart_id references).
-func createCartForOrder(t *testing.T, s *Store, ctx context.Context) int64 {
+func createCartForOrder(t *testing.T, s *Store, ctx context.Context) domain.ShoppingCartID {
 	t.Helper()
 	listID, err := s.CreateShoppingList(ctx, ShoppingList{Name: "Order Test List"})
 	if err != nil {
 		t.Fatalf("CreateShoppingList: %v", err)
 	}
-	bindingID := createBindingForList(t, s, ctx, listID)
-	cartID, err := s.CreateShoppingCart(ctx, ShoppingCart{RetailerListBindingID: bindingID})
+	createBindingForList(t, s, ctx, listID)
+	cartID, err := s.CreateShoppingCart(ctx, ShoppingCart{ShoppingListID: listID, Retailer: "willys"})
 	if err != nil {
 		t.Fatalf("CreateShoppingCart: %v", err)
 	}
@@ -29,11 +31,12 @@ func TestOrder_CreateAndGet(t *testing.T) {
 
 	cartID := createCartForOrder(t, s, ctx)
 	order, err := s.CreateOrder(ctx, Order{
-		ShoppingCartID: &cartID,
-		Retailer:       "willys",
-		Source:         "manual",
-		OrderedAt:      time.Date(2026, 7, 20, 18, 30, 0, 0, time.UTC),
-		TotalPrice:     ptrFloat64(149.5),
+		ShoppingCartID:  &cartID,
+		Retailer:        "willys",
+		Source:          "manual",
+		OrderedAt:       time.Date(2026, 7, 20, 18, 30, 0, 0, time.UTC),
+		TotalPriceMinor: ptrInt64(14950),
+		Currency:        "SEK",
 	})
 	if err != nil {
 		t.Fatalf("CreateOrder: %v", err)
@@ -45,8 +48,8 @@ func TestOrder_CreateAndGet(t *testing.T) {
 	if got.Retailer != "willys" || got.Source != "manual" {
 		t.Errorf("got %+v", got)
 	}
-	if got.TotalPrice == nil || *got.TotalPrice != 149.5 {
-		t.Errorf("total_price = %v, want 149.5", got.TotalPrice)
+	if got.TotalPriceMinor == nil || *got.TotalPriceMinor != 14950 {
+		t.Errorf("total_price_minor = %v, want 14950", got.TotalPriceMinor)
 	}
 }
 
@@ -69,7 +72,7 @@ func TestOrder_NullCartReference(t *testing.T) {
 		t.Fatalf("GetOrder: %v", err)
 	}
 	if got.ShoppingCartID != nil {
-		t.Errorf("expected nil shopping_cart_id, got %d", *got.ShoppingCartID)
+		t.Errorf("expected nil shopping_cart_id, got %s", got.ShoppingCartID.String())
 	}
 }
 
@@ -129,21 +132,23 @@ func TestOrderItem_RoundTrip(t *testing.T) {
 	// Create the "substituted for" item first (the original that was swapped out).
 	subForID, err := s.CreateOrderItem(ctx, OrderItem{
 		OrderID:           orderID,
-		RetailerProductID: "willys-original",
+		RetailerProductID: domain.NewRetailerProductID(),
 		Quantity:          1,
 	})
 	if err != nil {
 		t.Fatalf("CreateOrderItem (substituted-for): %v", err)
 	}
 
+	rpID := domain.NewRetailerProductID()
 	unitPrice := 49.5
-	totalPrice := 99.0
+	totalPriceMinor := int64(9900)
 	item, err := s.CreateOrderItem(ctx, OrderItem{
 		OrderID:              orderID,
-		RetailerProductID:    "willys-123",
+		RetailerProductID:    rpID,
 		Quantity:             2,
 		UnitPrice:            &unitPrice,
-		TotalPrice:           &totalPrice,
+		TotalPriceMinor:      &totalPriceMinor,
+		Currency:             "SEK",
 		SubstitutedForItemID: &subForID,
 	})
 	if err != nil {
@@ -159,18 +164,18 @@ func TestOrderItem_RoundTrip(t *testing.T) {
 	}
 	var main *OrderItem
 	for i := range items {
-		if items[i].RetailerProductID == "willys-123" {
+		if items[i].RetailerProductID == rpID {
 			main = &items[i]
 		}
 	}
 	if main == nil {
-		t.Fatalf("expected to find willys-123 item, got %+v", items)
+		t.Fatalf("expected to find item, got %+v", items)
 	}
 	if main.Quantity != 2 {
 		t.Errorf("item = %+v", main)
 	}
 	if main.SubstitutedForItemID == nil || *main.SubstitutedForItemID != subForID {
-		t.Errorf("substituted_for_item_id = %v, want %d", main.SubstitutedForItemID, subForID)
+		t.Errorf("substituted_for_item_id = %v, want %s", main.SubstitutedForItemID, subForID)
 	}
 	_ = item
 }
@@ -192,10 +197,11 @@ func TestOrderItem_NullPrices(t *testing.T) {
 	// No unit_price or total_price — manual entry may not have exact prices.
 	_, err = s.CreateOrderItem(ctx, OrderItem{
 		OrderID:           orderID,
-		RetailerProductID: "willys-456",
+		RetailerProductID: domain.NewRetailerProductID(),
 		Quantity:          1,
 		UnitPrice:         nil,
-		TotalPrice:        nil,
+		TotalPriceMinor:   nil,
+		Currency:          "SEK",
 	})
 	if err != nil {
 		t.Fatalf("CreateOrderItem (no prices): %v", err)
@@ -204,10 +210,10 @@ func TestOrderItem_NullPrices(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListOrderItems: %v", err)
 	}
-	if len(items) != 1 || items[0].UnitPrice != nil || items[0].TotalPrice != nil {
+	if len(items) != 1 || items[0].UnitPrice != nil || items[0].TotalPriceMinor != nil {
 		t.Errorf("expected null prices, got %+v", items[0])
 	}
 }
 
 func ptrString(s string) *string { return &s }
-func ptrFloat64(f float64) *float64 { return &f }
+func ptrInt64(i int64) *int64    { return &i }

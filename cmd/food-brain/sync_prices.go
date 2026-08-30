@@ -52,20 +52,28 @@ func runSyncPrices(args []string) error {
 	fmt.Printf("fetched %d offer(s) from %s-adapter (store=%s)\n", len(offers), kind, *storeID)
 
 	// Identity rows: one retailer per chain, one store per location.
-	if err := store.UpsertRetailer(ctx, domain.Retailer{ID: string(kind), Name: string(kind)}); err != nil {
+	retailerID, err := domain.ParseRetailerID(string(kind))
+	if err != nil {
+		return fmt.Errorf("sync prices: parse retailer id: %w", err)
+	}
+	if err := store.UpsertRetailer(ctx, domain.Retailer{ID: retailerID, Name: string(kind)}); err != nil {
 		return fmt.Errorf("sync prices: upsert retailer: %w", err)
 	}
-	if err := store.UpsertStore(ctx, domain.Store{ID: *storeID, RetailerID: string(kind), Name: *storeID}); err != nil {
+	storeUUID, err := domain.ParseStoreID(*storeID)
+	if err != nil {
+		return fmt.Errorf("sync prices: parse store id: %w", err)
+	}
+	if err := store.UpsertStore(ctx, domain.Store{ID: storeUUID, RetailerID: retailerID, Name: *storeID}); err != nil {
 		return fmt.Errorf("sync prices: upsert store: %w", err)
 	}
 
 	source := string(kind) + "_adapter"
 	for _, o := range offers {
 		sku := strconv.Itoa(o.ArticleID)
-		rpID := "rp-" + string(kind) + "-" + sku
+		rpUUID := domain.NewRetailerProductID()
 		rp := domain.RetailerProduct{
-			ID:           rpID,
-			RetailerID:   string(kind),
+			ID:           rpUUID,
+			RetailerID:   retailerID,
 			RetailerSKU:  sku,
 			DisplayName:  o.Name,
 		}
@@ -73,8 +81,8 @@ func runSyncPrices(args []string) error {
 			return fmt.Errorf("sync prices: upsert retailer_product %s: %w", sku, err)
 		}
 		offerID, err := store.UpsertStoreProductOffer(ctx, domain.StoreProductOffer{
-			StoreID:           *storeID,
-			RetailerProductID: rpID,
+			StoreID:           storeUUID,
+			RetailerProductID: rpUUID,
 			CurrentlyCarried:  true,
 		})
 		if err != nil {

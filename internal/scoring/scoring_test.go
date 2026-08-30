@@ -1,6 +1,7 @@
 package scoring
 
 import (
+	"crypto/sha256"
 	"testing"
 	"time"
 
@@ -11,8 +12,26 @@ import (
 // day is a fixed reference date so tests never depend on the wall clock.
 var day = time.Date(2026, 7, 20, 17, 0, 0, 0, time.UTC)
 
+// slugToPersonID derives a deterministic PersonID from a slug string so that
+// the same slug always maps to the same UUID within a test. This lets tests
+// keep using readable slugs ("mum", "kid") while the domain uses typed UUIDs.
+func slugToPersonID(slug string) domain.PersonID {
+	// Deterministic derivation: hash the slug so the same slug always maps to
+	// the same UUID within (and across) tests.
+	sum := sha256.Sum256([]byte("spisordning-test-person:" + slug))
+	var u [16]byte
+	copy(u[:], sum[:16])
+	u[6] = (u[6] & 0x0f) | 0x40 // version 4
+	u[8] = (u[8] & 0x3f) | 0x80 // variant 1
+	return domain.PersonID(u)
+}
+
 func person(id string, weight float64) domain.Person {
-	return domain.Person{ID: id, Name: id, Weight: weight}
+	return domain.Person{ID: slugToPersonID(id), Name: id, Weight: weight}
+}
+
+func mustParsePersonID(s string) domain.PersonID {
+	return slugToPersonID(s)
 }
 
 // baseCtx is a minimal two-person context with no recent meals, no school
@@ -33,8 +52,8 @@ func TestRank_DeterministicAndReproducible(t *testing.T) {
 	}
 	ctx := baseCtx()
 	ctx.Preferences = []domain.Preference{
-		{PersonID: "kid", Tag: "pasta", Sentiment: domain.Loves, Confidence: 0.9},
-		{PersonID: "kid", Tag: "fish", Sentiment: domain.Hates, Confidence: 0.9},
+		{PersonID: mustParsePersonID("kid"), Tag: "pasta", Sentiment: domain.Loves, Confidence: 0.9},
+		{PersonID: mustParsePersonID("kid"), Tag: "fish", Sentiment: domain.Hates, Confidence: 0.9},
 	}
 	w := DefaultWeights()
 
@@ -90,11 +109,11 @@ func TestPreference_ConfidenceScales(t *testing.T) {
 	c := domain.Candidate{MealieRecipeID: "r", Tags: []string{"spicy"}}
 	high := baseCtx()
 	high.People = []domain.Person{person("a", 1)}
-	high.Preferences = []domain.Preference{{PersonID: "a", Tag: "spicy", Sentiment: domain.Loves, Confidence: 1.0}}
+	high.Preferences = []domain.Preference{{PersonID: mustParsePersonID("a"), Tag: "spicy", Sentiment: domain.Loves, Confidence: 1.0}}
 
 	low := baseCtx()
 	low.People = []domain.Person{person("a", 1)}
-	low.Preferences = []domain.Preference{{PersonID: "a", Tag: "spicy", Sentiment: domain.Loves, Confidence: 0.1}}
+	low.Preferences = []domain.Preference{{PersonID: mustParsePersonID("a"), Tag: "spicy", Sentiment: domain.Loves, Confidence: 0.1}}
 
 	hs := Rank([]domain.Candidate{c}, high, DefaultWeights())[0].Breakdown.Preference
 	ls := Rank([]domain.Candidate{c}, low, DefaultWeights())[0].Breakdown.Preference
@@ -108,8 +127,8 @@ func TestPersonWeight_PickyKidCountsMore(t *testing.T) {
 	ctx := baseCtx()
 	ctx.People = []domain.Person{person("parent", 1), person("kid", 3)}
 	ctx.Preferences = []domain.Preference{
-		{PersonID: "parent", Tag: "broccoli", Sentiment: domain.Loves, Confidence: 1},
-		{PersonID: "kid", Tag: "broccoli", Sentiment: domain.Hates, Confidence: 1},
+		{PersonID: mustParsePersonID("parent"), Tag: "broccoli", Sentiment: domain.Loves, Confidence: 1},
+		{PersonID: mustParsePersonID("kid"), Tag: "broccoli", Sentiment: domain.Hates, Confidence: 1},
 	}
 	// Weighted aggregate: (1*2 + 3*-2) / (1+3) = (2 - 6)/4 = -1 → net negative.
 	got := Rank([]domain.Candidate{c}, ctx, DefaultWeights())[0].Breakdown.Preference
@@ -261,7 +280,7 @@ func TestFamiliarity_Deterministic(t *testing.T) {
 func favCtx(tag string, sentiment domain.Sentiment, cookTimes int) domain.PlanContext {
 	ctx := baseCtx()
 	ctx.People = []domain.Person{person("kid", 1)}
-	ctx.Preferences = []domain.Preference{{PersonID: "kid", Tag: tag, Sentiment: sentiment, Confidence: 1.0}}
+	ctx.Preferences = []domain.Preference{{PersonID: mustParsePersonID("kid"), Tag: tag, Sentiment: sentiment, Confidence: 1.0}}
 	for i := 0; i < cookTimes; i++ {
 		ctx.RecentMealIDs = append(ctx.RecentMealIDs, domain.RecentMeal{MealieRecipeID: "r", Served: day.AddDate(0, 0, -(30 + i*30))})
 	}
@@ -405,8 +424,8 @@ func mixedPool() ([]domain.Candidate, domain.PlanContext) {
 	}
 	ctx := baseCtx()
 	ctx.Preferences = []domain.Preference{
-		{PersonID: "kid", Tag: "pasta", Sentiment: domain.Loves, Confidence: 1.0},
-		{PersonID: "kid", Tag: "curry", Sentiment: domain.Loves, Confidence: 1.0},
+		{PersonID: mustParsePersonID("kid"), Tag: "pasta", Sentiment: domain.Loves, Confidence: 1.0},
+		{PersonID: mustParsePersonID("kid"), Tag: "curry", Sentiment: domain.Loves, Confidence: 1.0},
 	}
 	for i := 0; i < 3; i++ {
 		ctx.RecentMealIDs = append(ctx.RecentMealIDs, domain.RecentMeal{MealieRecipeID: "fav", Served: day.AddDate(0, 0, -(30 + i*30))})
@@ -526,7 +545,7 @@ func favPool(novelIDs []string) ([]domain.Candidate, domain.PlanContext) {
 	ctx := baseCtx()
 	ctx.People = []domain.Person{person("kid", 1)}
 	for _, id := range favIDs {
-		ctx.Preferences = append(ctx.Preferences, domain.Preference{PersonID: "kid", Tag: tags[id], Sentiment: domain.Loves, Confidence: 1.0})
+		ctx.Preferences = append(ctx.Preferences, domain.Preference{PersonID: mustParsePersonID("kid"), Tag: tags[id], Sentiment: domain.Loves, Confidence: 1.0})
 		for i := 0; i < 3; i++ {
 			ctx.RecentMealIDs = append(ctx.RecentMealIDs, domain.RecentMeal{MealieRecipeID: id, Served: day.AddDate(0, 0, -(30 + i*30))})
 		}
@@ -634,7 +653,7 @@ func TestScore_PantryIntegrated(t *testing.T) {
 	cInfeasible := domain.Candidate{MealieRecipeID: "bad", Tags: []string{"pasta"}, Effort: domain.EffortLow}
 	ctx := baseCtx()
 	ctx.Preferences = []domain.Preference{
-		{PersonID: "kid", Tag: "pasta", Sentiment: domain.Loves, Confidence: 1.0},
+		{PersonID: mustParsePersonID("kid"), Tag: "pasta", Sentiment: domain.Loves, Confidence: 1.0},
 	}
 	ctx.PantryAvailability = map[string]domain.PantryStatus{
 		"ok":   domain.PantryFeasible,
@@ -661,7 +680,7 @@ func TestScore_PantryDoesNotOverrideFeasibility(t *testing.T) {
 	ctx := baseCtx()
 	ctx.KitchenEnergy = domain.EffortLow
 	ctx.Preferences = []domain.Preference{
-		{PersonID: "kid", Tag: "pasta", Sentiment: domain.Loves, Confidence: 1.0},
+		{PersonID: mustParsePersonID("kid"), Tag: "pasta", Sentiment: domain.Loves, Confidence: 1.0},
 	}
 	ctx.PantryAvailability = map[string]domain.PantryStatus{
 		"easy": domain.PantryFeasible,
@@ -717,8 +736,8 @@ func TestSelectBatch_InfeasibleCandidateNotPromoted(t *testing.T) {
 	ctx := baseCtx()
 	ctx.KitchenEnergy = domain.EffortLow // exhausted cook
 	ctx.Preferences = []domain.Preference{
-		{PersonID: "kid", Tag: "pasta", Sentiment: domain.Loves, Confidence: 1.0},
-		{PersonID: "kid", Tag: "curry", Sentiment: domain.Loves, Confidence: 1.0},
+		{PersonID: mustParsePersonID("kid"), Tag: "pasta", Sentiment: domain.Loves, Confidence: 1.0},
+		{PersonID: mustParsePersonID("kid"), Tag: "curry", Sentiment: domain.Loves, Confidence: 1.0},
 	}
 	// fav: loved, thrice-cooked → known favorite, but high effort → infeasible
 	fav := domain.Candidate{MealieRecipeID: "fav", Tags: []string{"pasta"}, Effort: domain.EffortHigh}
@@ -849,7 +868,7 @@ func TestRank_AvailabilityInfeasibleRanksLast(t *testing.T) {
 	}
 	ctx := baseCtx()
 	ctx.Preferences = []domain.Preference{
-		{PersonID: "kid", Tag: "saffron", Sentiment: domain.Loves, Confidence: 1.0},
+		{PersonID: mustParsePersonID("kid"), Tag: "saffron", Sentiment: domain.Loves, Confidence: 1.0},
 	}
 	ctx.AvailabilityVerdicts = map[string]string{
 		"r-missing": string(availability.VerdictInfeasible),
@@ -911,7 +930,7 @@ func TestRankSimple_NoSchoolDedup(t *testing.T) {
 	ctx := baseCtx()
 	ctx.SchoolLunchTags = []string{"fisk"} // would normally penalize "fisk"
 	ctx.Preferences = []domain.Preference{
-		{PersonID: "kid", Tag: "fisk", Sentiment: domain.Likes, Confidence: 1.0},
+		{PersonID: mustParsePersonID("kid"), Tag: "fisk", Sentiment: domain.Likes, Confidence: 1.0},
 	}
 	ranked := RankSimple(candidates, ctx)
 	// Fisk should be at the top (preference boost, no school dedup penalty).

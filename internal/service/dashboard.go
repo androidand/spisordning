@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/androidand/spisordning/internal/domain"
 	"github.com/androidand/spisordning/internal/dto"
 )
 
@@ -98,7 +99,11 @@ func (s *Dashboard) Get(ctx context.Context, householdID string) (dto.Dashboard,
 func (s *Dashboard) countLots(ctx context.Context, locations []dto.PantryLocation) (int, error) {
 	total := 0
 	for _, loc := range locations {
-		lots, err := s.db.ListLotsUnderLocation(ctx, loc.ID)
+		locID, err := domain.ParseInventoryLocationID(loc.ID)
+		if err != nil {
+			return 0, fmt.Errorf("service: count lots: %w", err)
+		}
+		lots, err := s.db.ListLotsUnderLocation(ctx, locID)
 		if err != nil {
 			return 0, fmt.Errorf("service: count lots: %w", err)
 		}

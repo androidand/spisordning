@@ -15,7 +15,6 @@ import (
 	"github.com/androidand/spisordning/internal/dto"
 	"github.com/androidand/spisordning/internal/mealie"
 	"github.com/androidand/spisordning/internal/persistence"
-	"github.com/jackc/pgx/v5"
 )
 
 // Store is the subset of persistence.Store that services need. It is defined
@@ -27,36 +26,37 @@ type Store interface {
 	GetPerson(ctx context.Context, id string) (persistence.Person, error)
 	ListPeople(ctx context.Context) ([]persistence.Person, error)
 	UpsertPreference(ctx context.Context, p persistence.PersonPreference) error
-	ListPreferences(ctx context.Context, personID string) ([]persistence.PersonPreference, error)
+	ListPreferences(ctx context.Context, personID domain.PersonID) ([]persistence.PersonPreference, error)
 	RecordObservation(ctx context.Context, o persistence.PreferenceObservation) error
 	ListRecipeRefs(ctx context.Context) ([]persistence.RecipeRef, error)
-	GetRecipeRef(ctx context.Context, id string) (persistence.RecipeRef, error)
+	GetRecipeRef(ctx context.Context, id domain.RecipeRefID) (persistence.RecipeRef, error)
+	GetRecipeRefByMealieID(ctx context.Context, mealieRecipeID string) (persistence.RecipeRef, error)
 	UpsertRecipeRef(ctx context.Context, r persistence.RecipeRef) error
-	CreateMealEvent(ctx context.Context, mealieRecipeID string, servedOn time.Time, planID *int64, planSlotDate *time.Time) (int64, error)
+	CreateMealEvent(ctx context.Context, recipeRefID domain.RecipeRefID, servedOn time.Time, planID *domain.MealPlanID, planSlotDate *time.Time) (domain.MealEventID, error)
 	AddMealReaction(ctx context.Context, r persistence.MealReaction) error
-	ListMealReactions(ctx context.Context, eventID int64) ([]persistence.MealReaction, error)
-	GetMealPlan(ctx context.Context, id int64) (persistence.MealPlan, error)
+	ListMealReactions(ctx context.Context, eventID domain.MealEventID) ([]persistence.MealReaction, error)
+	GetMealPlan(ctx context.Context, id domain.MealPlanID) (persistence.MealPlan, error)
 	GetOrCreateMealPlan(ctx context.Context, weekStart time.Time) (persistence.MealPlan, error)
-	SetMealPlanStatus(ctx context.Context, id int64, status string) error
+	SetMealPlanStatus(ctx context.Context, id domain.MealPlanID, status string) error
 	InsertCandidate(ctx context.Context, c persistence.MealPlanCandidate) error
-	ListCandidates(ctx context.Context, planID int64) ([]persistence.MealPlanCandidate, error)
+	ListCandidates(ctx context.Context, planID domain.MealPlanID) ([]persistence.MealPlanCandidate, error)
 	SetDecision(ctx context.Context, d persistence.MealPlanDecision) error
-	ListDecisions(ctx context.Context, planID int64) ([]persistence.MealPlanDecision, error)
+	ListDecisions(ctx context.Context, planID domain.MealPlanID) ([]persistence.MealPlanDecision, error)
 	InsertShoppingRequirement(ctx context.Context, r persistence.ShoppingRequirement) error
-	ListShoppingRequirements(ctx context.Context, planID int64) ([]persistence.ShoppingRequirement, error)
+	ListShoppingRequirements(ctx context.Context, planID domain.MealPlanID) ([]persistence.ShoppingRequirement, error)
 	UpsertIngredientMapping(ctx context.Context, m persistence.IngredientMapping) error
 	UpsertIngredient(ctx context.Context, i persistence.Ingredient) error
 	AddRecipeIngredient(ctx context.Context, ri persistence.RecipeIngredient) error
-	BeginTx(ctx context.Context) (pgx.Tx, error)
+	BeginTx(ctx context.Context) (persistence.Tx, error)
 	CreateInventoryLocation(ctx context.Context, l persistence.InventoryLocation) error
-	GetInventoryLocation(ctx context.Context, id string) (persistence.InventoryLocation, error)
-	ListLotsUnderLocation(ctx context.Context, id string) ([]persistence.InventoryLot, error)
+	GetInventoryLocation(ctx context.Context, id domain.InventoryLocationID) (persistence.InventoryLocation, error)
+	ListLotsUnderLocation(ctx context.Context, id domain.InventoryLocationID) ([]persistence.InventoryLot, error)
 	ListInventoryLocations(ctx context.Context, householdID string) ([]persistence.InventoryLocation, error)
-	RecordPurchase(ctx context.Context, ingredientID, productID, locationID string, quantity float64, unit string, bestBefore *time.Time, source string) (int64, error)
-	RecordConsume(ctx context.Context, lotID int64, quantity float64, estimated bool, source string) error
-	GetInventoryLot(ctx context.Context, id int64) (persistence.InventoryLot, error)
-	ListMealEvents(ctx context.Context, mealieRecipeID, servedOn string) ([]persistence.MealEvent, error)
-	GetMealEvent(ctx context.Context, id int64) (persistence.MealEvent, error)
+	RecordPurchase(ctx context.Context, ingredientID domain.IngredientID, productID *domain.ProductID, locationID domain.InventoryLocationID, quantity float64, unit string, bestBefore *time.Time, source string) (domain.InventoryLotID, error)
+	RecordConsume(ctx context.Context, lotID domain.InventoryLotID, quantity float64, estimated bool, source string) error
+	GetInventoryLot(ctx context.Context, id domain.InventoryLotID) (persistence.InventoryLot, error)
+	ListMealEvents(ctx context.Context, recipeRefID domain.RecipeRefID, servedOn string) ([]persistence.MealEvent, error)
+	GetMealEvent(ctx context.Context, id domain.MealEventID) (persistence.MealEvent, error)
 	ListMealPlans(ctx context.Context) ([]persistence.MealPlan, error)
 	GetIngredientMapping(ctx context.Context, mealieFoodID string) (persistence.IngredientMapping, error)
 	UpsertIngredientAlias(ctx context.Context, a persistence.IngredientAlias) error
@@ -65,28 +65,28 @@ type Store interface {
 	DeleteIngredientAlias(ctx context.Context, householdID, alias string) error
 	ResolveIngredientAlias(ctx context.Context, householdID, alias string) (string, error)
 	ListAllStores(ctx context.Context) ([]domain.Store, error)
-	ListStoreProductOffers(ctx context.Context, storeID string) ([]domain.StoreProductOffer, error)
+	ListStoreProductOffers(ctx context.Context, storeID domain.StoreID) ([]domain.StoreProductOffer, error)
 	CreateRecipeFamily(ctx context.Context, f persistence.RecipeFamily) error
-	GetRecipeFamily(ctx context.Context, id string) (persistence.RecipeFamily, error)
+	GetRecipeFamily(ctx context.Context, id domain.RecipeFamilyID) (persistence.RecipeFamily, error)
 	ListRecipeFamilies(ctx context.Context) ([]persistence.RecipeFamily, error)
-	SetRecipeFamilyDefaultVariant(ctx context.Context, familyID, variantID string) error
+	SetRecipeFamilyDefaultVariant(ctx context.Context, familyID domain.RecipeFamilyID, variantID domain.RecipeVariantID) error
 	CreateRecipeVariant(ctx context.Context, v persistence.RecipeVariant) error
-	GetRecipeVariant(ctx context.Context, id string) (persistence.RecipeVariant, error)
-	ListRecipeVariants(ctx context.Context, familyID string) ([]persistence.RecipeVariant, error)
-	CreateRecipeRevision(ctx context.Context, r persistence.RecipeRevision) (int64, error)
-	GetRecipeRevision(ctx context.Context, id int64) (persistence.RecipeRevision, error)
-	ListRecipeRevisions(ctx context.Context, variantID string) ([]persistence.RecipeRevision, error)
-	AddRecipeRevisionParent(ctx context.Context, child, parent int64) error
-	ListRecipeRevisionParents(ctx context.Context, revisionID int64) ([]int64, error)
-	UpsertFavorite(ctx context.Context, personID, householdID, mealieRecipeID string) error
-	DeleteFavorite(ctx context.Context, personID, householdID, mealieRecipeID string) error
-	ListFavoritesForRecipe(ctx context.Context, mealieRecipeID string) ([]persistence.Favorite, error)
-	GetRecipeRating(ctx context.Context, mealieRecipeID string) (persistence.RecipeRating, error)
+	GetRecipeVariant(ctx context.Context, id domain.RecipeVariantID) (persistence.RecipeVariant, error)
+	ListRecipeVariants(ctx context.Context, familyID domain.RecipeFamilyID) ([]persistence.RecipeVariant, error)
+	CreateRecipeRevision(ctx context.Context, r persistence.RecipeRevision) (domain.RecipeRevisionID, error)
+	GetRecipeRevision(ctx context.Context, id domain.RecipeRevisionID) (persistence.RecipeRevision, error)
+	ListRecipeRevisions(ctx context.Context, variantID domain.RecipeVariantID) ([]persistence.RecipeRevision, error)
+	AddRecipeRevisionParent(ctx context.Context, child, parent domain.RecipeRevisionID) error
+	ListRecipeRevisionParents(ctx context.Context, revisionID domain.RecipeRevisionID) ([]domain.RecipeRevisionID, error)
+	UpsertFavorite(ctx context.Context, scopeType, scopeID string, recipeRefID domain.RecipeRefID) error
+	DeleteFavorite(ctx context.Context, scopeType, scopeID string, recipeRefID domain.RecipeRefID) error
+	ListFavoritesForRecipe(ctx context.Context, recipeRefID domain.RecipeRefID) ([]persistence.Favorite, error)
+	GetRecipeRating(ctx context.Context, recipeRefID domain.RecipeRefID) (persistence.RecipeRating, error)
 	ListRetailers(ctx context.Context) ([]domain.Retailer, error)
-	ListRetailerProducts(ctx context.Context, retailerID string) ([]domain.RetailerProduct, error)
+	ListRetailerProducts(ctx context.Context, retailerID domain.RetailerID) ([]domain.RetailerProduct, error)
 	ListCurrentPrices(ctx context.Context) ([]domain.CurrentStoreProductPrice, error)
 	ListExpiringLots(ctx context.Context, within time.Duration) ([]persistence.InventoryLot, error)
-	ListPantryIngredientIDs(ctx context.Context) ([]string, error)
+	ListPantryIngredientIDs(ctx context.Context) ([]domain.IngredientID, error)
 	ListAllRecipeIngredients(ctx context.Context) ([]persistence.RecipeIngredient, error)
 }
 
@@ -94,7 +94,7 @@ type Store interface {
 // It is separate from pgx.Tx so tests can inject a fake without importing pgx.
 type txConn interface {
 	Exec(ctx context.Context, query string, args ...interface{}) (interface{}, error)
-	QueryRow(ctx context.Context, query string, args ...interface{}) pgx.Row
+	QueryRow(ctx context.Context, query string, args ...interface{}) persistence.Row
 	Commit(ctx context.Context) error
 	Rollback(ctx context.Context) error
 }
@@ -135,7 +135,7 @@ func (s *People) CreatePerson(ctx context.Context, in dto.PersonInput) (dto.Pers
 		weight = 1.0
 	}
 	p := persistence.Person{
-		ID:        generateID(),
+		ID:        domain.NewPersonID().String(),
 		Name:      in.Name,
 		Weight:    weight,
 		CreatedAt: time.Now(),
@@ -153,7 +153,7 @@ func (s *People) UpdatePerson(ctx context.Context, id string, in dto.PersonUpdat
 		return dto.PersonResponse{}, fmt.Errorf("service: update person: name is required")
 	}
 	if err := s.db.UpdatePerson(ctx, persistence.Person{ID: id, Name: in.Name, Weight: in.Weight}); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, persistence.ErrNoRows) {
 			return dto.PersonResponse{}, fmt.Errorf("%w: person %s not found", dto.ErrNotFound, id)
 		}
 		return dto.PersonResponse{}, fmt.Errorf("service: update person: %w", err)
@@ -168,14 +168,22 @@ type Preferences struct{ db Store }
 func NewPreferences(db Store) *Preferences { return &Preferences{db: db} }
 
 func (s *Preferences) ListPreferences(ctx context.Context, personID string) ([]dto.PersonPreferenceResponse, error) {
-	prefs, err := s.db.ListPreferences(ctx, personID)
+	var pid domain.PersonID
+	if personID != "" {
+		var err error
+		pid, err = domain.ParsePersonID(personID)
+		if err != nil {
+			return nil, fmt.Errorf("service: list preferences: %w", err)
+		}
+	}
+	prefs, err := s.db.ListPreferences(ctx, pid)
 	if err != nil {
 		return nil, fmt.Errorf("service: list preferences: %w", err)
 	}
 	out := make([]dto.PersonPreferenceResponse, 0, len(prefs))
 	for _, p := range prefs {
 		out = append(out, dto.PersonPreferenceResponse{
-			PersonID: p.PersonID, Tag: p.Tag, Sentiment: int(p.Sentiment),
+			PersonID: p.PersonID.String(), Tag: p.Tag, Sentiment: int(p.Sentiment),
 			Confidence: p.Confidence, UpdatedAt: p.UpdatedAt,
 		})
 	}
@@ -193,20 +201,24 @@ func (s *Preferences) SetPreference(ctx context.Context, in dto.SetPreferenceInp
 	if in.Confidence < 0 || in.Confidence > 1 {
 		return dto.PersonPreferenceResponse{}, fmt.Errorf("%w: confidence must be in [0, 1]", dto.ErrInvalidPreference)
 	}
+	pid, err := domain.ParsePersonID(in.PersonID)
+	if err != nil {
+		return dto.PersonPreferenceResponse{}, fmt.Errorf("service: set preference: %w", err)
+	}
 	if err := s.db.UpsertPreference(ctx, persistence.PersonPreference{
-		PersonID: in.PersonID, Tag: in.Tag, Sentiment: in.Sentiment, Confidence: in.Confidence,
+		PersonID: pid, Tag: in.Tag, Sentiment: in.Sentiment, Confidence: in.Confidence,
 	}); err != nil {
 		return dto.PersonPreferenceResponse{}, fmt.Errorf("service: set preference: %w", err)
 	}
 	// Re-read to return the authoritative row (with the server-set updated_at).
-	prefs, err := s.db.ListPreferences(ctx, in.PersonID)
+	prefs, err := s.db.ListPreferences(ctx, pid)
 	if err != nil {
 		return dto.PersonPreferenceResponse{}, fmt.Errorf("service: set preference: %w", err)
 	}
 	for _, p := range prefs {
 		if p.Tag == in.Tag {
 			return dto.PersonPreferenceResponse{
-				PersonID: p.PersonID, Tag: p.Tag, Sentiment: int(p.Sentiment),
+				PersonID: p.PersonID.String(), Tag: p.Tag, Sentiment: int(p.Sentiment),
 				Confidence: p.Confidence, UpdatedAt: p.UpdatedAt,
 			}, nil
 		}
@@ -241,10 +253,10 @@ func (s *Recipes) ListRecipes(ctx context.Context) ([]dto.RecipeRefResponse, err
 	return out, nil
 }
 
-func (s *Recipes) GetRecipe(ctx context.Context, id string) (dto.RecipeRefResponse, error) {
-	r, err := s.db.GetRecipeRef(ctx, id)
+func (s *Recipes) GetRecipe(ctx context.Context, mealieRecipeID string) (dto.RecipeRefResponse, error) {
+	r, err := s.db.GetRecipeRefByMealieID(ctx, mealieRecipeID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, persistence.ErrNoRows) {
 			return dto.RecipeRefResponse{}, fmt.Errorf("service: get recipe: %w", dto.ErrNotFound)
 		}
 		return dto.RecipeRefResponse{}, fmt.Errorf("service: get recipe: %w", err)
@@ -290,22 +302,26 @@ func (s *Recipes) SyncFromMealie(ctx context.Context) (int, error) {
 // parser fallback carries nothing usable and is skipped rather than persisted
 // as a blank ingredient.
 func (s *Recipes) syncIngredients(ctx context.Context, ref mealie.RecipeRef) error {
+	refRow, err := s.db.GetRecipeRefByMealieID(ctx, ref.MealieRecipeID)
+	if err != nil {
+		return fmt.Errorf("resolve recipe ref %q: %w", ref.MealieRecipeID, err)
+	}
 	for _, line := range ref.Ingredients {
 		if line.FoodName == "" {
 			continue
 		}
-		id := domain.CanonicalIngredientID(line.FoodName)
-		if err := s.db.UpsertIngredient(ctx, persistence.Ingredient{ID: id, Display: line.FoodName}); err != nil {
-			return fmt.Errorf("upsert ingredient %q: %w", id, err)
+		ingID := domain.IngredientIDForName(domain.CanonicalIngredientID(line.FoodName))
+		if err := s.db.UpsertIngredient(ctx, persistence.Ingredient{ID: ingID, Display: line.FoodName}); err != nil {
+			return fmt.Errorf("upsert ingredient %q: %w", ingID, err)
 		}
 		ri := persistence.RecipeIngredient{
-			MealieRecipeID: ref.MealieRecipeID,
-			IngredientID:   id,
-			Quantity:       line.Quantity,
-			Unit:           line.Unit,
+			RecipeRefID:  refRow.ID,
+			IngredientID: ingID,
+			Quantity:     line.Quantity,
+			Unit:         line.Unit,
 		}
 		if err := s.db.AddRecipeIngredient(ctx, ri); err != nil {
-			return fmt.Errorf("add recipe_ingredient %q: %w", id, err)
+			return fmt.Errorf("add recipe_ingredient %q: %w", ingID, err)
 		}
 	}
 	return nil
@@ -329,24 +345,36 @@ func (s *Meals) CreateMealEvent(ctx context.Context, in dto.MealEventNew) (dto.M
 		return dto.MealEventResponse{}, fmt.Errorf("service: meals create: invalid served_on %q: %w", in.ServedOn, err)
 	}
 
+	ref, err := s.db.GetRecipeRefByMealieID(ctx, in.MealieRecipeID)
+	if err != nil {
+		if errors.Is(err, persistence.ErrNoRows) {
+			return dto.MealEventResponse{}, fmt.Errorf("service: meals create: %w: recipe %q not found", dto.ErrNotFound, in.MealieRecipeID)
+		}
+		return dto.MealEventResponse{}, fmt.Errorf("service: meals create: resolve recipe: %w", err)
+	}
+
 	tx, err := s.db.BeginTx(ctx)
 	if err != nil {
 		return dto.MealEventResponse{}, fmt.Errorf("service: meals create: begin tx: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
-	const insertEventQ = `INSERT INTO meal_event (mealie_recipe_id, served_on) VALUES ($1, $2) RETURNING id`
-	var eventID int64
-	if err := tx.QueryRow(ctx, insertEventQ, in.MealieRecipeID, servedOn).Scan(&eventID); err != nil {
+	const insertEventQ = `INSERT INTO meal_event (recipe_ref_id, served_on) VALUES ($1, $2) RETURNING id`
+	var eventID domain.MealEventID
+	if err := tx.QueryRow(ctx, insertEventQ, ref.ID, servedOn).Scan(&eventID); err != nil {
 		return dto.MealEventResponse{}, fmt.Errorf("service: meals create: insert event: %w", err)
 	}
 
 	for _, rx := range in.Reactions {
+		pid, perr := domain.ParsePersonID(rx.PersonID)
+		if perr != nil {
+			return dto.MealEventResponse{}, fmt.Errorf("service: meals create: parse person id: %w", perr)
+		}
 		const insertRxQ = `INSERT INTO meal_reaction (meal_event_id, person_id, sentiment, note)
 			VALUES ($1, $2, $3, $4)
 			ON CONFLICT (meal_event_id, person_id) DO UPDATE SET sentiment = EXCLUDED.sentiment,
 				note = EXCLUDED.note`
-		if _, err := tx.Exec(ctx, insertRxQ, eventID, rx.PersonID, rx.Sentiment, ""); err != nil {
+		if _, err := tx.Exec(ctx, insertRxQ, eventID, pid, rx.Sentiment, ""); err != nil {
 			return dto.MealEventResponse{}, fmt.Errorf("service: meals create: add reaction: %w", err)
 		}
 	}
@@ -357,8 +385,9 @@ func (s *Meals) CreateMealEvent(ctx context.Context, in dto.MealEventNew) (dto.M
 
 	// Record preference observations outside the transaction — non-fatal.
 	for _, rx := range in.Reactions {
+		pid, _ := domain.ParsePersonID(rx.PersonID)
 		obs := persistence.PreferenceObservation{
-			PersonID:   rx.PersonID,
+			PersonID:   pid,
 			Tag:        "meal",
 			Sentiment:  rx.Sentiment,
 			Source:     "reaction",
@@ -374,74 +403,90 @@ func (s *Meals) CreateMealEvent(ctx context.Context, in dto.MealEventNew) (dto.M
 		return dto.MealEventResponse{}, fmt.Errorf("service: meals create: read reactions: %w", err)
 	}
 	out := dto.MealEventResponse{
-		ID: eventID, MealieRecipeID: in.MealieRecipeID,
+		ID: eventID.String(), MealieRecipeID: in.MealieRecipeID,
 		ServedOn:  in.ServedOn,
 		CreatedAt: time.Now(),
 		Reactions: make([]dto.MealReactionResponse, 0, len(rxns)),
 	}
 	for _, r := range rxns {
 		out.Reactions = append(out.Reactions, dto.MealReactionResponse{
-			PersonID: r.PersonID, Sentiment: r.Sentiment,
+			PersonID: r.PersonID.String(), Sentiment: r.Sentiment,
 		})
 	}
 	return out, nil
 }
 
-func (s *Meals) GetMeal(ctx context.Context, id int64) (dto.MealEventResponse, error) {
-	event, err := s.db.GetMealEvent(ctx, id)
+func (s *Meals) GetMeal(ctx context.Context, id string) (dto.MealEventResponse, error) {
+	eventID, err := domain.ParseMealEventID(id)
 	if err != nil {
 		return dto.MealEventResponse{}, fmt.Errorf("service: get meal: %w", err)
+	}
+	event, err := s.db.GetMealEvent(ctx, eventID)
+	if err != nil {
+		return dto.MealEventResponse{}, fmt.Errorf("service: get meal: %w", err)
+	}
+	ref, err := s.db.GetRecipeRef(ctx, event.RecipeRefID)
+	if err != nil {
+		return dto.MealEventResponse{}, fmt.Errorf("service: get meal: resolve recipe: %w", err)
 	}
 	rxns, err := s.db.ListMealReactions(ctx, event.ID)
 	if err != nil {
 		return dto.MealEventResponse{}, fmt.Errorf("service: get meal: list reactions: %w", err)
 	}
 	out := dto.MealEventResponse{
-		ID: event.ID, MealieRecipeID: event.MealieRecipeID,
+		ID: event.ID.String(), MealieRecipeID: ref.MealieRecipeID,
 		ServedOn:  event.ServedOn.Format("2006-01-02"),
 		CreatedAt: event.CreatedAt,
 		Reactions: make([]dto.MealReactionResponse, 0, len(rxns)),
 	}
 	for _, r := range rxns {
 		out.Reactions = append(out.Reactions, dto.MealReactionResponse{
-			PersonID: r.PersonID, Sentiment: r.Sentiment,
+			PersonID: r.PersonID.String(), Sentiment: r.Sentiment,
 		})
 	}
 	return out, nil
 }
 
 func (s *Meals) ListMeals(ctx context.Context, mealieRecipeID, servedOn string) ([]dto.MealEventResponse, error) {
-	events, err := s.db.ListMealEvents(ctx, mealieRecipeID, servedOn)
+	var recipeRefID domain.RecipeRefID
+	if mealieRecipeID != "" {
+		ref, err := s.db.GetRecipeRefByMealieID(ctx, mealieRecipeID)
+		if err != nil {
+			if errors.Is(err, persistence.ErrNoRows) {
+				return nil, fmt.Errorf("service: list meals: %w: recipe %q not found", dto.ErrNotFound, mealieRecipeID)
+			}
+			return nil, fmt.Errorf("service: list meals: resolve recipe: %w", err)
+		}
+		recipeRefID = ref.ID
+	}
+	events, err := s.db.ListMealEvents(ctx, recipeRefID, servedOn)
 	if err != nil {
 		return nil, fmt.Errorf("service: list meals: %w", err)
 	}
 	out := make([]dto.MealEventResponse, 0, len(events))
 	for _, event := range events {
+		ref, err := s.db.GetRecipeRef(ctx, event.RecipeRefID)
+		if err != nil {
+			return nil, fmt.Errorf("service: list meals: resolve recipe: %w", err)
+		}
 		rxns, err := s.db.ListMealReactions(ctx, event.ID)
 		if err != nil {
 			return nil, fmt.Errorf("service: list meals: list reactions: %w", err)
 		}
 		resp := dto.MealEventResponse{
-			ID: event.ID, MealieRecipeID: event.MealieRecipeID,
+			ID: event.ID.String(), MealieRecipeID: ref.MealieRecipeID,
 			ServedOn:  event.ServedOn.Format("2006-01-02"),
 			CreatedAt: event.CreatedAt,
 			Reactions: make([]dto.MealReactionResponse, 0, len(rxns)),
 		}
-		for _, r := range rxns {
-			resp.Reactions = append(resp.Reactions, dto.MealReactionResponse{
-				PersonID: r.PersonID, Sentiment: r.Sentiment,
-			})
-		}
-		out = append(out, resp)
+	for _, r := range rxns {
+		resp.Reactions = append(resp.Reactions, dto.MealReactionResponse{
+			PersonID: r.PersonID.String(), Sentiment: r.Sentiment,
+		})
+	}
+	out = append(out, resp)
 	}
 	return out, nil
 }
 
-// generateID generates a deterministic 16-char hex id for tests.
-func generateID() string {
-	var b [8]byte
-	for i := range b {
-		b[i] = byte(i + 1)
-	}
-	return fmt.Sprintf("%016x", b)
-}
+

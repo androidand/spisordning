@@ -34,8 +34,8 @@
 -- household-level list. When the household table lands
 -- (establish-household-and-catalog) this becomes a household_id reference.
 CREATE TABLE shopping_list (
-    id              BIGSERIAL PRIMARY KEY,
-    owner_person_id TEXT REFERENCES person(id) ON DELETE SET NULL,
+    id              UUID PRIMARY KEY,
+    owner_person_id UUID REFERENCES person(id) ON DELETE SET NULL,
     name            TEXT NOT NULL,
     status          TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','archived')),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -49,12 +49,12 @@ CREATE TABLE shopping_list (
 -- (e.g. "paper towels"). No retailer product id — resolution is the adapter's
 -- job.
 CREATE TABLE shopping_list_item (
-    id                      BIGSERIAL PRIMARY KEY,
-    shopping_list_id        BIGINT NOT NULL REFERENCES shopping_list(id) ON DELETE CASCADE,
-    shopping_requirement_id BIGINT REFERENCES shopping_requirement(id) ON DELETE SET NULL,
-    ingredient_id           TEXT REFERENCES ingredient(id) ON DELETE SET NULL,
+    id                      UUID PRIMARY KEY,
+    shopping_list_id        UUID NOT NULL REFERENCES shopping_list(id) ON DELETE CASCADE,
+    shopping_requirement_id UUID REFERENCES shopping_requirement(id) ON DELETE SET NULL,
+    ingredient_id           UUID REFERENCES ingredient(id) ON DELETE SET NULL,
     label                   TEXT,
-    quantity                DOUBLE PRECISION NOT NULL,
+    quantity                numeric(12,3) NOT NULL,
     unit                    TEXT NOT NULL,
     checked                 BOOLEAN NOT NULL DEFAULT false,
     added_at                TIMESTAMPTZ NOT NULL DEFAULT now(),

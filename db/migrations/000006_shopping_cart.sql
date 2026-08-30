@@ -31,10 +31,12 @@
 -- lifecycle: 'created' (to-cart call made) -> 'confirmed' (an order was confirmed
 -- from it) or 'abandoned' (no order).
 CREATE TABLE shopping_cart (
-    id BIGSERIAL PRIMARY KEY,
-    retailer_list_binding_id BIGINT NOT NULL REFERENCES retailer_list_binding(id) ON DELETE CASCADE,
+    id UUID PRIMARY KEY,
+    shopping_list_id UUID NOT NULL,
+    retailer TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    status TEXT NOT NULL DEFAULT 'created' CHECK (status IN ('created','confirmed','abandoned'))
+    status TEXT NOT NULL DEFAULT 'created' CHECK (status IN ('created','confirmed','abandoned')),
+    FOREIGN KEY (shopping_list_id, retailer) REFERENCES retailer_list_binding(shopping_list_id, retailer) ON DELETE CASCADE
 );
 
 -- The resolved items at the moment of the to-cart call — a snapshot for order
@@ -42,14 +44,15 @@ CREATE TABLE shopping_cart (
 -- product code; the cart is retailer-specific (unlike the retailer-independent
 -- shopping_list). `resolved_price` is the price at that moment (NULL if unknown).
 CREATE TABLE shopping_cart_item (
-    id BIGSERIAL PRIMARY KEY,
-    shopping_cart_id BIGINT NOT NULL REFERENCES shopping_cart(id) ON DELETE CASCADE,
+    shopping_cart_id UUID NOT NULL REFERENCES shopping_cart(id) ON DELETE CASCADE,
+    line_no          INT NOT NULL,
     retailer_product_id TEXT NOT NULL,
-    quantity DOUBLE PRECISION NOT NULL,
-    unit TEXT NOT NULL,
-    resolved_price DOUBLE PRECISION
+    quantity numeric(12,3) NOT NULL,
+    unit             TEXT NOT NULL,
+    resolved_price_minor BIGINT,
+    currency         CHAR(3) NOT NULL DEFAULT 'SEK',
+    PRIMARY KEY (shopping_cart_id, line_no)
 );
-CREATE INDEX ON shopping_cart_item (shopping_cart_id);
 
 -- +goose Down
 DROP TABLE IF EXISTS shopping_cart_item CASCADE;

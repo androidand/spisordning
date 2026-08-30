@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/androidand/spisordning/internal/domain"
 )
 
 // truncateTable resets the tables an integration test touches so round-trips
@@ -42,12 +44,13 @@ func TestPeople_PreferencesAndObservations(t *testing.T) {
 		t.Errorf("GetPerson = %+v", got)
 	}
 
+	testPersonID := domain.NewPersonID()
 	if err := s.UpsertPreference(ctx, PersonPreference{
-		PersonID: "p-test-people", Tag: "pasta", Sentiment: 2, Confidence: 0.9,
+		PersonID: testPersonID, Tag: "pasta", Sentiment: 2, Confidence: 0.9,
 	}); err != nil {
 		t.Fatalf("UpsertPreference: %v", err)
 	}
-	prefs, err := s.ListPreferences(ctx, "p-test-people")
+	prefs, err := s.ListPreferences(ctx, testPersonID)
 	if err != nil {
 		t.Fatalf("ListPreferences: %v", err)
 	}
@@ -62,11 +65,12 @@ func TestRecipes_IngredientsAndMappings(t *testing.T) {
 	truncateTables(t, ctx, s, "recipe_ingredient", "ingredient_mapping", "ingredient", "recipe_ref")
 
 	// Seed an ingredient + mapping, then a recipe referencing it.
-	if err := s.UpsertIngredient(ctx, Ingredient{ID: "köttfärs", Display: "Köttfärs"}); err != nil {
+	ingID := domain.NewIngredientID()
+	if err := s.UpsertIngredient(ctx, Ingredient{ID: ingID, Display: "Köttfärs"}); err != nil {
 		t.Fatalf("UpsertIngredient: %v", err)
 	}
 	if err := s.UpsertIngredientMapping(ctx, IngredientMapping{
-		MealieFoodID: "mf-1", IngredientID: "köttfärs", GramsPerUnit: 500, DefaultForm: "fresh",
+		MealieFoodID: "mf-1", IngredientID: ingID, GramsPerUnit: 500, DefaultForm: "fresh",
 	}); err != nil {
 		t.Fatalf("UpsertIngredientMapping: %v", err)
 	}
@@ -75,13 +79,17 @@ func TestRecipes_IngredientsAndMappings(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpsertRecipeRef: %v", err)
 	}
+	ref, err := s.GetRecipeRefByMealieID(ctx, "r-pasta")
+	if err != nil {
+		t.Fatalf("GetRecipeRefByMealieID: %v", err)
+	}
 	if err := s.AddRecipeIngredient(ctx, RecipeIngredient{
-		MealieRecipeID: "r-pasta", IngredientID: "köttfärs", Quantity: 400, Unit: "g",
+		RecipeRefID: ref.ID, IngredientID: ingID, Quantity: 400, Unit: "g",
 	}); err != nil {
 		t.Fatalf("AddRecipeIngredient: %v", err)
 	}
 
-	refs, err := s.GetRecipeRef(ctx, "r-pasta")
+	refs, err := s.GetRecipeRef(ctx, ref.ID)
 	if err != nil {
 		t.Fatalf("GetRecipeRef: %v", err)
 	}
@@ -96,14 +104,14 @@ func TestRecipes_IngredientsAndMappings(t *testing.T) {
 	if len(all) != 1 || all[0].MealieRecipeID != "r-pasta" || all[0].Effort != 2 {
 		t.Errorf("ListRecipeRefs = %+v", all)
 	}
-	ing, err := s.GetIngredient(ctx, "köttfärs")
+	ing, err := s.GetIngredient(ctx, ingID)
 	if err != nil {
 		t.Fatalf("GetIngredient: %v", err)
 	}
 	if ing.Display != "Köttfärs" {
 		t.Errorf("GetIngredient = %+v", ing)
 	}
-	rings, err := s.ListRecipeIngredients(ctx, "r-pasta")
+	rings, err := s.ListRecipeIngredients(ctx, ref.ID)
 	if err != nil {
 		t.Fatalf("ListRecipeIngredients: %v", err)
 	}
@@ -113,7 +121,7 @@ func TestRecipes_IngredientsAndMappings(t *testing.T) {
 
 	// resolve + re-fetch mapping
 	if err := s.UpsertIngredientMapping(ctx, IngredientMapping{
-		MealieFoodID: "mf-1", IngredientID: "köttfärs", GramsPerUnit: 500, DefaultForm: "fresh", NeedsReview: false,
+		MealieFoodID: "mf-1", IngredientID: ingID, GramsPerUnit: 500, DefaultForm: "fresh", NeedsReview: false,
 	}); err != nil {
 		t.Fatalf("UpsertIngredientMapping resolve: %v", err)
 	}
@@ -135,15 +143,19 @@ func TestMeals_ReactionsAndConstraints(t *testing.T) {
 	if err := s.UpsertRecipeRef(ctx, RecipeRef{MealieRecipeID: "r-fisk", Title: "Ugnslax", Effort: 2}); err != nil {
 		t.Fatalf("UpsertRecipeRef: %v", err)
 	}
+	ref, err := s.GetRecipeRefByMealieID(ctx, "r-fisk")
+	if err != nil {
+		t.Fatalf("GetRecipeRefByMealieID: %v", err)
+	}
 	if err := s.CreatePerson(ctx, Person{ID: "p-kid", Name: "Kid", Weight: 1}); err != nil {
 		t.Fatalf("CreatePerson: %v", err)
 	}
 	served := time.Now().AddDate(0, 0, -3)
-	eid, err := s.CreateMealEvent(ctx, "r-fisk", served, nil, nil)
+	eid, err := s.CreateMealEvent(ctx, ref.ID, served, nil, nil)
 	if err != nil {
 		t.Fatalf("CreateMealEvent: %v", err)
 	}
-	if err := s.AddMealReaction(ctx, MealReaction{MealEventID: eid, PersonID: "p-kid", Sentiment: 2, Note: "gott"}); err != nil {
+	if err := s.AddMealReaction(ctx, MealReaction{MealEventID: eid, PersonID: domain.NewPersonID(), Sentiment: 2, Note: "gott"}); err != nil {
 		t.Fatalf("AddMealReaction: %v", err)
 	}
 	rxns, err := s.ListMealReactions(ctx, eid)

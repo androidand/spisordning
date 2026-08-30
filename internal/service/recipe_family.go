@@ -7,8 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/androidand/spisordning/internal/domain"
 	"github.com/androidand/spisordning/internal/dto"
 	"github.com/androidand/spisordning/internal/persistence"
@@ -39,9 +37,13 @@ func (s *RecipeFamily) ListFamilies(ctx context.Context) ([]dto.RecipeFamilyResp
 }
 
 func (s *RecipeFamily) GetFamily(ctx context.Context, id string) (dto.RecipeFamilyResponse, error) {
-	f, err := s.db.GetRecipeFamily(ctx, id)
+	famID, err := domain.ParseRecipeFamilyID(id)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		return dto.RecipeFamilyResponse{}, fmt.Errorf("service: get recipe family: %w", err)
+	}
+	f, err := s.db.GetRecipeFamily(ctx, famID)
+	if err != nil {
+		if errors.Is(err, persistence.ErrNoRows) {
 			return dto.RecipeFamilyResponse{}, fmt.Errorf("service: get recipe family: %w", dto.ErrNotFound)
 		}
 		return dto.RecipeFamilyResponse{}, fmt.Errorf("service: get recipe family: %w", err)
@@ -50,16 +52,16 @@ func (s *RecipeFamily) GetFamily(ctx context.Context, id string) (dto.RecipeFami
 }
 
 func (s *RecipeFamily) CreateFamily(ctx context.Context, in dto.CreateRecipeFamilyInput) (dto.RecipeFamilyResponse, error) {
-	id := strings.TrimSpace(in.ID)
-	if id == "" {
-		id = slugify(in.Name)
+	slug := strings.TrimSpace(in.ID)
+	if slug == "" {
+		slug = slugify(in.Name)
 	}
 	name := strings.TrimSpace(in.Name)
 	if name == "" {
 		return dto.RecipeFamilyResponse{}, fmt.Errorf("service: create recipe family: name is required")
 	}
 	f := persistence.RecipeFamily{
-		ID:          id,
+		Slug:        slug,
 		Name:        name,
 		Description: strings.TrimSpace(in.Description),
 		Archived:    false,
@@ -72,13 +74,17 @@ func (s *RecipeFamily) CreateFamily(ctx context.Context, in dto.CreateRecipeFami
 }
 
 func (s *RecipeFamily) ListVariants(ctx context.Context, familyID string) ([]dto.RecipeFamilyVariantResponse, error) {
-	if _, err := s.db.GetRecipeFamily(ctx, familyID); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+	famID, err := domain.ParseRecipeFamilyID(familyID)
+	if err != nil {
+		return nil, fmt.Errorf("service: list recipe variants: %w", err)
+	}
+	if _, err := s.db.GetRecipeFamily(ctx, famID); err != nil {
+		if errors.Is(err, persistence.ErrNoRows) {
 			return nil, fmt.Errorf("service: list recipe variants: %w", dto.ErrNotFound)
 		}
 		return nil, fmt.Errorf("service: list recipe variants: %w", err)
 	}
-	variants, err := s.db.ListRecipeVariants(ctx, familyID)
+	variants, err := s.db.ListRecipeVariants(ctx, famID)
 	if err != nil {
 		return nil, fmt.Errorf("service: list recipe variants: %w", err)
 	}
@@ -90,23 +96,27 @@ func (s *RecipeFamily) ListVariants(ctx context.Context, familyID string) ([]dto
 }
 
 func (s *RecipeFamily) CreateVariant(ctx context.Context, familyID string, in dto.CreateRecipeVariantInput) (dto.RecipeFamilyVariantResponse, error) {
-	if _, err := s.db.GetRecipeFamily(ctx, familyID); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+	famID, err := domain.ParseRecipeFamilyID(familyID)
+	if err != nil {
+		return dto.RecipeFamilyVariantResponse{}, fmt.Errorf("service: create recipe variant: %w", err)
+	}
+	if _, err := s.db.GetRecipeFamily(ctx, famID); err != nil {
+		if errors.Is(err, persistence.ErrNoRows) {
 			return dto.RecipeFamilyVariantResponse{}, fmt.Errorf("service: create recipe variant: %w", dto.ErrNotFound)
 		}
 		return dto.RecipeFamilyVariantResponse{}, fmt.Errorf("service: create recipe variant: %w", err)
 	}
-	id := strings.TrimSpace(in.ID)
-	if id == "" {
-		id = slugify(in.Title)
+	slug := strings.TrimSpace(in.ID)
+	if slug == "" {
+		slug = slugify(in.Title)
 	}
 	title := strings.TrimSpace(in.Title)
 	if title == "" {
 		return dto.RecipeFamilyVariantResponse{}, fmt.Errorf("service: create recipe variant: title is required")
 	}
 	v := persistence.RecipeVariant{
-		ID:                id,
-		FamilyID:          familyID,
+		Slug:              slug,
+		FamilyID:          famID,
 		Title:             title,
 		SourceAttribution: strings.TrimSpace(in.SourceAttribution),
 		Archived:          false,
@@ -119,13 +129,17 @@ func (s *RecipeFamily) CreateVariant(ctx context.Context, familyID string, in dt
 }
 
 func (s *RecipeFamily) ListRevisions(ctx context.Context, variantID string) ([]dto.RecipeFamilyRevisionResponse, error) {
-	if _, err := s.db.GetRecipeVariant(ctx, variantID); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+	varID, err := domain.ParseRecipeVariantID(variantID)
+	if err != nil {
+		return nil, fmt.Errorf("service: list recipe revisions: %w", err)
+	}
+	if _, err := s.db.GetRecipeVariant(ctx, varID); err != nil {
+		if errors.Is(err, persistence.ErrNoRows) {
 			return nil, fmt.Errorf("service: list recipe revisions: %w", dto.ErrNotFound)
 		}
 		return nil, fmt.Errorf("service: list recipe revisions: %w", err)
 	}
-	revs, err := s.db.ListRecipeRevisions(ctx, variantID)
+	revs, err := s.db.ListRecipeRevisions(ctx, varID)
 	if err != nil {
 		return nil, fmt.Errorf("service: list recipe revisions: %w", err)
 	}
@@ -140,15 +154,19 @@ func (s *RecipeFamily) ListRevisions(ctx context.Context, variantID string) ([]d
 	return out, nil
 }
 
-func (s *RecipeFamily) GetRevision(ctx context.Context, revisionID int64) (dto.RecipeFamilyRevisionResponse, error) {
-	r, err := s.db.GetRecipeRevision(ctx, revisionID)
+func (s *RecipeFamily) GetRevision(ctx context.Context, revisionID string) (dto.RecipeFamilyRevisionResponse, error) {
+	revID, err := domain.ParseRecipeRevisionID(revisionID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		return dto.RecipeFamilyRevisionResponse{}, fmt.Errorf("service: get recipe revision: %w", err)
+	}
+	r, err := s.db.GetRecipeRevision(ctx, revID)
+	if err != nil {
+		if errors.Is(err, persistence.ErrNoRows) {
 			return dto.RecipeFamilyRevisionResponse{}, fmt.Errorf("service: get recipe revision: %w", dto.ErrNotFound)
 		}
 		return dto.RecipeFamilyRevisionResponse{}, fmt.Errorf("service: get recipe revision: %w", err)
 	}
-	parents, perr := s.db.ListRecipeRevisionParents(ctx, revisionID)
+	parents, perr := s.db.ListRecipeRevisionParents(ctx, revID)
 	if perr != nil {
 		return dto.RecipeFamilyRevisionResponse{}, fmt.Errorf("service: get recipe revision: %w", perr)
 	}
@@ -156,27 +174,33 @@ func (s *RecipeFamily) GetRevision(ctx context.Context, revisionID int64) (dto.R
 }
 
 func (s *RecipeFamily) CreateRevision(ctx context.Context, variantID string, in dto.CreateRecipeRevisionInput) (dto.RecipeFamilyRevisionResponse, error) {
-	if _, err := s.db.GetRecipeVariant(ctx, variantID); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+	varID, err := domain.ParseRecipeVariantID(variantID)
+	if err != nil {
+		return dto.RecipeFamilyRevisionResponse{}, fmt.Errorf("service: create recipe revision: %w", err)
+	}
+	if _, err := s.db.GetRecipeVariant(ctx, varID); err != nil {
+		if errors.Is(err, persistence.ErrNoRows) {
 			return dto.RecipeFamilyRevisionResponse{}, fmt.Errorf("service: create recipe revision: %w", dto.ErrNotFound)
 		}
 		return dto.RecipeFamilyRevisionResponse{}, fmt.Errorf("service: create recipe revision: %w", err)
 	}
 
-	// Enforce the DAG invariant: if a parent is given, it must exist and must
-	// not already be an ancestor of itself (trivially true for a new revision,
-	// but the parent must be a real revision).
-	if in.ParentRevisionID != 0 {
-		if _, err := s.db.GetRecipeRevision(ctx, in.ParentRevisionID); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return dto.RecipeFamilyRevisionResponse{}, fmt.Errorf("service: create recipe revision: parent %d not found", in.ParentRevisionID)
+	var parentID domain.RecipeRevisionID
+	if in.ParentRevisionID != "" {
+		parentID, err = domain.ParseRecipeRevisionID(in.ParentRevisionID)
+		if err != nil {
+			return dto.RecipeFamilyRevisionResponse{}, fmt.Errorf("service: create recipe revision: %w", err)
+		}
+		if _, err := s.db.GetRecipeRevision(ctx, parentID); err != nil {
+			if errors.Is(err, persistence.ErrNoRows) {
+				return dto.RecipeFamilyRevisionResponse{}, fmt.Errorf("service: create recipe revision: parent %s not found", in.ParentRevisionID)
 			}
 			return dto.RecipeFamilyRevisionResponse{}, fmt.Errorf("service: create recipe revision: %w", err)
 		}
 	}
 
 	rev := persistence.RecipeRevision{
-		VariantID:   variantID,
+		VariantID:   varID,
 		Servings:    in.Servings,
 		Description: strings.TrimSpace(in.Description),
 		Ingredients: toDomainIngredients(in.Ingredients),
@@ -187,8 +211,8 @@ func (s *RecipeFamily) CreateRevision(ctx context.Context, variantID string, in 
 	if err != nil {
 		return dto.RecipeFamilyRevisionResponse{}, fmt.Errorf("service: create recipe revision: %w", err)
 	}
-	if in.ParentRevisionID != 0 {
-		if err := s.db.AddRecipeRevisionParent(ctx, id, in.ParentRevisionID); err != nil {
+	if in.ParentRevisionID != "" {
+		if err := s.db.AddRecipeRevisionParent(ctx, id, parentID); err != nil {
 			return dto.RecipeFamilyRevisionResponse{}, fmt.Errorf("service: create recipe revision: link parent: %w", err)
 		}
 	}
@@ -196,34 +220,40 @@ func (s *RecipeFamily) CreateRevision(ctx context.Context, variantID string, in 
 	if err != nil {
 		return dto.RecipeFamilyRevisionResponse{}, fmt.Errorf("service: create recipe revision: %w", err)
 	}
-	parents := []int64{}
-	if in.ParentRevisionID != 0 {
-		parents = append(parents, in.ParentRevisionID)
+	parents := []domain.RecipeRevisionID{}
+	if in.ParentRevisionID != "" {
+		parents = append(parents, parentID)
 	}
 	return toRevisionDTO(created, parents), nil
 }
 
 func (s *RecipeFamily) SetDefaultVariant(ctx context.Context, familyID, variantID string) error {
-	f, err := s.db.GetRecipeFamily(ctx, familyID)
+	famID, err := domain.ParseRecipeFamilyID(familyID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("service: set default variant: %w", err)
+	}
+	varID, err := domain.ParseRecipeVariantID(variantID)
+	if err != nil {
+		return fmt.Errorf("service: set default variant: %w", err)
+	}
+	f, err := s.db.GetRecipeFamily(ctx, famID)
+	if err != nil {
+		if errors.Is(err, persistence.ErrNoRows) {
 			return fmt.Errorf("service: set default variant: %w", dto.ErrNotFound)
 		}
 		return fmt.Errorf("service: set default variant: %w", err)
 	}
-	v, err := s.db.GetRecipeVariant(ctx, variantID)
+	v, err := s.db.GetRecipeVariant(ctx, varID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, persistence.ErrNoRows) {
 			return fmt.Errorf("service: set default variant: variant %q not found", variantID)
 		}
 		return fmt.Errorf("service: set default variant: %w", err)
 	}
-	// The "resolves within its own family" invariant is enforced here, not in
-	// the schema (design.md, "Decisions — default_variant_id").
 	if v.FamilyID != f.ID {
 		return fmt.Errorf("service: set default variant: variant %q does not belong to family %q", variantID, familyID)
 	}
-	if err := s.db.SetRecipeFamilyDefaultVariant(ctx, familyID, variantID); err != nil {
+	if err := s.db.SetRecipeFamilyDefaultVariant(ctx, famID, varID); err != nil {
 		return fmt.Errorf("service: set default variant: %w", err)
 	}
 	return nil
@@ -231,11 +261,15 @@ func (s *RecipeFamily) SetDefaultVariant(ctx context.Context, familyID, variantI
 
 // toFamilyDTO projects a persistence.RecipeFamily to its wire DTO.
 func toFamilyDTO(f persistence.RecipeFamily) dto.RecipeFamilyResponse {
+	defaultVariantID := ""
+	if f.DefaultVariantID != (domain.RecipeVariantID{}) {
+		defaultVariantID = f.DefaultVariantID.String()
+	}
 	return dto.RecipeFamilyResponse{
-		ID:               f.ID,
+		ID:               f.ID.String(),
 		Name:             f.Name,
 		Description:      f.Description,
-		DefaultVariantID: f.DefaultVariantID,
+		DefaultVariantID: defaultVariantID,
 		Archived:         f.Archived,
 		CreatedAt:        f.CreatedAt,
 	}
@@ -244,8 +278,8 @@ func toFamilyDTO(f persistence.RecipeFamily) dto.RecipeFamilyResponse {
 // toVariantDTO projects a persistence.RecipeVariant to its wire DTO.
 func toVariantDTO(v persistence.RecipeVariant) dto.RecipeFamilyVariantResponse {
 	return dto.RecipeFamilyVariantResponse{
-		ID:                v.ID,
-		FamilyID:          v.FamilyID,
+		ID:                v.ID.String(),
+		FamilyID:          v.FamilyID.String(),
 		Title:             v.Title,
 		SourceAttribution: v.SourceAttribution,
 		Archived:          v.Archived,
@@ -254,16 +288,20 @@ func toVariantDTO(v persistence.RecipeVariant) dto.RecipeFamilyVariantResponse {
 }
 
 // toRevisionDTO projects a persistence.RecipeRevision to its wire DTO.
-func toRevisionDTO(r persistence.RecipeRevision, parents []int64) dto.RecipeFamilyRevisionResponse {
+func toRevisionDTO(r persistence.RecipeRevision, parents []domain.RecipeRevisionID) dto.RecipeFamilyRevisionResponse {
+	parentStrs := make([]string, 0, len(parents))
+	for _, p := range parents {
+		parentStrs = append(parentStrs, p.String())
+	}
 	return dto.RecipeFamilyRevisionResponse{
-		ID:          r.ID,
-		VariantID:   r.VariantID,
-		Servings:    r.Servings,
-		Description: r.Description,
-		Ingredients: toDTOIngredients(r.Ingredients),
-		Steps:       r.Steps,
-		Parents:     parents,
-		CreatedAt:   r.CreatedAt,
+		ID:            r.ID.String(),
+		VariantID:     r.VariantID.String(),
+		Servings:      r.Servings,
+		Description:   r.Description,
+		Ingredients:   toDTOIngredients(r.Ingredients),
+		Steps:         r.Steps,
+		Parents:       parentStrs,
+		CreatedAt:     r.CreatedAt,
 	}
 }
 

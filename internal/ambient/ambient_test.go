@@ -7,13 +7,17 @@ import (
 )
 
 func TestRecordReactionSeedsMissingPreference(t *testing.T) {
-	out := RecordReaction(nil, "kid", []string{"pasta", "tomato"}, domain.Loves)
+	personID, err := domain.ParsePersonID("00000000-0000-0000-0000-000000000001")
+	if err != nil {
+		t.Fatalf("parse personID: %v", err)
+	}
+	out := RecordReaction(nil, personID, []string{"pasta", "tomato"}, domain.Loves)
 	if len(out) != 2 {
 		t.Fatalf("want 2 prefs, got %d", len(out))
 	}
 	for _, p := range out {
-		if p.PersonID != "kid" {
-			t.Errorf("want personId kid, got %q", p.PersonID)
+		if p.PersonID != personID {
+			t.Errorf("want personId %s, got %s", personID, p.PersonID)
 		}
 		if p.Sentiment != domain.Loves {
 			t.Errorf("want Loves, got %v", p.Sentiment)
@@ -25,10 +29,14 @@ func TestRecordReactionSeedsMissingPreference(t *testing.T) {
 }
 
 func TestRecordReactionIncreasesConfidenceAndMovesSentiment(t *testing.T) {
-	prefs := []domain.Preference{
-		{PersonID: "dad", Tag: "gryta", Sentiment: domain.Neutral, Confidence: 0.3},
+	dadID, err := domain.ParsePersonID("00000000-0000-0000-0000-000000000002")
+	if err != nil {
+		t.Fatalf("parse personID: %v", err)
 	}
-	out := RecordReaction(prefs, "dad", []string{"gryta"}, domain.Loves)
+	prefs := []domain.Preference{
+		{PersonID: dadID, Tag: "gryta", Sentiment: domain.Neutral, Confidence: 0.3},
+	}
+	out := RecordReaction(prefs, dadID, []string{"gryta"}, domain.Loves)
 	if len(out) != 1 {
 		t.Fatalf("want 1 pref, got %d", len(out))
 	}
@@ -43,10 +51,14 @@ func TestRecordReactionIncreasesConfidenceAndMovesSentiment(t *testing.T) {
 }
 
 func TestRecordReactionCapsConfidenceAtOne(t *testing.T) {
-	prefs := []domain.Preference{
-		{PersonID: "kid", Tag: "pasta", Sentiment: domain.Loves, Confidence: 0.9},
+	kidID, err := domain.ParsePersonID("00000000-0000-0000-0000-000000000003")
+	if err != nil {
+		t.Fatalf("parse personID: %v", err)
 	}
-	out := RecordReaction(prefs, "kid", []string{"pasta"}, domain.Loves)
+	prefs := []domain.Preference{
+		{PersonID: kidID, Tag: "pasta", Sentiment: domain.Loves, Confidence: 0.9},
+	}
+	out := RecordReaction(prefs, kidID, []string{"pasta"}, domain.Loves)
 	if len(out) != 1 {
 		t.Fatalf("want 1 pref, got %d", len(out))
 	}
@@ -59,30 +71,46 @@ func TestRecordReactionCapsConfidenceAtOne(t *testing.T) {
 }
 
 func TestRecordReactionDoesNotTouchOtherPeople(t *testing.T) {
-	prefs := []domain.Preference{
-		{PersonID: "kid", Tag: "pasta", Sentiment: domain.Hates, Confidence: 0.5},
+	kidID, err := domain.ParsePersonID("00000000-0000-0000-0000-000000000004")
+	if err != nil {
+		t.Fatalf("parse personID: %v", err)
 	}
-	out := RecordReaction(prefs, "mum", []string{"pasta"}, domain.Loves)
+	mumID, err := domain.ParsePersonID("00000000-0000-0000-0000-000000000005")
+	if err != nil {
+		t.Fatalf("parse personID: %v", err)
+	}
+	prefs := []domain.Preference{
+		{PersonID: kidID, Tag: "pasta", Sentiment: domain.Hates, Confidence: 0.5},
+	}
+	out := RecordReaction(prefs, mumID, []string{"pasta"}, domain.Loves)
 	if len(out) != 2 {
 		t.Fatalf("want 2 prefs (kid unchanged + mum added), got %d", len(out))
 	}
-	if out[0].PersonID != "kid" || out[0].Sentiment != domain.Hates || out[0].Confidence != 0.5 {
+	if out[0].PersonID != kidID || out[0].Sentiment != domain.Hates || out[0].Confidence != 0.5 {
 		t.Errorf("kid's preference changed: %+v", out[0])
 	}
 }
 
 func TestRecordReactionDoesNotMutateInput(t *testing.T) {
-	prefs := []domain.Preference{
-		{PersonID: "kid", Tag: "pasta", Sentiment: domain.Likes, Confidence: 0.4},
+	kidID, err := domain.ParsePersonID("00000000-0000-0000-0000-000000000006")
+	if err != nil {
+		t.Fatalf("parse personID: %v", err)
 	}
-	_ = RecordReaction(prefs, "kid", []string{"pasta"}, domain.Loves)
+	prefs := []domain.Preference{
+		{PersonID: kidID, Tag: "pasta", Sentiment: domain.Likes, Confidence: 0.4},
+	}
+	_ = RecordReaction(prefs, kidID, []string{"pasta"}, domain.Loves)
 	if prefs[0].Confidence != 0.4 || prefs[0].Sentiment != domain.Likes {
 		t.Errorf("input was mutated: %+v", prefs[0])
 	}
 }
 
 func TestRecordReactionDedupesTags(t *testing.T) {
-	out := RecordReaction(nil, "kid", []string{"pasta", "pasta"}, domain.Loves)
+	kidID, err := domain.ParsePersonID("00000000-0000-0000-0000-000000000007")
+	if err != nil {
+		t.Fatalf("parse personID: %v", err)
+	}
+	out := RecordReaction(nil, kidID, []string{"pasta", "pasta"}, domain.Loves)
 	if len(out) != 1 {
 		t.Fatalf("want 1 pref (deduped), got %d", len(out))
 	}

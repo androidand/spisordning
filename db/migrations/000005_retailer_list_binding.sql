@@ -29,15 +29,14 @@
 -- is NULL until the first successful push; `last_push_status` is NULL until the first
 -- attempt. One binding per (list, retailer); re-pushing updates the same row.
 CREATE TABLE retailer_list_binding (
-    id               BIGSERIAL PRIMARY KEY,
-    shopping_list_id BIGINT NOT NULL REFERENCES shopping_list(id) ON DELETE CASCADE,
+    shopping_list_id UUID NOT NULL REFERENCES shopping_list(id) ON DELETE CASCADE,
     retailer         TEXT NOT NULL,
     external_list_id TEXT NOT NULL,
     -- v1 is outbound-only (D2); a future two-way change widens this CHECK.
     sync_direction   TEXT NOT NULL DEFAULT 'outbound' CHECK (sync_direction IN ('outbound')),
     last_pushed_at   TIMESTAMPTZ,
     last_push_status TEXT CHECK (last_push_status IN ('success','error')),
-    UNIQUE (shopping_list_id, retailer)
+    PRIMARY KEY (shopping_list_id, retailer)
 );
 
 -- +goose Down

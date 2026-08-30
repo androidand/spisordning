@@ -3,6 +3,8 @@ package persistence
 import (
 	"context"
 	"testing"
+
+	"github.com/androidand/spisordning/internal/domain"
 )
 
 // TestInvariant11_RegisterProductCreatesNoConversions reproduces the exact
@@ -26,10 +28,11 @@ func TestInvariant11_RegisterProductCreatesNoConversions(t *testing.T) {
 
 	// An ingredient with a product bought by the package but weighed in stock —
 	// the differing purchase/stock units that trigger Grocy's bug.
-	if err := s.UpsertIngredient(ctx, Ingredient{ID: "flour", Display: "Flour"}); err != nil {
+	flourID := domain.NewIngredientID()
+	if err := s.UpsertIngredient(ctx, Ingredient{ID: flourID, Display: "Flour"}); err != nil {
 		t.Fatalf("UpsertIngredient: %v", err)
 	}
-	p := Product{ID: "p-flour-1kg", Name: "Flour 1kg", Brand: "Generic", PackageSize: "1kg"}
+	p := Product{ID: domain.NewProductID(), Name: "Flour 1kg", Brand: "Generic", PackageSize: "1kg"}
 	if err := s.CreateProduct(ctx, p); err != nil {
 		t.Fatalf("CreateProduct: %v", err)
 	}
@@ -42,7 +45,7 @@ func TestInvariant11_RegisterProductCreatesNoConversions(t *testing.T) {
 	}
 
 	// ...and no ingredient-specific conversion for the product's ingredient.
-	if got, err := s.CountIngredientUnitConversions(ctx, "flour"); err != nil {
+	if got, err := s.CountIngredientUnitConversions(ctx, flourID); err != nil {
 		t.Fatalf("CountIngredientUnitConversions: %v", err)
 	} else if got != 0 {
 		t.Errorf("RegisterProduct auto-created %d ingredient conversions for flour, want 0", got)
@@ -50,7 +53,7 @@ func TestInvariant11_RegisterProductCreatesNoConversions(t *testing.T) {
 
 	// The absence of a conversion is a valid, queryable state — not a silent
 	// 1:1 default.
-	if _, found, err := s.GetIngredientUnitConversion(ctx, "flour", "dl", "g"); err != nil {
+	if _, found, err := s.GetIngredientUnitConversion(ctx, flourID, "dl", "g"); err != nil {
 		t.Fatalf("GetIngredientUnitConversion (absent): %v", err)
 	} else if found {
 		t.Error("found a dl->g conversion before any was explicitly defined")
@@ -58,10 +61,10 @@ func TestInvariant11_RegisterProductCreatesNoConversions(t *testing.T) {
 
 	// Explicitly defining a conversion is the only write path, and it stores the
 	// real factor with no collision (Grocy's auto 1:1 row collided here).
-	if err := s.DefineIngredientUnitConversion(ctx, "flour", "dl", "g", 60); err != nil {
+	if err := s.DefineIngredientUnitConversion(ctx, flourID, "dl", "g", 60); err != nil {
 		t.Fatalf("DefineIngredientUnitConversion: %v", err)
 	}
-	factor, found, err := s.GetIngredientUnitConversion(ctx, "flour", "dl", "g")
+	factor, found, err := s.GetIngredientUnitConversion(ctx, flourID, "dl", "g")
 	if err != nil {
 		t.Fatalf("GetIngredientUnitConversion (defined): %v", err)
 	}

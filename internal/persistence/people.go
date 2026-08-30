@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/androidand/spisordning/internal/domain"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -74,7 +75,7 @@ func scanPeople(rows pgx.Rows) ([]Person, error) {
 
 // PersonPreference is the current confidence-weighted sentiment toward a tag.
 type PersonPreference struct {
-	PersonID   string
+	PersonID   domain.PersonID
 	Tag        string
 	Sentiment  int // -2..2
 	Confidence float64
@@ -94,12 +95,12 @@ func (s *Store) UpsertPreference(ctx context.Context, p PersonPreference) error 
 }
 
 // ListPreferences returns preferences, optionally filtered to personID when
-// non-empty. An empty personID returns all preferences (used by the unfiltered
+// non-zero. A zero PersonID returns all preferences (used by the unfiltered
 // GET /preferences endpoint).
-func (s *Store) ListPreferences(ctx context.Context, personID string) ([]PersonPreference, error) {
+func (s *Store) ListPreferences(ctx context.Context, personID domain.PersonID) ([]PersonPreference, error) {
 	var rows pgx.Rows
 	var err error
-	if personID == "" {
+	if personID == (domain.PersonID{}) {
 		rows, err = s.db.Query(ctx,
 			`SELECT person_id, tag, sentiment, confidence, updated_at
 			 FROM person_preference ORDER BY person_id, tag`)
@@ -125,8 +126,8 @@ func (s *Store) ListPreferences(ctx context.Context, personID string) ([]PersonP
 
 // PreferenceObservation is an append-only evidence row feeding confidence.
 type PreferenceObservation struct {
-	ID         int64
-	PersonID   string
+	ID         domain.PreferenceObservationID
+	PersonID   domain.PersonID
 	Tag        string
 	Sentiment  int
 	Source     string // 'reaction' | 'manual' | 'import'
@@ -136,9 +137,12 @@ type PreferenceObservation struct {
 // RecordObservation appends evidence and re-derives the aggregate preference is
 // handled by the application layer; this only writes the observation.
 func (s *Store) RecordObservation(ctx context.Context, o PreferenceObservation) error {
-	const q = `INSERT INTO preference_observation (person_id, tag, sentiment, source)
-		VALUES ($1, $2, $3, $4)`
-	if _, err := s.db.Exec(ctx, q, o.PersonID, o.Tag, o.Sentiment, o.Source); err != nil {
+	if o.ID == (domain.PreferenceObservationID{}) {
+		o.ID = domain.NewPreferenceObservationID()
+	}
+	const q = `INSERT INTO preference_observation (id, person_id, tag, sentiment, source)
+		VALUES ($1, $2, $3, $4, $5)`
+	if _, err := s.db.Exec(ctx, q, o.ID, o.PersonID, o.Tag, o.Sentiment, o.Source); err != nil {
 		return fmt.Errorf("persistence: record observation: %w", err)
 	}
 	return nil

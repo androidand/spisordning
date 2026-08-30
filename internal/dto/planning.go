@@ -7,7 +7,7 @@ import (
 
 // MealPlan mirrors api/openapi.yaml components/schemas/MealPlan.
 type MealPlan struct {
-	ID        int64     `json:"id"`
+	ID        string    `json:"id"`
 	WeekStart string    `json:"week_start"` // date (YYYY-MM-DD)
 	Status    string    `json:"status"`     // draft | approved | archived
 	CreatedAt time.Time `json:"created_at"`
@@ -25,7 +25,7 @@ type MealPlanUpdate struct {
 
 // MealPlanCandidate mirrors api/openapi.yaml components/schemas/MealPlanCandidate.
 type MealPlanCandidate struct {
-	ID        int64              `json:"id"`
+	ID        string             `json:"id"`
 	Recipe    RecipeRefResponse  `json:"recipe"`
 	SlotDate  string             `json:"slot_date"` // date (YYYY-MM-DD)
 	Score     float64            `json:"score"`
@@ -36,7 +36,7 @@ type MealPlanCandidate struct {
 
 // MealPlanDecision mirrors api/openapi.yaml components/schemas/MealPlanDecision.
 type MealPlanDecision struct {
-	PlanID         int64     `json:"plan_id"`
+	PlanID         string    `json:"plan_id"`
 	SlotDate       string    `json:"slot_date"`
 	MealieRecipeID string    `json:"mealie_recipe_id"`
 	DecidedAt      time.Time `json:"decided_at,omitempty"`
@@ -51,7 +51,7 @@ type MealPlanView struct {
 
 // ShoppingRequirement mirrors api/openapi.yaml components/schemas/ShoppingRequirement.
 type ShoppingRequirement struct {
-	ID              int64    `json:"id"`
+	ID              string   `json:"id"`
 	IngredientID    string   `json:"ingredient_id"`
 	Quantity        float64  `json:"quantity"`
 	Unit            string   `json:"unit"`
@@ -63,8 +63,8 @@ type ShoppingRequirement struct {
 type PlanningService interface {
 	ListPlans(ctx context.Context) ([]MealPlan, error)
 	CreatePlan(ctx context.Context, weekStart string) (MealPlan, error)
-	GetPlan(ctx context.Context, id int64) (MealPlanView, error)
-	UpdatePlan(ctx context.Context, id int64, in MealPlanUpdate) (MealPlan, error)
-	SetDecisions(ctx context.Context, planID int64, in []MealPlanDecision) ([]MealPlanDecision, error)
-	ListShoppingRequirements(ctx context.Context, planID int64) ([]ShoppingRequirement, error)
+	GetPlan(ctx context.Context, id string) (MealPlanView, error)
+	UpdatePlan(ctx context.Context, id string, in MealPlanUpdate) (MealPlan, error)
+	SetDecisions(ctx context.Context, planID string, in []MealPlanDecision) ([]MealPlanDecision, error)
+	ListShoppingRequirements(ctx context.Context, planID string) ([]ShoppingRequirement, error)
 }

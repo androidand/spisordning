@@ -9,11 +9,11 @@ import (
 
 // pantryFixture sets up a household, an ingredient, and a product mapped to
 // it, returning their ids. Shared setup for every test in this file.
-func pantryFixture(t *testing.T, ctx context.Context, s *Store, suffix string) (householdID, ingredientID, productID string) {
+func pantryFixture(t *testing.T, ctx context.Context, s *Store, suffix string) (householdID domain.HouseholdID, ingredientID domain.IngredientID, productID domain.ProductID) {
 	t.Helper()
-	householdID = "h-pantry-" + suffix
-	ingredientID = "milk-" + suffix
-	productID = "p-milk-" + suffix
+	householdID = domain.NewHouseholdID()
+	ingredientID = domain.NewIngredientID()
+	productID = domain.NewProductID()
 
 	if err := s.CreateHousehold(ctx, Household{ID: householdID, Name: "Pantry Test Household"}); err != nil {
 		t.Fatalf("CreateHousehold: %v", err)
@@ -33,13 +33,13 @@ func TestPantry_GraduatedSpecificity(t *testing.T) {
 	truncateTables(t, ctx, s, "inventory_event", "inventory_lot", "inventory_location", "product", "household")
 	householdID, ingredientID, productID := pantryFixture(t, ctx, s, "specificity")
 
-	loc := InventoryLocation{ID: "loc-fridge-specificity", HouseholdID: householdID, Name: "Fridge"}
+	loc := InventoryLocation{ID: domain.NewInventoryLocationID(), HouseholdID: householdID, Name: "Fridge"}
 	if err := s.CreateInventoryLocation(ctx, loc); err != nil {
 		t.Fatalf("CreateInventoryLocation: %v", err)
 	}
 
 	// Manual quick entry: no productID, ingredient-only lot.
-	lotID, err := s.RecordPurchase(ctx, ingredientID, "", loc.ID, 1, "l", nil, "manual_count")
+	lotID, err := s.RecordPurchase(ctx, ingredientID, nil, loc.ID, 1, "l", nil, "manual_count")
 	if err != nil {
 		t.Fatalf("RecordPurchase (ingredient-only): %v", err)
 	}
@@ -47,8 +47,8 @@ func TestPantry_GraduatedSpecificity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetInventoryLot: %v", err)
 	}
-	if lot.ProductID != "" {
-		t.Errorf("expected ingredient-only lot to have no product, got %q", lot.ProductID)
+	if lot.ProductID != nil {
+		t.Errorf("expected ingredient-only lot to have no product, got %q", lot.ProductID.String())
 	}
 	if lot.Confidence != domain.ConfidenceExact {
 		t.Errorf("expected EXACT confidence for a counted purchase, got %s", lot.Confidence)
@@ -62,18 +62,18 @@ func TestPantry_GraduatedSpecificity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetInventoryLot after refine: %v", err)
 	}
-	if refined.ProductID != productID {
-		t.Errorf("expected refined lot to reference product %q, got %q", productID, refined.ProductID)
+	if refined.ProductID == nil || *refined.ProductID != productID {
+		t.Errorf("expected refined lot to reference product %q, got %v", productID, refined.ProductID)
 	}
 	if refined.Quantity != lot.Quantity || refined.LocationID != lot.LocationID || refined.Confidence != lot.Confidence {
 		t.Errorf("RefineLotProduct changed quantity/location/confidence: before %+v after %+v", lot, refined)
 	}
 
 	// shopping_order source requires a productID.
-	if _, err := s.RecordPurchase(ctx, ingredientID, "", loc.ID, 1, "l", nil, sourceShoppingOrder); err == nil {
+	if _, err := s.RecordPurchase(ctx, ingredientID, nil, loc.ID, 1, "l", nil, sourceShoppingOrder); err == nil {
 		t.Error("expected RecordPurchase to reject shopping_order source without a productID")
 	}
-	orderLotID, err := s.RecordPurchase(ctx, ingredientID, productID, loc.ID, 1, "l", nil, sourceShoppingOrder)
+	orderLotID, err := s.RecordPurchase(ctx, ingredientID, &productID, loc.ID, 1, "l", nil, sourceShoppingOrder)
 	if err != nil {
 		t.Fatalf("RecordPurchase (shopping_order): %v", err)
 	}
@@ -81,12 +81,12 @@ func TestPantry_GraduatedSpecificity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetInventoryLot (order lot): %v", err)
 	}
-	if orderLot.ProductID != productID {
-		t.Errorf("expected shopping_order lot to carry productID immediately, got %q", orderLot.ProductID)
+	if orderLot.ProductID == nil || *orderLot.ProductID != productID {
+		t.Errorf("expected shopping_order lot to carry productID immediately, got %v", orderLot.ProductID)
 	}
 
 	// home_prepared source creates an ingredient-only lot, same as manual quick entry.
-	homeLotID, err := s.RecordPurchase(ctx, ingredientID, "", loc.ID, 1, "portion", nil, "home_prepared")
+	homeLotID, err := s.RecordPurchase(ctx, ingredientID, nil, loc.ID, 1, "portion", nil, "home_prepared")
 	if err != nil {
 		t.Fatalf("RecordPurchase (home_prepared): %v", err)
 	}
@@ -94,8 +94,8 @@ func TestPantry_GraduatedSpecificity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetInventoryLot (home lot): %v", err)
 	}
-	if homeLot.ProductID != "" {
-		t.Errorf("expected home_prepared lot to have no product, got %q", homeLot.ProductID)
+	if homeLot.ProductID != nil {
+		t.Errorf("expected home_prepared lot to have no product, got %q", homeLot.ProductID.String())
 	}
 	if homeLot.Confidence != domain.ConfidenceExact {
 		t.Errorf("expected EXACT confidence for home_prepared purchase, got %s", homeLot.Confidence)
@@ -109,7 +109,7 @@ func TestPantry_ListCandidateProductsForIngredient(t *testing.T) {
 	_, ingredientID, productID := pantryFixture(t, ctx, s, "candidates")
 
 	// No mapping yet, but the name matches — falls back to name-match search.
-	unrelated := Product{ID: "p-unrelated-candidates", Name: "Chips"}
+	unrelated := Product{ID: domain.NewProductID(), Name: "Chips"}
 	if err := s.CreateProduct(ctx, unrelated); err != nil {
 		t.Fatalf("CreateProduct (unrelated): %v", err)
 	}
@@ -127,7 +127,7 @@ func TestPantry_ListCandidateProductsForIngredient(t *testing.T) {
 		}
 	}
 	if !foundByName {
-		t.Errorf("expected name-match fallback to find %q (name contains ingredient display), got %v", productID, byName)
+		t.Errorf("expected name-match fallback to find %q (name contains ingredient display), got %v", productID.String(), byName)
 	}
 
 	// Once mapped, the mapped set takes priority (and excludes the unrelated product).
@@ -149,12 +149,12 @@ func TestPantry_EventLifecycle(t *testing.T) {
 	truncateTables(t, ctx, s, "inventory_event", "inventory_lot", "inventory_location", "product", "household")
 	householdID, ingredientID, _ := pantryFixture(t, ctx, s, "events")
 
-	loc := InventoryLocation{ID: "loc-fridge-events", HouseholdID: householdID, Name: "Fridge"}
+	loc := InventoryLocation{ID: domain.NewInventoryLocationID(), HouseholdID: householdID, Name: "Fridge"}
 	if err := s.CreateInventoryLocation(ctx, loc); err != nil {
 		t.Fatalf("CreateInventoryLocation: %v", err)
 	}
 
-	lotID, err := s.RecordPurchase(ctx, ingredientID, "", loc.ID, 10, "portion", nil, "manual_count")
+	lotID, err := s.RecordPurchase(ctx, ingredientID, nil, loc.ID, 10, "portion", nil, "manual_count")
 	if err != nil {
 		t.Fatalf("RecordPurchase: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestPantry_EventLifecycle(t *testing.T) {
 	}
 
 	// A second lot for DISCARD, independent of the one above.
-	discardLotID, err := s.RecordPurchase(ctx, ingredientID, "", loc.ID, 4, "portion", nil, "manual_count")
+	discardLotID, err := s.RecordPurchase(ctx, ingredientID, nil, loc.ID, 4, "portion", nil, "manual_count")
 	if err != nil {
 		t.Fatalf("RecordPurchase (discard lot): %v", err)
 	}
@@ -238,8 +238,8 @@ func TestPantry_Transfer(t *testing.T) {
 	truncateTables(t, ctx, s, "inventory_event", "inventory_lot", "inventory_location", "product", "household")
 	householdID, ingredientID, _ := pantryFixture(t, ctx, s, "transfer")
 
-	fridge := InventoryLocation{ID: "loc-fridge-transfer", HouseholdID: householdID, Name: "Fridge"}
-	freezer := InventoryLocation{ID: "loc-freezer-transfer", HouseholdID: householdID, Name: "Freezer"}
+	fridge := InventoryLocation{ID: domain.NewInventoryLocationID(), HouseholdID: householdID, Name: "Fridge"}
+	freezer := InventoryLocation{ID: domain.NewInventoryLocationID(), HouseholdID: householdID, Name: "Freezer"}
 	if err := s.CreateInventoryLocation(ctx, fridge); err != nil {
 		t.Fatalf("CreateInventoryLocation (fridge): %v", err)
 	}
@@ -247,7 +247,7 @@ func TestPantry_Transfer(t *testing.T) {
 		t.Fatalf("CreateInventoryLocation (freezer): %v", err)
 	}
 
-	lotID, err := s.RecordPurchase(ctx, ingredientID, "", fridge.ID, 10, "portion", nil, "manual_count")
+	lotID, err := s.RecordPurchase(ctx, ingredientID, nil, fridge.ID, 10, "portion", nil, "manual_count")
 	if err != nil {
 		t.Fatalf("RecordPurchase: %v", err)
 	}
@@ -281,7 +281,7 @@ func TestPantry_Transfer(t *testing.T) {
 		t.Fatalf("RecordTransfer (full): %v", err)
 	}
 	if movedLotID != newLotID {
-		t.Errorf("expected a full transfer to move the same lot id, got new id %d (was %d)", movedLotID, newLotID)
+		t.Errorf("expected a full transfer to move the same lot id, got new id %s (was %s)", movedLotID, newLotID)
 	}
 	moved, err := s.GetInventoryLot(ctx, newLotID)
 	if err != nil {
@@ -298,16 +298,16 @@ func TestPantry_LocationHierarchy(t *testing.T) {
 	truncateTables(t, ctx, s, "inventory_event", "inventory_lot", "inventory_location", "product", "household")
 	householdID, ingredientID, _ := pantryFixture(t, ctx, s, "hierarchy")
 
-	basement := InventoryLocation{ID: "loc-basement-hierarchy", HouseholdID: householdID, Name: "Basement", LocationType: "BASEMENT"}
+	basement := InventoryLocation{ID: domain.NewInventoryLocationID(), HouseholdID: householdID, Name: "Basement", LocationType: "BASEMENT"}
 	if err := s.CreateInventoryLocation(ctx, basement); err != nil {
 		t.Fatalf("CreateInventoryLocation (basement): %v", err)
 	}
-	chestFreezer := InventoryLocation{ID: "loc-chest-freezer-hierarchy", HouseholdID: householdID, Name: "Chest Freezer", LocationType: "FREEZER", ParentLocationID: basement.ID}
+	chestFreezer := InventoryLocation{ID: domain.NewInventoryLocationID(), HouseholdID: householdID, Name: "Chest Freezer", LocationType: "FREEZER", ParentLocationID: &basement.ID}
 	if err := s.CreateInventoryLocation(ctx, chestFreezer); err != nil {
 		t.Fatalf("CreateInventoryLocation (chest freezer): %v", err)
 	}
 
-	lotID, err := s.RecordPurchase(ctx, ingredientID, "", chestFreezer.ID, 2, "portion", nil, "home_prepared")
+	lotID, err := s.RecordPurchase(ctx, ingredientID, nil, chestFreezer.ID, 2, "portion", nil, "home_prepared")
 	if err != nil {
 		t.Fatalf("RecordPurchase: %v", err)
 	}
@@ -323,11 +323,12 @@ func TestPantry_LocationHierarchy(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Errorf("expected lot %d (recorded directly against the nested chest freezer) to appear under basement", lotID)
+		t.Errorf("expected lot %s (recorded directly against the nested chest freezer) to appear under basement", lotID)
 	}
 
 	// Self-parent is rejected.
-	if err := s.CreateInventoryLocation(ctx, InventoryLocation{ID: "loc-self-hierarchy", HouseholdID: householdID, Name: "Self", ParentLocationID: "loc-self-hierarchy"}); err == nil {
+	selfID := domain.NewInventoryLocationID()
+	if err := s.CreateInventoryLocation(ctx, InventoryLocation{ID: selfID, HouseholdID: householdID, Name: "Self", ParentLocationID: &selfID}); err == nil {
 		t.Error("expected creating a location with itself as parent to be rejected")
 	}
 

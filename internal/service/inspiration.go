@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/androidand/spisordning/internal/domain"
 	"github.com/androidand/spisordning/internal/dto"
 	"github.com/androidand/spisordning/internal/persistence"
 )
@@ -24,7 +25,7 @@ func (s *Inspiration) Suggest(ctx context.Context) ([]dto.InspirationSuggestion,
 	if err != nil {
 		return nil, fmt.Errorf("service: inspiration: %w", err)
 	}
-	pantrySet := make(map[string]bool, len(pantryIDs))
+	pantrySet := make(map[domain.IngredientID]bool, len(pantryIDs))
 	for _, id := range pantryIDs {
 		pantrySet[id] = true
 	}
@@ -33,9 +34,9 @@ func (s *Inspiration) Suggest(ctx context.Context) ([]dto.InspirationSuggestion,
 	if err != nil {
 		return nil, fmt.Errorf("service: inspiration: %w", err)
 	}
-	refByID := make(map[string]persistence.RecipeRef, len(recipeRefs))
+	refByID := make(map[domain.RecipeRefID]persistence.RecipeRef, len(recipeRefs))
 	for _, r := range recipeRefs {
-		refByID[r.MealieRecipeID] = r
+		refByID[r.ID] = r
 	}
 
 	allLines, err := s.db.ListAllRecipeIngredients(ctx)
@@ -44,9 +45,9 @@ func (s *Inspiration) Suggest(ctx context.Context) ([]dto.InspirationSuggestion,
 	}
 
 	// Group recipe ingredient lines by recipe.
-	byRecipe := make(map[string][]string)
+	byRecipe := make(map[domain.RecipeRefID][]domain.IngredientID)
 	for _, line := range allLines {
-		byRecipe[line.MealieRecipeID] = append(byRecipe[line.MealieRecipeID], line.IngredientID)
+		byRecipe[line.RecipeRefID] = append(byRecipe[line.RecipeRefID], line.IngredientID)
 	}
 
 	var out []dto.InspirationSuggestion
@@ -59,9 +60,9 @@ func (s *Inspiration) Suggest(ctx context.Context) ([]dto.InspirationSuggestion,
 		missing := make([]string, 0, len(ingredientIDs))
 		for _, id := range ingredientIDs {
 			if pantrySet[id] {
-				matched = append(matched, id)
+				matched = append(matched, id.String())
 			} else {
-				missing = append(missing, id)
+				missing = append(missing, id.String())
 			}
 		}
 		if len(matched) == 0 {
@@ -72,7 +73,7 @@ func (s *Inspiration) Suggest(ctx context.Context) ([]dto.InspirationSuggestion,
 			ratio = float64(len(matched)) / float64(len(ingredientIDs))
 		}
 		out = append(out, dto.InspirationSuggestion{
-			MealieRecipeID:       recipeID,
+			MealieRecipeID:       ref.MealieRecipeID,
 			Title:                ref.Title,
 			Tags:                 ref.Tags,
 			Effort:               int(ref.Effort),

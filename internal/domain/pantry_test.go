@@ -92,25 +92,32 @@ func TestNormalizeGTIN(t *testing.T) {
 }
 
 func TestWouldCreateLocationCycle(t *testing.T) {
+	basement := NewInventoryLocationID()
+	freezer := NewInventoryLocationID()
+	house := NewInventoryLocationID()
+	chestFreezer := NewInventoryLocationID()
+	drawer := NewInventoryLocationID()
+	fridge := NewInventoryLocationID()
+
 	// Self-parent is always a cycle, regardless of ancestor list.
-	if !WouldCreateLocationCycle("basement", "basement", nil) {
+	if !WouldCreateLocationCycle(basement, basement, nil) {
 		t.Error("expected self-parent to be a cycle")
 	}
 
 	// basement -> freezer would create a cycle if freezer's ancestors already include basement
 	// (i.e. basement is already an ancestor of freezer, so basement can't also become freezer's
 	// descendant).
-	if !WouldCreateLocationCycle("basement", "freezer", []string{"basement", "house"}) {
+	if !WouldCreateLocationCycle(basement, freezer, []InventoryLocationID{basement, house}) {
 		t.Error("expected a cycle when candidate parent's ancestors include the child")
 	}
 
 	// A genuinely new, unrelated nesting is fine.
-	if WouldCreateLocationCycle("chest-freezer", "basement", []string{"house"}) {
+	if WouldCreateLocationCycle(chestFreezer, basement, []InventoryLocationID{house}) {
 		t.Error("did not expect a cycle for an unrelated parent")
 	}
 
 	// No ancestors at all (candidate parent is currently a root) is fine.
-	if WouldCreateLocationCycle("drawer", "fridge", nil) {
+	if WouldCreateLocationCycle(drawer, fridge, nil) {
 		t.Error("did not expect a cycle when candidate parent has no ancestors")
 	}
 }

@@ -3,6 +3,8 @@ package persistence
 import (
 	"context"
 	"testing"
+
+	"github.com/androidand/spisordning/internal/domain"
 )
 
 func TestCatalog_HouseholdProductIdentifierMapping(t *testing.T) {
@@ -10,10 +12,11 @@ func TestCatalog_HouseholdProductIdentifierMapping(t *testing.T) {
 	ctx := context.Background()
 	truncateTables(t, ctx, s, "product_ingredient_mapping", "product_identifier", "product", "household")
 
-	if err := s.CreateHousehold(ctx, Household{ID: "h-test", Name: "Test Household"}); err != nil {
+	hhID := domain.NewHouseholdID()
+	if err := s.CreateHousehold(ctx, Household{ID: hhID, Name: "Test Household"}); err != nil {
 		t.Fatalf("CreateHousehold: %v", err)
 	}
-	gotH, err := s.GetHousehold(ctx, "h-test")
+	gotH, err := s.GetHousehold(ctx, hhID)
 	if err != nil {
 		t.Fatalf("GetHousehold: %v", err)
 	}
@@ -21,15 +24,16 @@ func TestCatalog_HouseholdProductIdentifierMapping(t *testing.T) {
 		t.Errorf("household name = %q, want %q", gotH.Name, "Test Household")
 	}
 
-	if err := s.UpsertIngredient(ctx, Ingredient{ID: "milk", Display: "Milk"}); err != nil {
+	milkID := domain.IngredientIDForName("milk")
+	if err := s.UpsertIngredient(ctx, Ingredient{ID: milkID, Display: "Milk"}); err != nil {
 		t.Fatalf("UpsertIngredient: %v", err)
 	}
 
-	p := Product{ID: "p-arla-milk-1l", Name: "Arla Standardmjölk", Brand: "Arla", PackageSize: "1L"}
+	p := Product{ID: domain.NewProductID(), Name: "Arla Standardmjölk", Brand: "Arla", PackageSize: "1L"}
 	if err := s.CreateProduct(ctx, p); err != nil {
 		t.Fatalf("CreateProduct: %v", err)
 	}
-	gotP, err := s.GetProduct(ctx, "p-arla-milk-1l")
+	gotP, err := s.GetProduct(ctx, p.ID)
 	if err != nil {
 		t.Fatalf("GetProduct: %v", err)
 	}
@@ -38,7 +42,7 @@ func TestCatalog_HouseholdProductIdentifierMapping(t *testing.T) {
 	}
 
 	// A product without a resolved mapping is still valid (ingredient-catalog spec scenario).
-	unmapped, err := s.ListProductsForIngredient(ctx, "milk")
+	unmapped, err := s.ListProductsForIngredient(ctx, milkID)
 	if err != nil {
 		t.Fatalf("ListProductsForIngredient (pre-mapping): %v", err)
 	}
@@ -46,10 +50,10 @@ func TestCatalog_HouseholdProductIdentifierMapping(t *testing.T) {
 		t.Errorf("expected no products mapped yet, got %v", unmapped)
 	}
 
-	if err := s.SetProductIngredientMapping(ctx, ProductIngredientMapping{ProductID: p.ID, IngredientID: "milk"}); err != nil {
+	if err := s.SetProductIngredientMapping(ctx, ProductIngredientMapping{ProductID: p.ID, IngredientID: milkID}); err != nil {
 		t.Fatalf("SetProductIngredientMapping: %v", err)
 	}
-	mapped, err := s.ListProductsForIngredient(ctx, "milk")
+	mapped, err := s.ListProductsForIngredient(ctx, milkID)
 	if err != nil {
 		t.Fatalf("ListProductsForIngredient (post-mapping): %v", err)
 	}
@@ -57,12 +61,12 @@ func TestCatalog_HouseholdProductIdentifierMapping(t *testing.T) {
 		t.Errorf("ListProductsForIngredient = %v, want [%s]", mapped, p.ID)
 	}
 
-	// GTIN resolution: unknown GTIN resolves to "", no error; known GTIN resolves to the product.
+	// GTIN resolution: unknown GTIN resolves to zero-value, no error; known GTIN resolves to the product.
 	unknown, err := s.LookupProductByGTIN(ctx, "07300400176353")
 	if err != nil {
 		t.Fatalf("LookupProductByGTIN (unknown): %v", err)
 	}
-	if unknown != "" {
+	if unknown != (domain.ProductID{}) {
 		t.Errorf("expected empty product id for unknown GTIN, got %q", unknown)
 	}
 
@@ -79,7 +83,7 @@ func TestCatalog_HouseholdProductIdentifierMapping(t *testing.T) {
 
 	// Re-linking the same GTIN to a different product overwrites the link (D6: latest confirmed
 	// match wins).
-	p2 := Product{ID: "p-arla-milk-1l-relabel", Name: "Arla Standardmjölk (relabel)"}
+	p2 := Product{ID: domain.NewProductID(), Name: "Arla Standardmjölk (relabel)"}
 	if err := s.CreateProduct(ctx, p2); err != nil {
 		t.Fatalf("CreateProduct (p2): %v", err)
 	}

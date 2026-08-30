@@ -3,7 +3,6 @@ package httpapi
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
 
 	"github.com/androidand/spisordning/internal/dto"
 )
@@ -46,12 +45,7 @@ func (h *plansHandler) createPlan(w http.ResponseWriter, r *http.Request) {
 
 func (h *plansHandler) getPlan(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
-	id, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid plan id: " + idStr})
-		return
-	}
-	out, err := h.svc.GetPlan(r.Context(), id)
+	out, err := h.svc.GetPlan(r.Context(), idStr)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "get plan: "+err.Error())
 		return
@@ -61,17 +55,12 @@ func (h *plansHandler) getPlan(w http.ResponseWriter, r *http.Request) {
 
 func (h *plansHandler) updatePlan(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
-	id, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid plan id: " + idStr})
-		return
-	}
 	var in dto.MealPlanUpdate
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid JSON body: " + err.Error()})
 		return
 	}
-	out, err := h.svc.UpdatePlan(r.Context(), id, in)
+	out, err := h.svc.UpdatePlan(r.Context(), idStr, in)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "update plan: "+err.Error())
 		return
@@ -81,17 +70,12 @@ func (h *plansHandler) updatePlan(w http.ResponseWriter, r *http.Request) {
 
 func (h *plansHandler) setDecisions(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
-	id, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid plan id: " + idStr})
-		return
-	}
 	var in []dto.MealPlanDecision
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid JSON body: " + err.Error()})
 		return
 	}
-	out, err := h.svc.SetDecisions(r.Context(), id, in)
+	out, err := h.svc.SetDecisions(r.Context(), idStr, in)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "set decisions: "+err.Error())
 		return
@@ -101,12 +85,7 @@ func (h *plansHandler) setDecisions(w http.ResponseWriter, r *http.Request) {
 
 func (h *plansHandler) listShoppingRequirements(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
-	id, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid plan id: " + idStr})
-		return
-	}
-	out, err := h.svc.ListShoppingRequirements(r.Context(), id)
+	out, err := h.svc.ListShoppingRequirements(r.Context(), idStr)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "list shopping requirements: "+err.Error())
 		return

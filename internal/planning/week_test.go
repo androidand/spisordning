@@ -19,15 +19,17 @@ func weekCtx() ([]domain.Candidate, WeekConfig) {
 		{MealieRecipeID: "pasta", Title: "Pasta", Tags: []string{"pasta"}, Effort: domain.EffortLow},
 		{MealieRecipeID: "rice", Title: "Ris", Tags: []string{"rice"}, Effort: domain.EffortLow},
 	}
+	mumID := domain.NewPersonID()
+	kidID := domain.NewPersonID()
 	cfg := WeekConfig{
 		Candidates: candidates,
 		People: []domain.Person{
-			{ID: "mum", Name: "Mum", Weight: 1},
-			{ID: "kid", Name: "Kid", Weight: 2},
+			{ID: mumID, Name: "Mum", Weight: 1},
+			{ID: kidID, Name: "Kid", Weight: 2},
 		},
 		Preferences: []domain.Preference{
-			{PersonID: "kid", Tag: "pasta", Sentiment: domain.Likes, Confidence: 1.0},
-			{PersonID: "kid", Tag: "rice", Sentiment: domain.Likes, Confidence: 0.9},
+			{PersonID: kidID, Tag: "pasta", Sentiment: domain.Likes, Confidence: 1.0},
+			{PersonID: kidID, Tag: "rice", Sentiment: domain.Likes, Confidence: 0.9},
 		},
 		EnergyFor: func(time.Time) domain.Effort { return domain.EffortMedium },
 	}

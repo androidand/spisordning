@@ -20,13 +20,13 @@ func TestRestrictionNeverScored(t *testing.T) {
 	// categorical, not scored. This is a compile-time check: the struct
 	// definition must not contain those fields.
 	r := PersonRestriction{
-		PersonID: "p1",
+		PersonID: NewPersonID(),
 		Tag:      "peanuts",
 		Kind:     RestrictionAllergy,
 	}
 	// Assert the struct has exactly the fields we expect for a restriction:
 	// no sentiment, no confidence, no scoring influence.
-	if r.PersonID == "" {
+	if r.PersonID.String() == "" {
 		t.Error("PersonID must be settable")
 	}
 	if r.Tag == "" {
@@ -175,7 +175,7 @@ func TestPersonRestrictionClearedIsOptional(t *testing.T) {
 	// A restriction can be active (ClearedAt is zero) or cleared
 	// (ClearedAt is set). Both states are valid.
 	active := PersonRestriction{
-		PersonID: "p1",
+		PersonID: NewPersonID(),
 		Tag:      "peanuts",
 		Kind:     RestrictionAllergy,
 	}

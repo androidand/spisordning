@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/androidand/spisordning/internal/dto"
@@ -59,12 +58,7 @@ func (h *mealsHandler) listMeals(w http.ResponseWriter, r *http.Request) {
 
 func (h *mealsHandler) getMeal(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
-	id, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid meal id: " + idStr})
-		return
-	}
-	out, err := h.svc.GetMeal(r.Context(), id)
+	out, err := h.svc.GetMeal(r.Context(), idStr)
 	if errors.Is(err, ErrNotFound) {
 		writeJSON(w, http.StatusNotFound, errorBody{Message: "meal " + idStr + " not found"})
 		return

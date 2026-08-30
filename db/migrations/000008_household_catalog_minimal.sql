@@ -14,7 +14,8 @@
 -- The unit that owns inventory locations. No account/membership modeling yet — that is
 -- establish-household-and-catalog's own scope, deferred.
 CREATE TABLE household (
-    id          TEXT PRIMARY KEY,
+    id          UUID PRIMARY KEY,
+    slug        TEXT NOT NULL UNIQUE,
     name        TEXT NOT NULL,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -23,7 +24,8 @@ CREATE TABLE household (
 -- retailer-agnostic (design.md Step 1). Distinct from ingredient: no brand/package data ever
 -- lives on `ingredient`.
 CREATE TABLE product (
-    id            TEXT PRIMARY KEY,
+    id            UUID PRIMARY KEY,
+    slug          TEXT NOT NULL UNIQUE,
     name          TEXT NOT NULL,
     brand         TEXT,
     package_size  TEXT,
@@ -33,10 +35,13 @@ CREATE TABLE product (
 -- GTIN/EAN lookup key onto a Product — never identity itself (implement-pantry-inventory
 -- design.md D6/invariant 5).
 CREATE TABLE product_identifier (
-    id          BIGSERIAL PRIMARY KEY,
-    product_id  TEXT NOT NULL REFERENCES product(id) ON DELETE CASCADE,
-    gtin        TEXT NOT NULL UNIQUE,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    scheme        TEXT NOT NULL,
+    value         TEXT NOT NULL,
+    product_id    UUID NOT NULL REFERENCES product(id) ON DELETE CASCADE,
+    provenance    TEXT,
+    confidence    numeric(5,4),
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (scheme, value)
 );
 
 -- Product → Ingredient is many-to-many (design.md Step 3: "a taco kit product maps to several
@@ -44,9 +49,9 @@ CREATE TABLE product_identifier (
 -- ingredient-catalog spec's "A Product without a resolved mapping is still valid" scenario — no
 -- placeholder row is inserted to represent "no mapping yet."
 CREATE TABLE product_ingredient_mapping (
-    product_id     TEXT NOT NULL REFERENCES product(id) ON DELETE CASCADE,
-    ingredient_id  TEXT NOT NULL REFERENCES ingredient(id),
-    quantity       DOUBLE PRECISION,
+    product_id     UUID NOT NULL REFERENCES product(id) ON DELETE CASCADE,
+    ingredient_id  UUID NOT NULL REFERENCES ingredient(id),
+    quantity       numeric(12,3),
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (product_id, ingredient_id)
 );

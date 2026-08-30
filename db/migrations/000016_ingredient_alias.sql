@@ -18,10 +18,10 @@
 --     upsert refreshes nothing but re-asserts existence.
 
 CREATE TABLE IF NOT EXISTS ingredient_alias (
-    id            BIGSERIAL PRIMARY KEY,
-    household_id  TEXT,                          -- NULL = global alias
+    id            UUID PRIMARY KEY,
+    household_id  UUID,                          -- NULL = global alias
     alias         TEXT NOT NULL,                 -- normalized nickname, e.g. 'potatis'
-    ingredient_id TEXT NOT NULL REFERENCES ingredient(id) ON DELETE CASCADE,
+    ingredient_id UUID NOT NULL REFERENCES ingredient(id) ON DELETE CASCADE,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (household_id, alias)
 );

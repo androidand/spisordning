@@ -16,7 +16,8 @@
 -- ── 1. Retailer ───────────────────────────────────────────────────────────────
 -- A retail chain (ICA, Willys, Coop, ...). One row per chain, not per store.
 CREATE TABLE IF NOT EXISTS retailer (
-    id         TEXT PRIMARY KEY,
+    id         UUID PRIMARY KEY,
+    slug       TEXT NOT NULL UNIQUE,
     name       TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -24,8 +25,9 @@ CREATE TABLE IF NOT EXISTS retailer (
 -- ── 2. Store ──────────────────────────────────────────────────────────────────
 -- A specific store within a retailer. Assortment and prices may differ per store.
 CREATE TABLE IF NOT EXISTS store (
-    id           TEXT PRIMARY KEY,
-    retailer_id  TEXT NOT NULL REFERENCES retailer(id) ON DELETE CASCADE,
+    id           UUID PRIMARY KEY,
+    slug         TEXT NOT NULL UNIQUE,
+    retailer_id  UUID NOT NULL REFERENCES retailer(id) ON DELETE CASCADE,
     name       TEXT NOT NULL,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -37,9 +39,10 @@ CREATE INDEX IF NOT EXISTS idx_store_retailer ON store (retailer_id);
 -- (owned by establish-household-and-catalog); product_id is nullable because
 -- a retailer may list a SKU before the canonical mapping is resolved.
 CREATE TABLE IF NOT EXISTS retailer_product (
-    id               TEXT PRIMARY KEY,
-    retailer_id      TEXT NOT NULL REFERENCES retailer(id) ON DELETE CASCADE,
-    product_id       TEXT REFERENCES product(id) ON DELETE SET NULL,
+    id               UUID PRIMARY KEY,
+    slug             TEXT NOT NULL UNIQUE,
+    retailer_id      UUID NOT NULL REFERENCES retailer(id) ON DELETE CASCADE,
+    product_id       UUID REFERENCES product(id) ON DELETE SET NULL,
     retailer_sku     TEXT NOT NULL,          -- article number / EAN / SKU as returned by the retailer
     display_name     TEXT,                   -- retailer's display name for this SKU
     created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -54,9 +57,9 @@ CREATE INDEX IF NOT EXISTS idx_retailer_product_retailer ON retailer_product (re
 -- currently_carried is the source of truth for "is this available now?"; price
 -- history lives separately in price_observation.
 CREATE TABLE IF NOT EXISTS store_product_offer (
-    id                    BIGSERIAL PRIMARY KEY,
-    store_id              TEXT NOT NULL REFERENCES store(id) ON DELETE CASCADE,
-    retailer_product_id   TEXT NOT NULL REFERENCES retailer_product(id) ON DELETE CASCADE,
+    id                    UUID PRIMARY KEY,
+    store_id              UUID NOT NULL REFERENCES store(id) ON DELETE CASCADE,
+    retailer_product_id   UUID NOT NULL REFERENCES retailer_product(id) ON DELETE CASCADE,
     currently_carried     BOOLEAN NOT NULL DEFAULT true,
     created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -71,10 +74,10 @@ CREATE INDEX IF NOT EXISTS idx_store_product_offer_product ON store_product_offe
 -- "Current price" is derived by reading the latest observation per (offer,
 -- price_kind) — see the view below.
 CREATE TABLE IF NOT EXISTS price_observation (
-    id                    BIGSERIAL PRIMARY KEY,
-    store_product_offer_id BIGINT NOT NULL REFERENCES store_product_offer(id) ON DELETE CASCADE,
+    id                    UUID PRIMARY KEY,
+    store_product_offer_id UUID NOT NULL REFERENCES store_product_offer(id) ON DELETE CASCADE,
     observed_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
-    price                 DOUBLE PRECISION NOT NULL,
+    price                 numeric(12,3) NOT NULL,
     price_kind            TEXT NOT NULL CHECK (price_kind IN ('regular', 'member', 'campaign')),
     source                TEXT NOT NULL,      -- e.g. 'willys_adapter', 'primat', 'matpriskollen', ...
     created_at            TIMESTAMPTZ NOT NULL DEFAULT now()

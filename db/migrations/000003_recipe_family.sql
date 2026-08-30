@@ -31,10 +31,11 @@
 -- variant (design.md, "Decisions — default_variant_id"); its FK is added after
 -- recipe_variant exists to break the circular reference.
 CREATE TABLE recipe_family (
-    id                 TEXT PRIMARY KEY,   -- slug, e.g. 'korvstroganoff'
+    id                 UUID PRIMARY KEY,
+    slug               TEXT NOT NULL UNIQUE,
     name               TEXT NOT NULL UNIQUE,
     description        TEXT,
-    default_variant_id TEXT,               -- FK added below (circular reference)
+    default_variant_id UUID,               -- FK added below (circular reference)
     archived           BOOLEAN NOT NULL DEFAULT false,
     created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -46,8 +47,9 @@ CREATE TABLE recipe_family (
 -- imported variants also carry the recipe_import_candidate.promoted_variant_id
 -- back-reference once promoted.
 CREATE TABLE recipe_variant (
-    id                 TEXT PRIMARY KEY,   -- slug, globally unique
-    family_id          TEXT NOT NULL REFERENCES recipe_family(id) ON DELETE RESTRICT,
+    id                 UUID PRIMARY KEY,
+    slug               TEXT NOT NULL UNIQUE,
+    family_id          UUID NOT NULL REFERENCES recipe_family(id) ON DELETE RESTRICT,
     title              TEXT NOT NULL,
     source_attribution TEXT,
     archived           BOOLEAN NOT NULL DEFAULT false,
@@ -62,8 +64,8 @@ CREATE INDEX ON recipe_variant (family_id);
 -- {ingredient_id, quantity, unit, raw_text}; `steps` is an ordered array of
 -- strings. A revision is never updated; a correction is a new row.
 CREATE TABLE recipe_revision (
-    id             BIGSERIAL PRIMARY KEY,
-    variant_id     TEXT NOT NULL REFERENCES recipe_variant(id) ON DELETE CASCADE,
+    id             UUID PRIMARY KEY,
+    variant_id     UUID NOT NULL REFERENCES recipe_variant(id) ON DELETE CASCADE,
     servings       INT,
     prep_time_sec  INT,
     cook_time_sec  INT,
@@ -84,8 +86,8 @@ CREATE INDEX ON recipe_revision (variant_id);
 -- parent-side RESTRICT (a revision that is someone's parent cannot be deleted,
 -- which also protects cross-variant fork edges such as A3 -> C1).
 CREATE TABLE recipe_revision_parent (
-    revision_id        BIGINT NOT NULL REFERENCES recipe_revision(id) ON DELETE CASCADE,
-    parent_revision_id BIGINT NOT NULL REFERENCES recipe_revision(id) ON DELETE RESTRICT,
+    revision_id        UUID NOT NULL REFERENCES recipe_revision(id) ON DELETE CASCADE,
+    parent_revision_id UUID NOT NULL REFERENCES recipe_revision(id) ON DELETE RESTRICT,
     PRIMARY KEY (revision_id, parent_revision_id)
 );
 CREATE INDEX ON recipe_revision_parent (parent_revision_id);
@@ -98,8 +100,16 @@ ALTER TABLE recipe_family
     ADD CONSTRAINT recipe_family_default_variant_fk
     FOREIGN KEY (default_variant_id) REFERENCES recipe_variant(id) ON DELETE RESTRICT;
 
+-- ── Deferred FK: recipe_import_candidate.promoted_variant_id -> variant ─────
+-- Bound now that recipe_variant exists. RESTRICT so a variant that has been
+-- promoted from an import candidate cannot be deleted.
+ALTER TABLE recipe_import_candidate
+    ADD CONSTRAINT recipe_import_candidate_promoted_variant_fk
+    FOREIGN KEY (promoted_variant_id) REFERENCES recipe_variant(id) ON DELETE RESTRICT;
+
 -- +goose Down
 DROP TABLE IF EXISTS recipe_revision_parent CASCADE;
 DROP TABLE IF EXISTS recipe_revision CASCADE;
+ALTER TABLE recipe_import_candidate DROP CONSTRAINT IF EXISTS recipe_import_candidate_promoted_variant_fk;
 DROP TABLE IF EXISTS recipe_variant CASCADE;
 DROP TABLE IF EXISTS recipe_family CASCADE;

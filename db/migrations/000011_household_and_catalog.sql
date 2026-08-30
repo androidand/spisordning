@@ -12,7 +12,7 @@
 -- ── 1. Account ↔ Person shape (design.md Step 5½) ───────────────────────────
 
 CREATE TABLE IF NOT EXISTS account (
-    id            TEXT PRIMARY KEY,
+    id            UUID PRIMARY KEY,
     -- Reserved slots for future auth columns (no real auth logic in this change).
     username      TEXT UNIQUE,            -- nullable: OIDC-only accounts may have none
     email         TEXT UNIQUE,
@@ -21,20 +21,21 @@ CREATE TABLE IF NOT EXISTS account (
         CHECK (auth_method IN ('NONE', 'LOCAL', 'OIDC')),
     -- Optional reference to a Person; 0..1 per Person, N per Account (multi-household
     -- support deferred — see design.md §Step 5½).
-    person_id     TEXT UNIQUE REFERENCES person(id) ON DELETE SET NULL,
+    person_id     UUID UNIQUE REFERENCES person(id) ON DELETE SET NULL,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_login_at TIMESTAMPTZ
 );
 
 -- Add account_id to person if it does not already exist (0010 may have added it).
 ALTER TABLE person
-    ADD COLUMN IF NOT EXISTS account_id TEXT REFERENCES account(id) ON DELETE SET NULL;
+    ADD COLUMN IF NOT EXISTS account_id UUID REFERENCES account(id) ON DELETE SET NULL;
 
 -- ── 1½. Add the deferred FK on household_membership.ended_by ─────────────────
---     Migration 0010 created the column as plain TEXT because `account` did not
---     exist yet. Now that account is created above, add the FK constraint so
---     referential integrity is enforced. Uses a DO block with exception handling
---     for idempotency (PostgreSQL has no ADD CONSTRAINT IF NOT EXISTS).
+--     Migration 0010 created the column as UUID (the re-baselined type) because
+--     `account` did not exist yet. Now that account is created above, add the
+--     FK constraint so referential integrity is enforced. Uses a DO block with
+--     exception handling for idempotency (PostgreSQL has no ADD CONSTRAINT
+--     IF NOT EXISTS).
 -- +goose StatementBegin
 DO $$ BEGIN
     ALTER TABLE household_membership
@@ -47,14 +48,14 @@ END $$;
 -- ── 2. Person restrictions (design.md Step 5½½) ──────────────────────────────
 
 CREATE TABLE IF NOT EXISTS person_restriction (
-    person_id   TEXT NOT NULL REFERENCES person(id) ON DELETE CASCADE,
+    person_id   UUID NOT NULL REFERENCES person(id) ON DELETE CASCADE,
     tag         TEXT NOT NULL,
     kind        TEXT NOT NULL CHECK (kind IN ('ALLERGY', 'HARD_RESTRICTION')),
     note        TEXT,
-    recorded_by TEXT REFERENCES account(id),
+    recorded_by UUID REFERENCES account(id),
     recorded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     cleared_at  TIMESTAMPTZ,
-    cleared_by  TEXT REFERENCES account(id),
+    cleared_by  UUID REFERENCES account(id),
     PRIMARY KEY (person_id, tag, kind)
 );
 CREATE INDEX IF NOT EXISTS idx_person_restriction_person_cleared
@@ -63,14 +64,14 @@ CREATE INDEX IF NOT EXISTS idx_person_restriction_person_cleared
 -- ── 3. Ingredient canonicalization (design.md Step 3.3) ─────────────────────
 
 ALTER TABLE ingredient
-    ADD COLUMN IF NOT EXISTS merged_into_id TEXT REFERENCES ingredient(id);
+    ADD COLUMN IF NOT EXISTS merged_into_id UUID REFERENCES ingredient(id);
 CREATE INDEX IF NOT EXISTS idx_ingredient_merged_into
     ON ingredient (merged_into_id);
 
 -- ── 4. Ingredient forms (design.md Step 5½½) ────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS ingredient_form (
-    ingredient_id TEXT NOT NULL REFERENCES ingredient(id) ON DELETE CASCADE,
+    ingredient_id UUID NOT NULL REFERENCES ingredient(id) ON DELETE CASCADE,
     form          TEXT NOT NULL,
     notes         TEXT,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -80,15 +81,15 @@ CREATE TABLE IF NOT EXISTS ingredient_form (
 -- ── 5. Ingredient substitution (design.md Step 5½½½) ────────────────────────
 
 CREATE TABLE IF NOT EXISTS ingredient_substitution (
-    id                   BIGSERIAL PRIMARY KEY,
-    from_ingredient_id   TEXT NOT NULL REFERENCES ingredient(id),
+    id                   UUID PRIMARY KEY,
+    from_ingredient_id   UUID NOT NULL REFERENCES ingredient(id),
     from_form            TEXT,
-    to_ingredient_id     TEXT NOT NULL REFERENCES ingredient(id),
+    to_ingredient_id     UUID NOT NULL REFERENCES ingredient(id),
     to_form              TEXT,
     category             TEXT NOT NULL CHECK (category IN (
         'EQUIVALENT', 'GOOD', 'ACCEPTABLE', 'FORM', 'DIETARY', 'EMERGENCY'
     )),
-    ratio                DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+    ratio                numeric(12,3) NOT NULL DEFAULT 1.0,
     retired_at           TIMESTAMPTZ,
     created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (from_ingredient_id, from_form, to_ingredient_id, to_form, category)
@@ -124,17 +125,17 @@ ON CONFLICT (code) DO NOTHING;
 CREATE TABLE IF NOT EXISTS unit_conversion (
     from_unit  TEXT NOT NULL REFERENCES unit(code),
     to_unit    TEXT NOT NULL REFERENCES unit(code),
-    factor     DOUBLE PRECISION NOT NULL,
+    factor     numeric(12,3) NOT NULL,
     PRIMARY KEY (from_unit, to_unit)
 );
 CREATE INDEX IF NOT EXISTS idx_unit_conversion_to
     ON unit_conversion (to_unit);
 
 CREATE TABLE IF NOT EXISTS ingredient_unit_conversion (
-    ingredient_id TEXT NOT NULL REFERENCES ingredient(id),
+    ingredient_id UUID NOT NULL REFERENCES ingredient(id),
     from_unit     TEXT NOT NULL REFERENCES unit(code),
     to_unit       TEXT NOT NULL REFERENCES unit(code),
-    factor        DOUBLE PRECISION NOT NULL,
+    factor        numeric(12,3) NOT NULL,
     PRIMARY KEY (ingredient_id, from_unit, to_unit)
 );
 

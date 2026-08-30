@@ -24,8 +24,8 @@ const (
 
 // Person is a family member whose preferences shape the plan.
 type Person struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID   PersonID `json:"id"`
+	Name string   `json:"name"`
 	// Weight lets some people count for more in the aggregate (e.g. a picky
 	// child whose buy-in matters most). Defaults to 1.0 when zero.
 	Weight float64 `json:"weight"`
@@ -42,10 +42,10 @@ func (p Person) EffectiveWeight() float64 {
 // Preference is one person's confidence-weighted sentiment toward a tag
 // (an ingredient, cuisine, or dish trait such as "spicy" or "fish").
 type Preference struct {
-	PersonID   string   `json:"personId"`
-	Tag        string   `json:"tag"`
+	PersonID   PersonID  `json:"personId"`
+	Tag        string    `json:"tag"`
 	Sentiment  Sentiment `json:"sentiment"`
-	Confidence float64  `json:"confidence"` // [0,1]; freshly-guessed = low, well-observed = high.
+	Confidence float64   `json:"confidence"` // [0,1]; freshly-guessed = low, well-observed = high.
 }
 
 // Effort classifies how much active work a meal costs the cook.
@@ -174,13 +174,4 @@ type ShoppingRequirement struct {
 	PreferredForm   string
 }
 
-// Note: Household, Account, PersonRestriction, RestrictionKind, IngredientForm,
-// IngredientSubstitution(Category), Unit(Dimension/Conversion), Product(Kind),
-// and ProductIngredientMapping are NOT defined here. A branch written before
-// establish-household-and-catalog landed re-declared all of these locally in
-// this file; that owner has since landed richer, real versions in catalog.go
-// (IngredientForm/IngredientSubstitution/Unit*/Product*) and household.go
-// (Household/Account/PersonRestriction/RestrictionKind, both *string-typed
-// for optional actor fields) - reconciled 2026-08-25 by dropping the
-// duplicate block in favor of those real types rather than keeping two
-// incompatible definitions of the same concepts.
+

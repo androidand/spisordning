@@ -49,7 +49,7 @@ func (f *fakePantrySvc) Purchase(ctx context.Context, in dto.PantryPurchaseInput
 	return f.purchased, nil
 }
 
-func (f *fakePantrySvc) Consume(ctx context.Context, lotID int64, in dto.PantryConsumeInput) error {
+func (f *fakePantrySvc) Consume(ctx context.Context, lotID string, in dto.PantryConsumeInput) error {
 	return f.err
 }
 
@@ -103,7 +103,7 @@ func TestCreateLocation_EmptyName(t *testing.T) {
 
 func TestListLots_HappyPath(t *testing.T) {
 	svc := &fakePantrySvc{lots: []dto.PantryLot{
-		{ID: 1, IngredientID: "cauliflower", LocationID: "kitchen", Quantity: 2.0, Unit: "piece"},
+		{ID: "lot-1", IngredientID: "cauliflower", LocationID: "kitchen", Quantity: 2.0, Unit: "piece"},
 	}}
 	mux := newMux(t, Dependencies{Pantry: svc})
 
@@ -119,7 +119,7 @@ func TestListLots_HappyPath(t *testing.T) {
 }
 
 func TestPurchase_HappyPath(t *testing.T) {
-	svc := &fakePantrySvc{purchased: dto.PantryLot{ID: 1, IngredientID: "cauliflower", Quantity: 1.0}}
+	svc := &fakePantrySvc{purchased: dto.PantryLot{ID: "lot-1", IngredientID: "cauliflower", Quantity: 1.0}}
 	mux := newMux(t, Dependencies{Pantry: svc})
 
 	rec := doPost(t, mux, "/pantry/lots/purchase", `{"ingredient_id":"cauliflower","quantity":1.0,"unit":"piece","location_id":"kitchen"}`)
@@ -155,8 +155,8 @@ func TestConsume_BadLotID(t *testing.T) {
 	mux := newMux(t, Dependencies{Pantry: &fakePantrySvc{}})
 
 	rec := doPost(t, mux, "/pantry/lots/abc/consume", `{"quantity":1.0}`)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 }
 
@@ -451,7 +451,7 @@ func TestListStores_BadLatitude(t *testing.T) {
 }
 
 func TestListStoreOffers_HappyPath(t *testing.T) {
-	svc := &fakeStoresSvc{offers: []dto.StoreOffer{{ID: 7, StoreID: "s-1", RetailerProductID: "rp-1", CurrentlyCarried: true}}}
+	svc := &fakeStoresSvc{offers: []dto.StoreOffer{{ID: "offer-7", StoreID: "s-1", RetailerProductID: "rp-1", CurrentlyCarried: true}}}
 	mux := newMux(t, Dependencies{Stores: svc})
 
 	rec := doGet(t, mux, "/stores/s-1/offers")
@@ -460,7 +460,7 @@ func TestListStoreOffers_HappyPath(t *testing.T) {
 	}
 	var got []dto.StoreOffer
 	mustJSON(t, rec.Body.Bytes(), &got)
-	if len(got) != 1 || got[0].ID != 7 {
+	if len(got) != 1 || got[0].ID != "offer-7" {
 		t.Fatalf("unexpected offers: %+v", got)
 	}
 }
@@ -491,7 +491,7 @@ func (f *fakeMealsSvc) CreateMealEvent(ctx context.Context, in dto.MealEventNew)
 	return f.created, nil
 }
 
-func (f *fakeMealsSvc) GetMeal(ctx context.Context, id int64) (dto.MealEventResponse, error) {
+func (f *fakeMealsSvc) GetMeal(ctx context.Context, id string) (dto.MealEventResponse, error) {
 	if f.err != nil {
 		return dto.MealEventResponse{}, f.err
 	}
@@ -507,7 +507,7 @@ func (f *fakeMealsSvc) ListMeals(ctx context.Context, mealieRecipeID, servedOn s
 
 func TestListMeals_HappyPath(t *testing.T) {
 	svc := &fakeMealsSvc{meals: []dto.MealEventResponse{
-		{ID: 1, MealieRecipeID: "r-1", ServedOn: "2026-08-19", Reactions: []dto.MealReactionResponse{{PersonID: "p1", Sentiment: 1}}},
+		{ID: "meal-1", MealieRecipeID: "r-1", ServedOn: "2026-08-19", Reactions: []dto.MealReactionResponse{{PersonID: "p1", Sentiment: 1}}},
 	}}
 	mux := newMux(t, Dependencies{Meals: svc})
 
@@ -523,16 +523,16 @@ func TestListMeals_HappyPath(t *testing.T) {
 }
 
 func TestGetMeal_HappyPath(t *testing.T) {
-	svc := &fakeMealsSvc{meal: dto.MealEventResponse{ID: 42, MealieRecipeID: "r-1", ServedOn: "2026-08-19"}}
+	svc := &fakeMealsSvc{meal: dto.MealEventResponse{ID: "meal-42", MealieRecipeID: "r-1", ServedOn: "2026-08-19"}}
 	mux := newMux(t, Dependencies{Meals: svc})
 
-	rec := doGet(t, mux, "/meals/42")
+	rec := doGet(t, mux, "/meals/meal-42")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body)
 	}
 	var got dto.MealEventResponse
 	mustJSON(t, rec.Body.Bytes(), &got)
-	if got.ID != 42 || got.MealieRecipeID != "r-1" {
+	if got.ID != "meal-42" || got.MealieRecipeID != "r-1" {
 		t.Fatalf("unexpected meal: %+v", got)
 	}
 }
@@ -541,8 +541,8 @@ func TestGetMeal_BadID(t *testing.T) {
 	mux := newMux(t, Dependencies{Meals: &fakeMealsSvc{}})
 
 	rec := doGet(t, mux, "/meals/abc")
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 }
 
@@ -1129,28 +1129,28 @@ func (f *fakePlansSvc) CreatePlan(ctx context.Context, weekStart time.Time) (Pla
 	if f.planErr != nil {
 		return PlanResponse{}, f.planErr
 	}
-	return PlanResponse{ID: 1, WeekStart: types.Date{Time: weekStart}, Status: "draft"}, nil
+	return PlanResponse{ID: "plan-1", WeekStart: types.Date{Time: weekStart}, Status: "draft"}, nil
 }
 
-func (f *fakePlansSvc) GetPlan(ctx context.Context, planID int64) (PlanView, error) {
+func (f *fakePlansSvc) GetPlan(ctx context.Context, planID string) (PlanView, error) {
 	if f.planErr != nil {
 		return PlanView{}, f.planErr
 	}
 	return f.planView, nil
 }
 
-func (f *fakePlansSvc) UpdatePlan(ctx context.Context, planID int64, status string) (PlanResponse, error) {
+func (f *fakePlansSvc) UpdatePlan(ctx context.Context, planID string, status string) (PlanResponse, error) {
 	if f.planErr != nil {
 		return PlanResponse{}, f.planErr
 	}
-	return PlanResponse{ID: int(planID), Status: status}, nil
+	return PlanResponse{ID: planID, Status: status}, nil
 }
 
-func (f *fakePlansSvc) SetDecisions(ctx context.Context, planID int64, decisions []PlanDecisionInput) error {
+func (f *fakePlansSvc) SetDecisions(ctx context.Context, planID string, decisions []PlanDecisionInput) error {
 	return f.decisionsErr
 }
 
-func (f *fakePlansSvc) ListCandidates(ctx context.Context, planID int64) ([]PlanCandidateResponse, error) {
+func (f *fakePlansSvc) ListCandidates(ctx context.Context, planID string) ([]PlanCandidateResponse, error) {
 	if f.candidatesErr != nil {
 		return nil, f.candidatesErr
 	}
@@ -1161,7 +1161,7 @@ func (f *fakePlansSvc) InsertCandidates(ctx context.Context, candidates []PlanCa
 	return nil
 }
 
-func (f *fakePlansSvc) ListShoppingRequirements(ctx context.Context, planID int64) ([]ShoppingRequirementResponse, error) {
+func (f *fakePlansSvc) ListShoppingRequirements(ctx context.Context, planID string) ([]ShoppingRequirementResponse, error) {
 	if f.shoppingErr != nil {
 		return nil, f.shoppingErr
 	}

@@ -8,7 +8,6 @@ import (
 // FavoriteResponse is one explicit favorite marker on a recipe, person- or
 // household-scoped. Exactly one of PersonID or HouseholdID is non-empty.
 type FavoriteResponse struct {
-	ID             int64     `json:"id"`
 	PersonID       string    `json:"person_id,omitempty"`
 	HouseholdID    string    `json:"household_id,omitempty"`
 	MealieRecipeID string    `json:"mealie_recipe_id"`

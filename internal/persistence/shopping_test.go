@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/androidand/spisordning/internal/domain"
 )
 
 func TestShoppingList_CreateAndGet(t *testing.T) {
@@ -12,8 +14,8 @@ func TestShoppingList_CreateAndGet(t *testing.T) {
 	truncateTables(t, ctx, s, "shopping_list_item", "shopping_list", "person")
 
 	// owner_person_id is an FK to person(id); create the owner first.
-	owner := "p-001"
-	if err := s.CreatePerson(ctx, Person{ID: owner, Name: "Owner"}); err != nil {
+	owner := domain.NewPersonID()
+	if err := s.CreatePerson(ctx, Person{ID: owner.String(), Name: "Owner"}); err != nil {
 		t.Fatalf("CreatePerson: %v", err)
 	}
 	l, err := s.CreateShoppingList(ctx, ShoppingList{
@@ -85,14 +87,14 @@ func TestShoppingListItem_RoundTrip(t *testing.T) {
 	}
 
 	// Seed an ingredient for the FK to resolve.
-	if err := s.UpsertIngredient(ctx, Ingredient{ID: "köttfärs", Display: "Köttfärs"}); err != nil {
+	ingID := domain.NewIngredientID()
+	if err := s.UpsertIngredient(ctx, Ingredient{ID: ingID, Display: "Köttfärs"}); err != nil {
 		t.Fatalf("UpsertIngredient: %v", err)
 	}
 
-	ing := "köttfärs"
 	item, err := s.CreateShoppingListItem(ctx, ShoppingListItem{
 		ShoppingListID: listID,
-		IngredientID:   &ing,
+		IngredientID:   &ingID,
 		Label:          nil,
 		Quantity:       400,
 		Unit:           "g",
@@ -336,10 +338,11 @@ func TestShoppingRequirement_Get(t *testing.T) {
 		t.Fatalf("CreateMealPlan: %v", err)
 	}
 
+	ingID := domain.NewIngredientID()
 	pref := "fresh"
 	req := ShoppingRequirement{
 		PlanID:          planID,
-		IngredientID:    "köttfärs",
+		IngredientID:    ingID,
 		Quantity:        400,
 		Unit:            "g",
 		AcceptableForms: []string{"400 g", "500 g"},
@@ -362,7 +365,7 @@ func TestShoppingRequirement_Get(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetShoppingRequirement: %v", err)
 	}
-	if got.IngredientID != "köttfärs" || got.Quantity != 400 || got.Unit != "g" {
+	if got.IngredientID != ingID || got.Quantity != 400 || got.Unit != "g" {
 		t.Errorf("got %+v", got)
 	}
 	if got.PreferredForm == nil || *got.PreferredForm != "fresh" {

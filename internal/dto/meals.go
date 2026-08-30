@@ -13,7 +13,7 @@ type MealReactionResponse struct {
 
 // MealEventResponse mirrors api/openapi.yaml components/schemas/MealEvent.
 type MealEventResponse struct {
-	ID             int64                  `json:"id"`
+	ID             string                 `json:"id"`
 	MealieRecipeID string                 `json:"mealie_recipe_id"`
 	ServedOn       string                 `json:"served_on"`  // date (date-only)
 	CreatedAt      time.Time              `json:"created_at"` // rendered as RFC3339
@@ -36,6 +36,6 @@ type MealReactionInput struct {
 // MealsService is the surface the /meals handlers need.
 type MealsService interface {
 	CreateMealEvent(ctx context.Context, in MealEventNew) (MealEventResponse, error)
-	GetMeal(ctx context.Context, id int64) (MealEventResponse, error)
+	GetMeal(ctx context.Context, id string) (MealEventResponse, error)
 	ListMeals(ctx context.Context, mealieRecipeID, servedOn string) ([]MealEventResponse, error)
 }

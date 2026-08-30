@@ -98,9 +98,9 @@ func newTestEnv(t *testing.T, ollaHandler http.HandlerFunc) (familyPath string, 
 	dir := t.TempDir()
 	familyPath = filepath.Join(dir, "family.json")
 	familyJSON := `{
-		"people":[{"id":"kid","name":"Kid","weight":2}],
-		"preferences":[{"personId":"kid","tag":"pasta","sentiment":2,"confidence":0.9},
-		               {"personId":"kid","tag":"fisk","sentiment":-1,"confidence":0.8}],
+		"people":[{"id":"01900000-0000-7000-8000-000000000001","name":"Kid","weight":2}],
+		"preferences":[{"personId":"01900000-0000-7000-8000-000000000001","tag":"pasta","sentiment":2,"confidence":0.9},
+		               {"personId":"01900000-0000-7000-8000-000000000001","tag":"fisk","sentiment":-1,"confidence":0.8}],
 		"kitchenEnergy":{"mon":2,"tue":2,"wed":2,"thu":2,"fri":2,"sat":3,"sun":3}
 	}`
 	if err := os.WriteFile(familyPath, []byte(familyJSON), 0o644); err != nil {

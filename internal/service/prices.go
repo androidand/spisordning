@@ -34,7 +34,7 @@ func (s *PriceIntelligence) ListProductPrices(ctx context.Context) ([]dto.Produc
 	}
 	retailerNames := make(map[string]string, len(retailers))
 	for _, r := range retailers {
-		retailerNames[r.ID] = r.Name
+		retailerNames[r.ID.String()] = r.Name
 	}
 	stores, err := s.db.ListAllStores(ctx)
 	if err != nil {
@@ -43,8 +43,8 @@ func (s *PriceIntelligence) ListProductPrices(ctx context.Context) ([]dto.Produc
 	storeNames := make(map[string]string, len(stores))
 	storeRetailers := make(map[string]string, len(stores))
 	for _, st := range stores {
-		storeNames[st.ID] = st.Name
-		storeRetailers[st.ID] = st.RetailerID
+		storeNames[st.ID.String()] = st.Name
+		storeRetailers[st.ID.String()] = st.RetailerID.String()
 	}
 
 	// Load retailer products for display names and retailer ids.
@@ -55,7 +55,7 @@ func (s *PriceIntelligence) ListProductPrices(ctx context.Context) ([]dto.Produc
 			return nil, fmt.Errorf("service: list retailer products: %w", err)
 		}
 		for _, rp := range rps {
-			productByRP[rp.ID] = rp
+			productByRP[rp.ID.String()] = rp
 		}
 	}
 
@@ -63,25 +63,31 @@ func (s *PriceIntelligence) ListProductPrices(ctx context.Context) ([]dto.Produc
 	groups := make(map[string]*dto.ProductPriceGroup)
 	var order []string
 	for _, p := range prices {
-		g, ok := groups[p.RetailerProductID]
+		rpKey := p.RetailerProductID.String()
+		g, ok := groups[rpKey]
 		if !ok {
-			rp := productByRP[p.RetailerProductID]
+			rp := productByRP[rpKey]
+			productIDStr := ""
+			if rp.ProductID != nil {
+				productIDStr = rp.ProductID.String()
+			}
 			g = &dto.ProductPriceGroup{
-				RetailerProductID: p.RetailerProductID,
-				ProductID:         rp.ProductID,
+				RetailerProductID: rpKey,
+				ProductID:         productIDStr,
 				DisplayName:       rp.DisplayName,
-				RetailerID:        rp.RetailerID,
-				RetailerName:      retailerNames[rp.RetailerID],
+				RetailerID:        rp.RetailerID.String(),
+				RetailerName:      retailerNames[rp.RetailerID.String()],
 				Prices:            []dto.StorePrice{},
 			}
-			groups[p.RetailerProductID] = g
-			order = append(order, p.RetailerProductID)
+			groups[rpKey] = g
+			order = append(order, rpKey)
 		}
+		storeIDStr := p.StoreID.String()
 		sp := dto.StorePrice{
-			StoreID:      p.StoreID,
-			StoreName:    storeNames[p.StoreID],
-			RetailerID:   storeRetailers[p.StoreID],
-			RetailerName: retailerNames[storeRetailers[p.StoreID]],
+			StoreID:      storeIDStr,
+			StoreName:    storeNames[storeIDStr],
+			RetailerID:   storeRetailers[storeIDStr],
+			RetailerName: retailerNames[storeRetailers[storeIDStr]],
 			PriceKind:    string(p.PriceKind),
 			Price:        p.Price,
 			ObservedAt:   p.ObservedAt,

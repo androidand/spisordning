@@ -354,7 +354,7 @@ func preferenceScore(c domain.Candidate, ctx domain.PlanContext) float64 {
 	}
 
 	// Index preferences by person then tag for O(1) lookup.
-	byPerson := map[string]map[string]domain.Preference{}
+	byPerson := map[domain.PersonID]map[string]domain.Preference{}
 	for _, p := range ctx.Preferences {
 		if _, ok := byPerson[p.PersonID]; !ok {
 			byPerson[p.PersonID] = map[string]domain.Preference{}

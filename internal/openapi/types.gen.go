@@ -87,6 +87,33 @@ func (e OrderSource) Valid() bool {
 	}
 }
 
+// Defines values for PlanProgressPhase.
+const (
+	Done      PlanProgressPhase = "done"
+	Planning  PlanProgressPhase = "planning"
+	Resolving PlanProgressPhase = "resolving"
+	Started   PlanProgressPhase = "started"
+	Wishlist  PlanProgressPhase = "wishlist"
+)
+
+// Valid indicates whether the value is a known member of the PlanProgressPhase enum.
+func (e PlanProgressPhase) Valid() bool {
+	switch e {
+	case Done:
+		return true
+	case Planning:
+		return true
+	case Resolving:
+		return true
+	case Started:
+		return true
+	case Wishlist:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PlanRunResultStatus.
 const (
 	Accepted PlanRunResultStatus = "accepted"
@@ -177,6 +204,55 @@ func (e ShoppingListStatus) Valid() bool {
 	}
 }
 
+// Defines values for StorePricePriceKind.
+const (
+	Campaign StorePricePriceKind = "campaign"
+	Member   StorePricePriceKind = "member"
+	Regular  StorePricePriceKind = "regular"
+)
+
+// Valid indicates whether the value is a known member of the StorePricePriceKind enum.
+func (e StorePricePriceKind) Valid() bool {
+	switch e {
+	case Campaign:
+		return true
+	case Member:
+		return true
+	case Regular:
+		return true
+	default:
+		return false
+	}
+}
+
+// Dashboard defines model for Dashboard.
+type Dashboard struct {
+	Expiring []DashboardExpiringLot `json:"expiring"`
+	Pantry   DashboardPantry        `json:"pantry"`
+	Tonight  *DashboardTonight      `json:"tonight,omitempty"`
+}
+
+// DashboardExpiringLot defines model for DashboardExpiringLot.
+type DashboardExpiringLot struct {
+	BestBefore   *time.Time `json:"best_before,omitempty"`
+	IngredientId string     `json:"ingredient_id"`
+	Quantity     float32    `json:"quantity"`
+	Unit         string     `json:"unit"`
+}
+
+// DashboardPantry defines model for DashboardPantry.
+type DashboardPantry struct {
+	Expiring  int `json:"expiring"`
+	Locations int `json:"locations"`
+	Lots      int `json:"lots"`
+}
+
+// DashboardTonight defines model for DashboardTonight.
+type DashboardTonight struct {
+	Recipe   RecipeRef `json:"recipe"`
+	ServedOn string    `json:"served_on"`
+}
+
 // EffortProfile defines model for EffortProfile.
 type EffortProfile struct {
 	KitchenEnergy int `json:"kitchen_energy"`
@@ -188,6 +264,67 @@ type EffortProfile struct {
 // Error defines model for Error.
 type Error struct {
 	Message string `json:"message"`
+}
+
+// Favorite defines model for Favorite.
+type Favorite struct {
+	CreatedAt      time.Time `json:"created_at"`
+	HouseholdId    *string   `json:"household_id,omitempty"`
+	Id             int       `json:"id"`
+	MealieRecipeId string    `json:"mealie_recipe_id"`
+	PersonId       *string   `json:"person_id,omitempty"`
+}
+
+// FavoriteNew defines model for FavoriteNew.
+type FavoriteNew struct {
+	HouseholdId *string `json:"household_id,omitempty"`
+
+	// PersonId set exactly one of person_id / household_id
+	PersonId *string `json:"person_id,omitempty"`
+}
+
+// GrocyProduct defines model for GrocyProduct.
+type GrocyProduct struct {
+	Barcode        *string  `json:"barcode,omitempty"`
+	Id             int      `json:"id"`
+	LocationId     *int     `json:"location_id,omitempty"`
+	MinStockAmount *float32 `json:"min_stock_amount,omitempty"`
+	Name           string   `json:"name"`
+	QuIdPurchase   *int     `json:"qu_id_purchase,omitempty"`
+	QuIdStock      *int     `json:"qu_id_stock,omitempty"`
+}
+
+// GrocyShoppingItem defines model for GrocyShoppingItem.
+type GrocyShoppingItem struct {
+	Amount float32 `json:"amount"`
+	Done   bool    `json:"done"`
+	Id     int     `json:"id"`
+	Note   string  `json:"note"`
+
+	// ProductId 0 for a free-text item
+	ProductId int `json:"product_id"`
+	QuId      int `json:"qu_id"`
+}
+
+// GrocyStatus defines model for GrocyStatus.
+type GrocyStatus struct {
+	BaseUrl    *string `json:"base_url,omitempty"`
+	Configured bool    `json:"configured"`
+	Reachable  bool    `json:"reachable"`
+	Version    *string `json:"version,omitempty"`
+}
+
+// GrocyStockEntry defines model for GrocyStockEntry.
+type GrocyStockEntry struct {
+	Amount float32 `json:"amount"`
+
+	// BestBefore YYYY-MM-DD
+	BestBefore  *string `json:"best_before,omitempty"`
+	Id          int     `json:"id"`
+	LocationId  int     `json:"location_id"`
+	ProductId   int     `json:"product_id"`
+	ProductName string  `json:"product_name"`
+	QuId        int     `json:"qu_id"`
 }
 
 // Health defines model for Health.
@@ -214,6 +351,27 @@ type Ingredient struct {
 
 	// Source upstream source (slv
 	Source *string `json:"source,omitempty"`
+}
+
+// IngredientAlias defines model for IngredientAlias.
+type IngredientAlias struct {
+	// Alias normalized nickname
+	Alias     string    `json:"alias"`
+	CreatedAt time.Time `json:"created_at"`
+
+	// HouseholdId empty/null = global alias
+	HouseholdId  *string `json:"household_id,omitempty"`
+	Id           int64   `json:"id"`
+	IngredientId string  `json:"ingredient_id"`
+}
+
+// IngredientAliasNew defines model for IngredientAliasNew.
+type IngredientAliasNew struct {
+	Alias string `json:"alias"`
+
+	// HouseholdId empty = global alias
+	HouseholdId  *string `json:"household_id,omitempty"`
+	IngredientId string  `json:"ingredient_id"`
 }
 
 // IngredientMapping defines model for IngredientMapping.
@@ -256,6 +414,24 @@ type IngredientProduct struct {
 	ImageUrl    *string `json:"image_url,omitempty"`
 	Key         string  `json:"key"`
 	Name        string  `json:"name"`
+}
+
+// InspirationSuggestion defines model for InspirationSuggestion.
+type InspirationSuggestion struct {
+	Effort int `json:"effort"`
+
+	// MatchRatio 1 = fully cookable from pantry
+	MatchRatio float64 `json:"match_ratio"`
+
+	// MatchedIngredientIds recipe ingredients already in the pantry
+	MatchedIngredientIds []string `json:"matched_ingredient_ids"`
+	MealieRecipeId       string   `json:"mealie_recipe_id"`
+
+	// MissingIngredientIds recipe ingredients still needed
+	MissingIngredientIds []string `json:"missing_ingredient_ids"`
+	Tags                 []string `json:"tags"`
+	Title                string   `json:"title"`
+	TotalIngredients     int      `json:"total_ingredients"`
 }
 
 // MealEvent defines model for MealEvent.
@@ -363,6 +539,21 @@ type OrderView struct {
 	Order Order       `json:"order"`
 }
 
+// PantryLot defines model for PantryLot.
+type PantryLot struct {
+	BestBefore   *time.Time `json:"best_before,omitempty"`
+	Confidence   string     `json:"confidence"`
+	CreatedAt    time.Time  `json:"created_at"`
+	Id           string     `json:"id"`
+	IngredientId string     `json:"ingredient_id"`
+	LocationId   string     `json:"location_id"`
+	OpenedAt     *time.Time `json:"opened_at,omitempty"`
+	ProductId    string     `json:"product_id"`
+	Quantity     float32    `json:"quantity"`
+	Unit         string     `json:"unit"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+}
+
 // Person defines model for Person.
 type Person struct {
 	CreatedAt time.Time `json:"created_at"`
@@ -389,6 +580,39 @@ type PersonPreference struct {
 	Tag       string    `json:"tag"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
+
+// PersonPreferenceNew defines model for PersonPreferenceNew.
+type PersonPreferenceNew struct {
+	Confidence float64 `json:"confidence"`
+	PersonId   string  `json:"person_id"`
+
+	// Sentiment -2 (strongly dislike) to 2 (love)
+	Sentiment int    `json:"sentiment"`
+	Tag       string `json:"tag"`
+}
+
+// PersonUpdate defines model for PersonUpdate.
+type PersonUpdate struct {
+	Name string `json:"name"`
+
+	// Weight 0/omitted leaves the existing weight unchanged
+	Weight *float64 `json:"weight,omitempty"`
+}
+
+// PlanProgress One SSE progress event for a running plan (POST /plans/run/stream). The payload shape is intentionally minimal and not finalized until the frontend's SSE consumer needs it (task 3.4).
+type PlanProgress struct {
+	// At when the phase was reached
+	At time.Time `json:"at"`
+
+	// Message human-readable progress detail
+	Message string `json:"message"`
+
+	// Phase the phase the run has reached
+	Phase PlanProgressPhase `json:"phase"`
+}
+
+// PlanProgressPhase the phase the run has reached
+type PlanProgressPhase string
 
 // PlanRunInput defines model for PlanRunInput.
 type PlanRunInput struct {
@@ -437,6 +661,17 @@ type PlanningConstraintNew struct {
 	Value  string `json:"value"`
 }
 
+// ProductPriceGroup defines model for ProductPriceGroup.
+type ProductPriceGroup struct {
+	Cheapest          *StorePrice  `json:"cheapest,omitempty"`
+	DisplayName       *string      `json:"display_name,omitempty"`
+	Prices            []StorePrice `json:"prices"`
+	ProductId         *string      `json:"product_id,omitempty"`
+	RetailerId        string       `json:"retailer_id"`
+	RetailerName      *string      `json:"retailer_name,omitempty"`
+	RetailerProductId string       `json:"retailer_product_id"`
+}
+
 // ReactionNew defines model for ReactionNew.
 type ReactionNew struct {
 	// Note optional free-text note
@@ -449,6 +684,42 @@ type ReactionNew struct {
 	Sentiment int `json:"sentiment"`
 }
 
+// RecipeFamily defines model for RecipeFamily.
+type RecipeFamily struct {
+	Archived         bool      `json:"archived"`
+	CreatedAt        time.Time `json:"created_at"`
+	DefaultVariantId *string   `json:"default_variant_id,omitempty"`
+	Description      *string   `json:"description,omitempty"`
+	Id               string    `json:"id"`
+	Name             string    `json:"name"`
+}
+
+// RecipeFamilyNew defines model for RecipeFamilyNew.
+type RecipeFamilyNew struct {
+	Description *string `json:"description,omitempty"`
+
+	// Id slug; derived from name when omitted
+	Id   *string `json:"id,omitempty"`
+	Name string  `json:"name"`
+}
+
+// RecipeIngredient defines model for RecipeIngredient.
+type RecipeIngredient struct {
+	AcceptableForms *[]string `json:"acceptable_forms,omitempty"`
+	IngredientId    string    `json:"ingredient_id"`
+	PreferredForm   *string   `json:"preferred_form,omitempty"`
+	Quantity        float32   `json:"quantity"`
+	RawText         *string   `json:"raw_text,omitempty"`
+	Unit            string    `json:"unit"`
+}
+
+// RecipeRating defines model for RecipeRating.
+type RecipeRating struct {
+	Average        float32 `json:"average"`
+	MealieRecipeId string  `json:"mealie_recipe_id"`
+	ReviewCount    int     `json:"review_count"`
+}
+
 // RecipeRef defines model for RecipeRef.
 type RecipeRef struct {
 	// Effort 1 (quick) to 3 (intense)
@@ -457,6 +728,47 @@ type RecipeRef struct {
 	MealieRecipeId string    `json:"mealie_recipe_id"`
 	Tags           []string  `json:"tags"`
 	Title          string    `json:"title"`
+}
+
+// RecipeRevision defines model for RecipeRevision.
+type RecipeRevision struct {
+	CreatedAt   time.Time          `json:"created_at"`
+	Description *string            `json:"description,omitempty"`
+	Id          string             `json:"id"`
+	Ingredients []RecipeIngredient `json:"ingredients"`
+	Parents     *[]string          `json:"parents,omitempty"`
+	Servings    *int               `json:"servings,omitempty"`
+	Steps       []string           `json:"steps"`
+	VariantId   string             `json:"variant_id"`
+}
+
+// RecipeRevisionNew defines model for RecipeRevisionNew.
+type RecipeRevisionNew struct {
+	Description *string            `json:"description,omitempty"`
+	Ingredients []RecipeIngredient `json:"ingredients"`
+
+	// ParentRevisionId derive from this revision
+	ParentRevisionId *string  `json:"parent_revision_id,omitempty"`
+	Servings         *int     `json:"servings,omitempty"`
+	Steps            []string `json:"steps"`
+}
+
+// RecipeVariant defines model for RecipeVariant.
+type RecipeVariant struct {
+	Archived          bool      `json:"archived"`
+	CreatedAt         time.Time `json:"created_at"`
+	FamilyId          string    `json:"family_id"`
+	Id                string    `json:"id"`
+	SourceAttribution *string   `json:"source_attribution,omitempty"`
+	Title             string    `json:"title"`
+}
+
+// RecipeVariantNew defines model for RecipeVariantNew.
+type RecipeVariantNew struct {
+	// Id slug; derived from title when omitted
+	Id                *string `json:"id,omitempty"`
+	SourceAttribution *string `json:"source_attribution,omitempty"`
+	Title             string  `json:"title"`
 }
 
 // RetailerListBinding defines model for RetailerListBinding.
@@ -541,9 +853,13 @@ type ShoppingRequirement struct {
 
 // Store defines model for Store.
 type Store struct {
-	Id         string `json:"id"`
-	Name       string `json:"name"`
-	RetailerId string `json:"retailer_id"`
+	DistanceKm   *float32 `json:"distance_km,omitempty"`
+	Id           string   `json:"id"`
+	Latitude     *float32 `json:"latitude,omitempty"`
+	Longitude    *float32 `json:"longitude,omitempty"`
+	Name         string   `json:"name"`
+	RetailerId   string   `json:"retailer_id"`
+	RetailerName *string  `json:"retailer_name,omitempty"`
 }
 
 // StoreOffer defines model for StoreOffer.
@@ -554,6 +870,21 @@ type StoreOffer struct {
 	StoreId           string    `json:"store_id"`
 	UpdatedAt         time.Time `json:"updated_at"`
 }
+
+// StorePrice defines model for StorePrice.
+type StorePrice struct {
+	ObservedAt   time.Time           `json:"observed_at"`
+	Price        float32             `json:"price"`
+	PriceKind    StorePricePriceKind `json:"price_kind"`
+	RetailerId   string              `json:"retailer_id"`
+	RetailerName *string             `json:"retailer_name,omitempty"`
+	Source       string              `json:"source"`
+	StoreId      string              `json:"store_id"`
+	StoreName    *string             `json:"store_name,omitempty"`
+}
+
+// StorePricePriceKind defines model for StorePrice.PriceKind.
+type StorePricePriceKind string
 
 // TonightView Tonight's meal: the recipe + any reactions recorded so far
 type TonightView struct {
@@ -589,6 +920,45 @@ type Conflict = Error
 // NotFound defines model for NotFound.
 type NotFound = Error
 
+// GrocyAddShoppingItemJSONBody defines parameters for GrocyAddShoppingItem.
+type GrocyAddShoppingItemJSONBody struct {
+	Amount float32 `json:"amount"`
+	Note   *string `json:"note,omitempty"`
+
+	// ProductId 0 for a free-text item
+	ProductId *int `json:"product_id,omitempty"`
+}
+
+// GrocyAddStockJSONBody defines parameters for GrocyAddStock.
+type GrocyAddStockJSONBody struct {
+	Amount float32 `json:"amount"`
+
+	// BestBefore YYYY-MM-DD
+	BestBefore *string `json:"best_before,omitempty"`
+	ProductId  int     `json:"product_id"`
+}
+
+// GrocyConsumeStockJSONBody defines parameters for GrocyConsumeStock.
+type GrocyConsumeStockJSONBody struct {
+	Amount    float32 `json:"amount"`
+	ProductId int     `json:"product_id"`
+}
+
+// ListIngredientAliasesParams defines parameters for ListIngredientAliases.
+type ListIngredientAliasesParams struct {
+	HouseholdId *string `form:"householdId,omitempty" json:"householdId,omitempty"`
+}
+
+// ResolveIngredientAliasParams defines parameters for ResolveIngredientAlias.
+type ResolveIngredientAliasParams struct {
+	HouseholdId *string `form:"householdId,omitempty" json:"householdId,omitempty"`
+}
+
+// DeleteIngredientAliasParams defines parameters for DeleteIngredientAlias.
+type DeleteIngredientAliasParams struct {
+	HouseholdId *string `form:"householdId,omitempty" json:"householdId,omitempty"`
+}
+
 // SearchFoodParams defines parameters for SearchFood.
 type SearchFoodParams struct {
 	// Q name substring to match
@@ -600,6 +970,12 @@ type SearchFoodParams struct {
 type ListOrdersParams struct {
 	Retailer *string `form:"retailer,omitempty" json:"retailer,omitempty"`
 	CartId   *int    `form:"cartId,omitempty" json:"cartId,omitempty"`
+}
+
+// ListExpiringLotsParams defines parameters for ListExpiringLots.
+type ListExpiringLotsParams struct {
+	// WithinHours window in hours (default 168 = 7 days)
+	WithinHours *int `form:"withinHours,omitempty" json:"withinHours,omitempty"`
 }
 
 // SetDecisionsJSONBody defines parameters for SetDecisions.
@@ -637,11 +1013,38 @@ type ToCartParams struct {
 	Retailer *string `form:"retailer,omitempty" json:"retailer,omitempty"`
 }
 
+// ListStoresParams defines parameters for ListStores.
+type ListStoresParams struct {
+	// Latitude origin latitude (WGS84); when set with longitude, stores are ranked nearest-first
+	Latitude *float32 `form:"latitude,omitempty" json:"latitude,omitempty"`
+
+	// Longitude origin longitude (WGS84)
+	Longitude *float32 `form:"longitude,omitempty" json:"longitude,omitempty"`
+}
+
+// GetDashboardParams defines parameters for GetDashboard.
+type GetDashboardParams struct {
+	// HouseholdId household to build the dashboard for
+	HouseholdId *string `form:"householdId,omitempty" json:"householdId,omitempty"`
+}
+
 // CreatePlanningConstraintJSONRequestBody defines body for CreatePlanningConstraint for application/json ContentType.
 type CreatePlanningConstraintJSONRequestBody = PlanningConstraintNew
 
 // UpsertEffortProfileJSONRequestBody defines body for UpsertEffortProfile for application/json ContentType.
 type UpsertEffortProfileJSONRequestBody = EffortProfile
+
+// GrocyAddShoppingItemJSONRequestBody defines body for GrocyAddShoppingItem for application/json ContentType.
+type GrocyAddShoppingItemJSONRequestBody GrocyAddShoppingItemJSONBody
+
+// GrocyAddStockJSONRequestBody defines body for GrocyAddStock for application/json ContentType.
+type GrocyAddStockJSONRequestBody GrocyAddStockJSONBody
+
+// GrocyConsumeStockJSONRequestBody defines body for GrocyConsumeStock for application/json ContentType.
+type GrocyConsumeStockJSONRequestBody GrocyConsumeStockJSONBody
+
+// CreateIngredientAliasJSONRequestBody defines body for CreateIngredientAlias for application/json ContentType.
+type CreateIngredientAliasJSONRequestBody = IngredientAliasNew
 
 // ResolveIngredientMappingJSONRequestBody defines body for ResolveIngredientMapping for application/json ContentType.
 type ResolveIngredientMappingJSONRequestBody = IngredientMappingResolve
@@ -652,11 +1055,17 @@ type CreateMealEventJSONRequestBody = MealEventNew
 // CreatePersonJSONRequestBody defines body for CreatePerson for application/json ContentType.
 type CreatePersonJSONRequestBody = PersonNew
 
+// UpdatePersonJSONRequestBody defines body for UpdatePerson for application/json ContentType.
+type UpdatePersonJSONRequestBody = PersonUpdate
+
 // CreatePlanJSONRequestBody defines body for CreatePlan for application/json ContentType.
 type CreatePlanJSONRequestBody = MealPlanNew
 
 // RunPlanJSONRequestBody defines body for RunPlan for application/json ContentType.
 type RunPlanJSONRequestBody = PlanRunInput
+
+// RunPlanStreamJSONRequestBody defines body for RunPlanStream for application/json ContentType.
+type RunPlanStreamJSONRequestBody = PlanRunInput
 
 // UpdatePlanJSONRequestBody defines body for UpdatePlan for application/json ContentType.
 type UpdatePlanJSONRequestBody = MealPlanUpdate
@@ -664,8 +1073,26 @@ type UpdatePlanJSONRequestBody = MealPlanUpdate
 // SetDecisionsJSONRequestBody defines body for SetDecisions for application/json ContentType.
 type SetDecisionsJSONRequestBody = SetDecisionsJSONBody
 
+// SetPreferenceJSONRequestBody defines body for SetPreference for application/json ContentType.
+type SetPreferenceJSONRequestBody = PersonPreferenceNew
+
 // CreateReactionJSONRequestBody defines body for CreateReaction for application/json ContentType.
 type CreateReactionJSONRequestBody = ReactionNew
+
+// CreateRecipeFamilyJSONRequestBody defines body for CreateRecipeFamily for application/json ContentType.
+type CreateRecipeFamilyJSONRequestBody = RecipeFamilyNew
+
+// CreateRecipeVariantJSONRequestBody defines body for CreateRecipeVariant for application/json ContentType.
+type CreateRecipeVariantJSONRequestBody = RecipeVariantNew
+
+// CreateRecipeRevisionJSONRequestBody defines body for CreateRecipeRevision for application/json ContentType.
+type CreateRecipeRevisionJSONRequestBody = RecipeRevisionNew
+
+// UnsetRecipeFavoriteJSONRequestBody defines body for UnsetRecipeFavorite for application/json ContentType.
+type UnsetRecipeFavoriteJSONRequestBody = FavoriteNew
+
+// SetRecipeFavoriteJSONRequestBody defines body for SetRecipeFavorite for application/json ContentType.
+type SetRecipeFavoriteJSONRequestBody = FavoriteNew
 
 // CreateShoppingListJSONRequestBody defines body for CreateShoppingList for application/json ContentType.
 type CreateShoppingListJSONRequestBody = ShoppingListNew

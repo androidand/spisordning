@@ -13,7 +13,7 @@ var ErrInvalidAlias = errors.New("invalid ingredient alias")
 // IngredientAlias is the HTTP-side view of a household nickname → canonical
 // ingredient mapping. HouseholdID "" means a global alias.
 type IngredientAlias struct {
-	ID           int64     `json:"id"`
+	ID           string    `json:"id"`
 	HouseholdID  string    `json:"household_id,omitempty"`
 	Alias        string    `json:"alias"`
 	IngredientID string    `json:"ingredient_id"`

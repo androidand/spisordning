@@ -68,11 +68,6 @@ func (h *pantryHandler) purchase(w http.ResponseWriter, r *http.Request) {
 
 func (h *pantryHandler) consume(w http.ResponseWriter, r *http.Request) {
 	lotIDStr := r.PathValue("id")
-	lotID, err := strconv.ParseInt(lotIDStr, 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid lot id: " + lotIDStr})
-		return
-	}
 	var in dto.PantryConsumeInput
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid JSON body: " + err.Error()})
@@ -82,7 +77,7 @@ func (h *pantryHandler) consume(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errorBody{Message: "field 'quantity' must be > 0"})
 		return
 	}
-	if err := h.svc.Consume(r.Context(), lotID, in); err != nil {
+	if err := h.svc.Consume(r.Context(), lotIDStr, in); err != nil {
 		writeError(w, http.StatusInternalServerError, "consume: "+err.Error())
 		return
 	}

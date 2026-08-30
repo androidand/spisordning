@@ -8,7 +8,7 @@ import (
 )
 
 // contains reports whether ids contains v.
-func contains(ids []int64, v int64) bool {
+func contains(ids []string, v string) bool {
 	for _, id := range ids {
 		if id == v {
 			return true
@@ -48,11 +48,11 @@ func TestRevisionHasNoUpdatePath(t *testing.T) {
 // creates a new revision": a correction is a new revision whose parent is the
 // original; the original's stored content is unchanged.
 func TestCorrectionCreatesNewRevision(t *testing.T) {
-	a1 := Revision{ID: 1, VariantID: "v1", Ingredients: []domain.Ingredient{{RawText: "300 ml cream"}}, Steps: []string{"boil"}}
-	a2 := Revision{ID: 2, VariantID: "v1", Ingredients: []domain.Ingredient{{RawText: "200 ml cream"}}, Steps: []string{"boil"}}
+	a1 := Revision{ID: "rev-1", VariantID: "v1", Ingredients: []domain.Ingredient{{RawText: "300 ml cream"}}, Steps: []string{"boil"}}
+	a2 := Revision{ID: "rev-2", VariantID: "v1", Ingredients: []domain.Ingredient{{RawText: "200 ml cream"}}, Steps: []string{"boil"}}
 
 	g := NewGraph()
-	if err := g.AddEdge(2, 1); err != nil {
+	if err := g.AddEdge("rev-2", "rev-1"); err != nil {
 		t.Fatalf("AddEdge(A2, A1): %v", err)
 	}
 	if a1.Ingredients[0].RawText != "300 ml cream" {
@@ -61,8 +61,8 @@ func TestCorrectionCreatesNewRevision(t *testing.T) {
 	if a2.Ingredients[0].RawText != "200 ml cream" {
 		t.Fatalf("corrected revision wrong: got %q, want %q", a2.Ingredients[0].RawText, "200 ml cream")
 	}
-	if !contains(g.Ancestors(2), 1) {
-		t.Fatalf("A2 should derive from A1; ancestors(A2)=%v", g.Ancestors(2))
+	if !contains(g.Ancestors("rev-2"), "rev-1") {
+		t.Fatalf("A2 should derive from A1; ancestors(A2)=%v", g.Ancestors("rev-2"))
 	}
 }
 
@@ -82,22 +82,22 @@ func TestRevisionBelongsToOneVariant(t *testing.T) {
 // would make a revision its own ancestor is rejected, as is a self-edge.
 func TestCycleRejection(t *testing.T) {
 	g := NewGraph()
-	if err := g.AddEdge(2, 1); err != nil { // 2 derives from 1
+	if err := g.AddEdge("rev-2", "rev-1"); err != nil { // 2 derives from 1
 		t.Fatalf("AddEdge(2,1): %v", err)
 	}
-	if err := g.AddEdge(3, 2); err != nil { // 3 derives from 2
+	if err := g.AddEdge("rev-3", "rev-2"); err != nil { // 3 derives from 2
 		t.Fatalf("AddEdge(3,2): %v", err)
 	}
 	// 1 deriving from 3 would create the cycle 1 -> 3 -> 2 -> 1.
-	if err := g.AddEdge(1, 3); err == nil {
+	if err := g.AddEdge("rev-1", "rev-3"); err == nil {
 		t.Fatal("expected cycle rejection for AddEdge(1,3)")
 	}
-	if err := g.AddEdge(1, 1); err == nil {
+	if err := g.AddEdge("rev-1", "rev-1"); err == nil {
 		t.Fatal("expected self-edge rejection for AddEdge(1,1)")
 	}
 	// The graph is unchanged by the rejected edges.
-	if !reflect.DeepEqual(g.Ancestors(3), []int64{1, 2}) {
-		t.Fatalf("ancestors(3) after rejected edges = %v, want [1 2]", g.Ancestors(3))
+	if !reflect.DeepEqual(g.Ancestors("rev-3"), []string{"rev-1", "rev-2"}) {
+		t.Fatalf("ancestors(3) after rejected edges = %v, want [rev-1 rev-2]", g.Ancestors("rev-3"))
 	}
 }
 
@@ -105,23 +105,23 @@ func TestCycleRejection(t *testing.T) {
 // two parents, and its ancestor set is the union of both lines (deduplicated).
 func TestMultiParentMergeLineage(t *testing.T) {
 	g := NewGraph()
-	if err := g.AddEdge(2, 1); err != nil { // line A: 2 -> 1
+	if err := g.AddEdge("rev-2", "rev-1"); err != nil { // line A: 2 -> 1
 		t.Fatalf("AddEdge(2,1): %v", err)
 	}
-	if err := g.AddEdge(3, 1); err != nil { // line B: 3 -> 1 (branch)
+	if err := g.AddEdge("rev-3", "rev-1"); err != nil { // line B: 3 -> 1 (branch)
 		t.Fatalf("AddEdge(3,1): %v", err)
 	}
-	if err := g.AddEdge(4, 2); err != nil { // merge: 4 derives from 2 and 3
+	if err := g.AddEdge("rev-4", "rev-2"); err != nil { // merge: 4 derives from 2 and 3
 		t.Fatalf("AddEdge(4,2): %v", err)
 	}
-	if err := g.AddEdge(4, 3); err != nil {
+	if err := g.AddEdge("rev-4", "rev-3"); err != nil {
 		t.Fatalf("AddEdge(4,3): %v", err)
 	}
-	if !contains(g.Parents(4), 2) || !contains(g.Parents(4), 3) {
-		t.Fatalf("parents(4) = %v, want both 2 and 3", g.Parents(4))
+	if !contains(g.Parents("rev-4"), "rev-2") || !contains(g.Parents("rev-4"), "rev-3") {
+		t.Fatalf("parents(4) = %v, want both rev-2 and rev-3", g.Parents("rev-4"))
 	}
-	if !reflect.DeepEqual(g.Ancestors(4), []int64{1, 2, 3}) {
-		t.Fatalf("ancestors(4) = %v, want [1 2 3]", g.Ancestors(4))
+	if !reflect.DeepEqual(g.Ancestors("rev-4"), []string{"rev-1", "rev-2", "rev-3"}) {
+		t.Fatalf("ancestors(4) = %v, want [rev-1 rev-2 rev-3]", g.Ancestors("rev-4"))
 	}
 }
 
@@ -129,13 +129,13 @@ func TestMultiParentMergeLineage(t *testing.T) {
 // slice: mutating the returned slice must never change the graph.
 func TestParentsReturnsCopy(t *testing.T) {
 	g := NewGraph()
-	if err := g.AddEdge(2, 1); err != nil {
+	if err := g.AddEdge("rev-2", "rev-1"); err != nil {
 		t.Fatalf("AddEdge(2,1): %v", err)
 	}
-	got := g.Parents(2)
-	got[0] = 99
-	if g.Parents(2)[0] != 1 {
-		t.Fatalf("mutating the returned Parents slice mutated the graph: %v", g.Parents(2))
+	got := g.Parents("rev-2")
+	got[0] = "rev-99"
+	if g.Parents("rev-2")[0] != "rev-1" {
+		t.Fatalf("mutating the returned Parents slice mutated the graph: %v", g.Parents("rev-2"))
 	}
 }
 
@@ -153,20 +153,20 @@ func TestKorvstroganoffWorkedExample(t *testing.T) {
 	}
 
 	g := NewGraph()
-	// Revision IDs: A1=1, A2=2, A3=3 (V1), C1=4 (V4). I1/K1 have no parents.
-	for _, e := range [][2]int64{{2, 1}, {3, 2}, {4, 3}} { // A1->A2->A3, A3->C1
+	// Revision IDs: A1=rev-1, A2=rev-2, A3=rev-3 (V1), C1=rev-4 (V4).
+	for _, e := range [][2]string{{"rev-2", "rev-1"}, {"rev-3", "rev-2"}, {"rev-4", "rev-3"}} { // A1->A2->A3, A3->C1
 		if err := g.AddEdge(e[0], e[1]); err != nil {
-			t.Fatalf("AddEdge(%d,%d): %v", e[0], e[1], err)
+			t.Fatalf("AddEdge(%s,%s): %v", e[0], e[1], err)
 		}
 	}
 
 	// The cross-variant fork: C1 (V4) derives from A3 (V1). The DAG is over
 	// revisions, not variants — C1's full history spans the fork.
-	if !reflect.DeepEqual(g.Ancestors(4), []int64{1, 2, 3}) {
-		t.Fatalf("ancestors(C1) = %v, want [1 2 3]", g.Ancestors(4))
+	if !reflect.DeepEqual(g.Ancestors("rev-4"), []string{"rev-1", "rev-2", "rev-3"}) {
+		t.Fatalf("ancestors(C1) = %v, want [rev-1 rev-2 rev-3]", g.Ancestors("rev-4"))
 	}
-	if !reflect.DeepEqual(g.Parents(4), []int64{3}) {
-		t.Fatalf("parents(C1) = %v, want [3] (A3)", g.Parents(4))
+	if !reflect.DeepEqual(g.Parents("rev-4"), []string{"rev-3"}) {
+		t.Fatalf("parents(C1) = %v, want [rev-3] (A3)", g.Parents("rev-4"))
 	}
 
 	// UI projection: default variant expanded, the rest listed as alternates.

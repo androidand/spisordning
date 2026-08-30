@@ -10,17 +10,27 @@ import (
 	"github.com/androidand/spisordning/internal/domain"
 )
 
+func mustParseOfferID(t *testing.T, s string) domain.StoreProductOfferID {
+	t.Helper()
+	id, err := domain.ParseStoreProductOfferID(s)
+	if err != nil {
+		t.Fatalf("parse offer id %q: %v", s, err)
+	}
+	return id
+}
+
 func TestPrice_RetailerAndStore(t *testing.T) {
 	s := skipWithoutDB(t)
 	ctx := context.Background()
 	truncateTables(t, ctx, s, "price_observation", "store_product_offer", "retailer_product", "product", "store", "retailer")
 
 	// Create retailer.
-	retailer := domain.Retailer{ID: "r-willys", Name: "Willys"}
+	rID := domain.NewRetailerID()
+	retailer := domain.Retailer{ID: rID, Name: "Willys"}
 	if err := s.CreateRetailer(ctx, retailer); err != nil {
 		t.Fatalf("CreateRetailer: %v", err)
 	}
-	got, err := s.GetRetailer(ctx, "r-willys")
+	got, err := s.GetRetailer(ctx, rID)
 	if err != nil {
 		t.Fatalf("GetRetailer: %v", err)
 	}
@@ -29,24 +39,25 @@ func TestPrice_RetailerAndStore(t *testing.T) {
 	}
 
 	// Create store.
-	store := domain.Store{ID: "s-lindhagen", RetailerID: "r-willys", Name: "Willys Lindhagen"}
+	sID := domain.NewStoreID()
+	store := domain.Store{ID: sID, RetailerID: rID, Name: "Willys Lindhagen"}
 	if err := s.CreateStore(ctx, store); err != nil {
 		t.Fatalf("CreateStore: %v", err)
 	}
-	gotStore, err := s.GetStore(ctx, "s-lindhagen")
+	gotStore, err := s.GetStore(ctx, sID)
 	if err != nil {
 		t.Fatalf("GetStore: %v", err)
 	}
-	if gotStore.RetailerID != "r-willys" || gotStore.Name != "Willys Lindhagen" {
+	if gotStore.RetailerID != rID || gotStore.Name != "Willys Lindhagen" {
 		t.Errorf("GetStore = %+v", gotStore)
 	}
 
 	// List stores for retailer.
-	stores, err := s.ListStores(ctx, "r-willys")
+	stores, err := s.ListStores(ctx, rID)
 	if err != nil {
 		t.Fatalf("ListStores: %v", err)
 	}
-	if len(stores) != 1 || stores[0].ID != "s-lindhagen" {
+	if len(stores) != 1 || stores[0].ID != sID {
 		t.Errorf("ListStores = %v", stores)
 	}
 
@@ -55,7 +66,7 @@ func TestPrice_RetailerAndStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListRetailers: %v", err)
 	}
-	if len(retailers) != 1 || retailers[0].ID != "r-willys" {
+	if len(retailers) != 1 || retailers[0].ID != rID {
 		t.Errorf("ListRetailers = %v", retailers)
 	}
 }
@@ -66,44 +77,48 @@ func TestPrice_RetailerProduct(t *testing.T) {
 	truncateTables(t, ctx, s, "price_observation", "store_product_offer", "retailer_product", "product", "store", "retailer")
 
 	// Seed retailer + store + product.
-	if err := s.CreateRetailer(ctx, domain.Retailer{ID: "r-willys", Name: "Willys"}); err != nil {
+	rID := domain.NewRetailerID()
+	if err := s.CreateRetailer(ctx, domain.Retailer{ID: rID, Name: "Willys"}); err != nil {
 		t.Fatalf("CreateRetailer: %v", err)
 	}
-	if err := s.CreateStore(ctx, domain.Store{ID: "s-lind", RetailerID: "r-willys", Name: "Lindhagen"}); err != nil {
+	sID := domain.NewStoreID()
+	if err := s.CreateStore(ctx, domain.Store{ID: sID, RetailerID: rID, Name: "Lindhagen"}); err != nil {
 		t.Fatalf("CreateStore: %v", err)
 	}
-	if err := s.CreateProduct(ctx, Product{ID: "p-milk", Name: "Arla Standardmjölk 1L"}); err != nil {
+	pID := domain.NewProductID()
+	if err := s.CreateProduct(ctx, Product{ID: pID, Name: "Arla Standardmjölk 1L"}); err != nil {
 		t.Fatalf("CreateProduct: %v", err)
 	}
 
 	// Create unmapped retailer product.
-	rp := domain.RetailerProduct{ID: "rp-1", RetailerID: "r-willys", RetailerSKU: "123456", DisplayName: "Arla mjölk"}
+	rpID := domain.NewRetailerProductID()
+	rp := domain.RetailerProduct{ID: rpID, RetailerID: rID, RetailerSKU: "123456", DisplayName: "Arla mjölk"}
 	if err := s.UpsertRetailerProduct(ctx, rp); err != nil {
 		t.Fatalf("UpsertRetailerProduct: %v", err)
 	}
-	got, err := s.GetRetailerProduct(ctx, "rp-1")
+	got, err := s.GetRetailerProduct(ctx, rpID)
 	if err != nil {
 		t.Fatalf("GetRetailerProduct: %v", err)
 	}
-	if got.ProductID != "" {
+	if got.ProductID != nil {
 		t.Errorf("expected unmapped product_id, got %q", got.ProductID)
 	}
 
 	// Map it to a product.
-	rp.ProductID = "p-milk"
+	rp.ProductID = &pID
 	if err := s.UpsertRetailerProduct(ctx, rp); err != nil {
 		t.Fatalf("UpsertRetailerProduct (mapped): %v", err)
 	}
-	got, err = s.GetRetailerProduct(ctx, "rp-1")
+	got, err = s.GetRetailerProduct(ctx, rpID)
 	if err != nil {
 		t.Fatalf("GetRetailerProduct (mapped): %v", err)
 	}
-	if got.ProductID != "p-milk" {
-		t.Errorf("expected mapped product_id = p-milk, got %q", got.ProductID)
+	if got.ProductID == nil || *got.ProductID != pID {
+		t.Errorf("expected mapped product_id = %s, got %v", pID, got.ProductID)
 	}
 
 	// List retailer products.
-	rps, err := s.ListRetailerProducts(ctx, "r-willys")
+	rps, err := s.ListRetailerProducts(ctx, rID)
 	if err != nil {
 		t.Fatalf("ListRetailerProducts: %v", err)
 	}
@@ -117,21 +132,25 @@ func TestPrice_StoreProductOffer(t *testing.T) {
 	ctx := context.Background()
 	truncateTables(t, ctx, s, "price_observation", "store_product_offer", "retailer_product", "product", "store", "retailer")
 
-	if err := s.CreateRetailer(ctx, domain.Retailer{ID: "r-willys", Name: "Willys"}); err != nil {
+	rID := domain.NewRetailerID()
+	if err := s.CreateRetailer(ctx, domain.Retailer{ID: rID, Name: "Willys"}); err != nil {
 		t.Fatalf("CreateRetailer: %v", err)
 	}
-	if err := s.CreateStore(ctx, domain.Store{ID: "s-lind", RetailerID: "r-willys", Name: "Lindhagen"}); err != nil {
+	sID := domain.NewStoreID()
+	if err := s.CreateStore(ctx, domain.Store{ID: sID, RetailerID: rID, Name: "Lindhagen"}); err != nil {
 		t.Fatalf("CreateStore: %v", err)
 	}
-	if err := s.CreateProduct(ctx, Product{ID: "p-milk", Name: "Arla Standardmjölk 1L"}); err != nil {
+	pID := domain.NewProductID()
+	if err := s.CreateProduct(ctx, Product{ID: pID, Name: "Arla Standardmjölk 1L"}); err != nil {
 		t.Fatalf("CreateProduct: %v", err)
 	}
-	if err := s.UpsertRetailerProduct(ctx, domain.RetailerProduct{ID: "rp-1", RetailerID: "r-willys", RetailerSKU: "123456"}); err != nil {
+	rpID := domain.NewRetailerProductID()
+	if err := s.UpsertRetailerProduct(ctx, domain.RetailerProduct{ID: rpID, RetailerID: rID, RetailerSKU: "123456"}); err != nil {
 		t.Fatalf("UpsertRetailerProduct: %v", err)
 	}
 
 	// Upsert offer (carried).
-	offerID, err := s.UpsertStoreProductOffer(ctx, domain.StoreProductOffer{StoreID: "s-lind", RetailerProductID: "rp-1", CurrentlyCarried: true})
+	offerID, err := s.UpsertStoreProductOffer(ctx, domain.StoreProductOffer{StoreID: sID, RetailerProductID: rpID, CurrentlyCarried: true})
 	if err != nil {
 		t.Fatalf("UpsertStoreProductOffer: %v", err)
 	}
@@ -144,7 +163,7 @@ func TestPrice_StoreProductOffer(t *testing.T) {
 	}
 
 	// Mark as not carried (upsert on same row).
-	if _, err := s.UpsertStoreProductOffer(ctx, domain.StoreProductOffer{StoreID: "s-lind", RetailerProductID: "rp-1", CurrentlyCarried: false}); err != nil {
+	if _, err := s.UpsertStoreProductOffer(ctx, domain.StoreProductOffer{StoreID: sID, RetailerProductID: rpID, CurrentlyCarried: false}); err != nil {
 		t.Fatalf("UpsertStoreProductOffer (not carried): %v", err)
 	}
 	got, err = s.GetStoreProductOffer(ctx, offerID)
@@ -156,7 +175,7 @@ func TestPrice_StoreProductOffer(t *testing.T) {
 	}
 
 	// List offers.
-	offers, err := s.ListStoreProductOffers(ctx, "s-lind")
+	offers, err := s.ListStoreProductOffers(ctx, sID)
 	if err != nil {
 		t.Fatalf("ListStoreProductOffers: %v", err)
 	}
@@ -170,43 +189,49 @@ func TestPrice_StoreProductOfferMultiple(t *testing.T) {
 	ctx := context.Background()
 	truncateTables(t, ctx, s, "price_observation", "store_product_offer", "retailer_product", "product", "store", "retailer")
 
-	if err := s.CreateRetailer(ctx, domain.Retailer{ID: "r-willys", Name: "Willys"}); err != nil {
+	rID := domain.NewRetailerID()
+	if err := s.CreateRetailer(ctx, domain.Retailer{ID: rID, Name: "Willys"}); err != nil {
 		t.Fatalf("CreateRetailer: %v", err)
 	}
-	if err := s.CreateStore(ctx, domain.Store{ID: "s-lind", RetailerID: "r-willys", Name: "Lindhagen"}); err != nil {
+	sID := domain.NewStoreID()
+	if err := s.CreateStore(ctx, domain.Store{ID: sID, RetailerID: rID, Name: "Lindhagen"}); err != nil {
 		t.Fatalf("CreateStore: %v", err)
 	}
-	if err := s.CreateProduct(ctx, Product{ID: "p-milk", Name: "Arla Standardmjölk 1L"}); err != nil {
+	pMilk := domain.NewProductID()
+	if err := s.CreateProduct(ctx, Product{ID: pMilk, Name: "Arla Standardmjölk 1L"}); err != nil {
 		t.Fatalf("CreateProduct: %v", err)
 	}
-	if err := s.CreateProduct(ctx, Product{ID: "p-bread", Name: "Rugbrød"}); err != nil {
+	pBread := domain.NewProductID()
+	if err := s.CreateProduct(ctx, Product{ID: pBread, Name: "Rugbrød"}); err != nil {
 		t.Fatalf("CreateProduct: %v", err)
 	}
-	if err := s.UpsertRetailerProduct(ctx, domain.RetailerProduct{ID: "rp-milk", RetailerID: "r-willys", ProductID: "p-milk", RetailerSKU: "111"}); err != nil {
+	rpMilk := domain.NewRetailerProductID()
+	if err := s.UpsertRetailerProduct(ctx, domain.RetailerProduct{ID: rpMilk, RetailerID: rID, ProductID: &pMilk, RetailerSKU: "111"}); err != nil {
 		t.Fatalf("UpsertRetailerProduct milk: %v", err)
 	}
-	if err := s.UpsertRetailerProduct(ctx, domain.RetailerProduct{ID: "rp-bread", RetailerID: "r-willys", ProductID: "p-bread", RetailerSKU: "222"}); err != nil {
+	rpBread := domain.NewRetailerProductID()
+	if err := s.UpsertRetailerProduct(ctx, domain.RetailerProduct{ID: rpBread, RetailerID: rID, ProductID: &pBread, RetailerSKU: "222"}); err != nil {
 		t.Fatalf("UpsertRetailerProduct bread: %v", err)
 	}
 
 	// Two different retailer products at the same store — each gets its own
 	// BIGSERIAL id; neither should collide.
-	offerID1, err := s.UpsertStoreProductOffer(ctx, domain.StoreProductOffer{StoreID: "s-lind", RetailerProductID: "rp-milk", CurrentlyCarried: true})
+	offerID1, err := s.UpsertStoreProductOffer(ctx, domain.StoreProductOffer{StoreID: sID, RetailerProductID: rpMilk, CurrentlyCarried: true})
 	if err != nil {
 		t.Fatalf("UpsertStoreProductOffer milk: %v", err)
 	}
-	offerID2, err := s.UpsertStoreProductOffer(ctx, domain.StoreProductOffer{StoreID: "s-lind", RetailerProductID: "rp-bread", CurrentlyCarried: true})
+	offerID2, err := s.UpsertStoreProductOffer(ctx, domain.StoreProductOffer{StoreID: sID, RetailerProductID: rpBread, CurrentlyCarried: true})
 	if err != nil {
 		t.Fatalf("UpsertStoreProductOffer bread: %v", err)
 	}
 	if offerID1 == offerID2 {
-		t.Errorf("expected different ids for different offers, got %d", offerID1)
+		t.Errorf("expected different ids for different offers, got %s", offerID1)
 	}
-	if offerID1 == 0 || offerID2 == 0 {
-		t.Errorf("expected non-zero ids, got %d and %d", offerID1, offerID2)
+	if offerID1 == (domain.StoreProductOfferID{}) || offerID2 == (domain.StoreProductOfferID{}) {
+		t.Errorf("expected non-empty ids, got %q and %q", offerID1, offerID2)
 	}
 
-	offers, err := s.ListStoreProductOffers(ctx, "s-lind")
+	offers, err := s.ListStoreProductOffers(ctx, sID)
 	if err != nil {
 		t.Fatalf("ListStoreProductOffers: %v", err)
 	}
@@ -215,7 +240,7 @@ func TestPrice_StoreProductOfferMultiple(t *testing.T) {
 	}
 
 	// Each offer should still be independently updatable.
-	if _, err := s.UpsertStoreProductOffer(ctx, domain.StoreProductOffer{StoreID: "s-lind", RetailerProductID: "rp-milk", CurrentlyCarried: false}); err != nil {
+	if _, err := s.UpsertStoreProductOffer(ctx, domain.StoreProductOffer{StoreID: sID, RetailerProductID: rpMilk, CurrentlyCarried: false}); err != nil {
 		t.Fatalf("UpsertStoreProductOffer milk not carried: %v", err)
 	}
 	got, err := s.GetStoreProductOffer(ctx, offerID1)
@@ -239,19 +264,23 @@ func TestPrice_PriceObservationAppendOnly(t *testing.T) {
 	ctx := context.Background()
 	truncateTables(t, ctx, s, "price_observation", "store_product_offer", "retailer_product", "product", "store", "retailer")
 
-	if err := s.CreateRetailer(ctx, domain.Retailer{ID: "r-willys", Name: "Willys"}); err != nil {
+	rID := domain.NewRetailerID()
+	if err := s.CreateRetailer(ctx, domain.Retailer{ID: rID, Name: "Willys"}); err != nil {
 		t.Fatalf("CreateRetailer: %v", err)
 	}
-	if err := s.CreateStore(ctx, domain.Store{ID: "s-lind", RetailerID: "r-willys", Name: "Lindhagen"}); err != nil {
+	sID := domain.NewStoreID()
+	if err := s.CreateStore(ctx, domain.Store{ID: sID, RetailerID: rID, Name: "Lindhagen"}); err != nil {
 		t.Fatalf("CreateStore: %v", err)
 	}
-	if err := s.CreateProduct(ctx, Product{ID: "p-milk", Name: "Arla Standardmjölk 1L"}); err != nil {
+	pID := domain.NewProductID()
+	if err := s.CreateProduct(ctx, Product{ID: pID, Name: "Arla Standardmjölk 1L"}); err != nil {
 		t.Fatalf("CreateProduct: %v", err)
 	}
-	if err := s.UpsertRetailerProduct(ctx, domain.RetailerProduct{ID: "rp-1", RetailerID: "r-willys", RetailerSKU: "123456"}); err != nil {
+	rpID := domain.NewRetailerProductID()
+	if err := s.UpsertRetailerProduct(ctx, domain.RetailerProduct{ID: rpID, RetailerID: rID, RetailerSKU: "123456"}); err != nil {
 		t.Fatalf("UpsertRetailerProduct: %v", err)
 	}
-	offerID, err := s.UpsertStoreProductOffer(ctx, domain.StoreProductOffer{StoreID: "s-lind", RetailerProductID: "rp-1", CurrentlyCarried: true})
+	offerID, err := s.UpsertStoreProductOffer(ctx, domain.StoreProductOffer{StoreID: sID, RetailerProductID: rpID, CurrentlyCarried: true})
 	if err != nil {
 		t.Fatalf("UpsertStoreProductOffer: %v", err)
 	}
@@ -315,19 +344,23 @@ func TestPrice_CurrentPriceView(t *testing.T) {
 	ctx := context.Background()
 	truncateTables(t, ctx, s, "price_observation", "store_product_offer", "retailer_product", "product", "store", "retailer")
 
-	if err := s.CreateRetailer(ctx, domain.Retailer{ID: "r-willys", Name: "Willys"}); err != nil {
+	rID := domain.NewRetailerID()
+	if err := s.CreateRetailer(ctx, domain.Retailer{ID: rID, Name: "Willys"}); err != nil {
 		t.Fatalf("CreateRetailer: %v", err)
 	}
-	if err := s.CreateStore(ctx, domain.Store{ID: "s-lind", RetailerID: "r-willys", Name: "Lindhagen"}); err != nil {
+	sID := domain.NewStoreID()
+	if err := s.CreateStore(ctx, domain.Store{ID: sID, RetailerID: rID, Name: "Lindhagen"}); err != nil {
 		t.Fatalf("CreateStore: %v", err)
 	}
-	if err := s.CreateProduct(ctx, Product{ID: "p-milk", Name: "Arla Standardmjölk 1L"}); err != nil {
+	pID := domain.NewProductID()
+	if err := s.CreateProduct(ctx, Product{ID: pID, Name: "Arla Standardmjölk 1L"}); err != nil {
 		t.Fatalf("CreateProduct: %v", err)
 	}
-	if err := s.UpsertRetailerProduct(ctx, domain.RetailerProduct{ID: "rp-1", RetailerID: "r-willys", RetailerSKU: "123456"}); err != nil {
+	rpID := domain.NewRetailerProductID()
+	if err := s.UpsertRetailerProduct(ctx, domain.RetailerProduct{ID: rpID, RetailerID: rID, RetailerSKU: "123456"}); err != nil {
 		t.Fatalf("UpsertRetailerProduct: %v", err)
 	}
-	offerID, err := s.UpsertStoreProductOffer(ctx, domain.StoreProductOffer{StoreID: "s-lind", RetailerProductID: "rp-1", CurrentlyCarried: true})
+	offerID, err := s.UpsertStoreProductOffer(ctx, domain.StoreProductOffer{StoreID: sID, RetailerProductID: rpID, CurrentlyCarried: true})
 	if err != nil {
 		t.Fatalf("UpsertStoreProductOffer: %v", err)
 	}
@@ -350,7 +383,7 @@ func TestPrice_CurrentPriceView(t *testing.T) {
 	// View returns one row per (offer, price_kind) with the latest observation.
 	for _, p := range prices {
 		if p.OfferID != offerID {
-			t.Errorf("expected offer_id=%d, got %d", offerID, p.OfferID)
+			t.Errorf("expected offer_id=%s, got %s", offerID, p.OfferID)
 		}
 	}
 }
@@ -360,19 +393,23 @@ func TestPrice_PriceObservationNeverUpdated(t *testing.T) {
 	ctx := context.Background()
 	truncateTables(t, ctx, s, "price_observation", "store_product_offer", "retailer_product", "product", "store", "retailer")
 
-	if err := s.CreateRetailer(ctx, domain.Retailer{ID: "r-willys", Name: "Willys"}); err != nil {
+	rID := domain.NewRetailerID()
+	if err := s.CreateRetailer(ctx, domain.Retailer{ID: rID, Name: "Willys"}); err != nil {
 		t.Fatalf("CreateRetailer: %v", err)
 	}
-	if err := s.CreateStore(ctx, domain.Store{ID: "s-lind", RetailerID: "r-willys", Name: "Lindhagen"}); err != nil {
+	sID := domain.NewStoreID()
+	if err := s.CreateStore(ctx, domain.Store{ID: sID, RetailerID: rID, Name: "Lindhagen"}); err != nil {
 		t.Fatalf("CreateStore: %v", err)
 	}
-	if err := s.CreateProduct(ctx, Product{ID: "p-milk", Name: "Arla Standardmjölk 1L"}); err != nil {
+	pID := domain.NewProductID()
+	if err := s.CreateProduct(ctx, Product{ID: pID, Name: "Arla Standardmjölk 1L"}); err != nil {
 		t.Fatalf("CreateProduct: %v", err)
 	}
-	if err := s.UpsertRetailerProduct(ctx, domain.RetailerProduct{ID: "rp-1", RetailerID: "r-willys", RetailerSKU: "123456"}); err != nil {
+	rpID := domain.NewRetailerProductID()
+	if err := s.UpsertRetailerProduct(ctx, domain.RetailerProduct{ID: rpID, RetailerID: rID, RetailerSKU: "123456"}); err != nil {
 		t.Fatalf("UpsertRetailerProduct: %v", err)
 	}
-	offerID, err := s.UpsertStoreProductOffer(ctx, domain.StoreProductOffer{StoreID: "s-lind", RetailerProductID: "rp-1", CurrentlyCarried: true})
+	offerID, err := s.UpsertStoreProductOffer(ctx, domain.StoreProductOffer{StoreID: sID, RetailerProductID: rpID, CurrentlyCarried: true})
 	if err != nil {
 		t.Fatalf("UpsertStoreProductOffer: %v", err)
 	}
@@ -410,19 +447,23 @@ func TestPrice_PriceObservationsForProduct(t *testing.T) {
 	ctx := context.Background()
 	truncateTables(t, ctx, s, "price_observation", "store_product_offer", "retailer_product", "product", "store", "retailer")
 
-	if err := s.CreateRetailer(ctx, domain.Retailer{ID: "r-willys", Name: "Willys"}); err != nil {
+	rID := domain.NewRetailerID()
+	if err := s.CreateRetailer(ctx, domain.Retailer{ID: rID, Name: "Willys"}); err != nil {
 		t.Fatalf("CreateRetailer: %v", err)
 	}
-	if err := s.CreateStore(ctx, domain.Store{ID: "s-lind", RetailerID: "r-willys", Name: "Lindhagen"}); err != nil {
+	sID := domain.NewStoreID()
+	if err := s.CreateStore(ctx, domain.Store{ID: sID, RetailerID: rID, Name: "Lindhagen"}); err != nil {
 		t.Fatalf("CreateStore: %v", err)
 	}
-	if err := s.CreateProduct(ctx, Product{ID: "p-milk", Name: "Arla Standardmjölk 1L"}); err != nil {
+	pID := domain.NewProductID()
+	if err := s.CreateProduct(ctx, Product{ID: pID, Name: "Arla Standardmjölk 1L"}); err != nil {
 		t.Fatalf("CreateProduct: %v", err)
 	}
-	if err := s.UpsertRetailerProduct(ctx, domain.RetailerProduct{ID: "rp-1", RetailerID: "r-willys", RetailerSKU: "123456"}); err != nil {
+	rpID := domain.NewRetailerProductID()
+	if err := s.UpsertRetailerProduct(ctx, domain.RetailerProduct{ID: rpID, RetailerID: rID, RetailerSKU: "123456"}); err != nil {
 		t.Fatalf("UpsertRetailerProduct: %v", err)
 	}
-	offerID, err := s.UpsertStoreProductOffer(ctx, domain.StoreProductOffer{StoreID: "s-lind", RetailerProductID: "rp-1", CurrentlyCarried: true})
+	offerID, err := s.UpsertStoreProductOffer(ctx, domain.StoreProductOffer{StoreID: sID, RetailerProductID: rpID, CurrentlyCarried: true})
 	if err != nil {
 		t.Fatalf("UpsertStoreProductOffer: %v", err)
 	}
@@ -435,7 +476,7 @@ func TestPrice_PriceObservationsForProduct(t *testing.T) {
 		t.Fatalf("InsertPriceObservation 2: %v", err)
 	}
 
-	obs, err := s.PriceObservationsForProduct(ctx, "rp-1")
+	obs, err := s.PriceObservationsForProduct(ctx, rpID)
 	if err != nil {
 		t.Fatalf("PriceObservationsForProduct: %v", err)
 	}
@@ -452,19 +493,23 @@ func TestPrice_PriceObservationsForStore(t *testing.T) {
 	ctx := context.Background()
 	truncateTables(t, ctx, s, "price_observation", "store_product_offer", "retailer_product", "product", "store", "retailer")
 
-	if err := s.CreateRetailer(ctx, domain.Retailer{ID: "r-willys", Name: "Willys"}); err != nil {
+	rID := domain.NewRetailerID()
+	if err := s.CreateRetailer(ctx, domain.Retailer{ID: rID, Name: "Willys"}); err != nil {
 		t.Fatalf("CreateRetailer: %v", err)
 	}
-	if err := s.CreateStore(ctx, domain.Store{ID: "s-lind", RetailerID: "r-willys", Name: "Lindhagen"}); err != nil {
+	sID := domain.NewStoreID()
+	if err := s.CreateStore(ctx, domain.Store{ID: sID, RetailerID: rID, Name: "Lindhagen"}); err != nil {
 		t.Fatalf("CreateStore: %v", err)
 	}
-	if err := s.CreateProduct(ctx, Product{ID: "p-milk", Name: "Arla Standardmjölk 1L"}); err != nil {
+	pID := domain.NewProductID()
+	if err := s.CreateProduct(ctx, Product{ID: pID, Name: "Arla Standardmjölk 1L"}); err != nil {
 		t.Fatalf("CreateProduct: %v", err)
 	}
-	if err := s.UpsertRetailerProduct(ctx, domain.RetailerProduct{ID: "rp-1", RetailerID: "r-willys", RetailerSKU: "123456"}); err != nil {
+	rpID := domain.NewRetailerProductID()
+	if err := s.UpsertRetailerProduct(ctx, domain.RetailerProduct{ID: rpID, RetailerID: rID, RetailerSKU: "123456"}); err != nil {
 		t.Fatalf("UpsertRetailerProduct: %v", err)
 	}
-	offerID, err := s.UpsertStoreProductOffer(ctx, domain.StoreProductOffer{StoreID: "s-lind", RetailerProductID: "rp-1", CurrentlyCarried: true})
+	offerID, err := s.UpsertStoreProductOffer(ctx, domain.StoreProductOffer{StoreID: sID, RetailerProductID: rpID, CurrentlyCarried: true})
 	if err != nil {
 		t.Fatalf("UpsertStoreProductOffer: %v", err)
 	}
@@ -474,7 +519,7 @@ func TestPrice_PriceObservationsForStore(t *testing.T) {
 		t.Fatalf("InsertPriceObservation: %v", err)
 	}
 
-	obs, err := s.PriceObservationsForStore(ctx, "s-lind")
+	obs, err := s.PriceObservationsForStore(ctx, sID)
 	if err != nil {
 		t.Fatalf("PriceObservationsForStore: %v", err)
 	}

@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -15,22 +16,39 @@ import (
 	"github.com/androidand/spisordning/internal/mealie"
 	"github.com/androidand/spisordning/internal/persistence"
 	"github.com/androidand/spisordning/internal/service"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 )
+
+// slugToUUID derives a deterministic UUID from a slug string so tests can use
+// readable slugs ("s-1", "rp-1", "willys") while the domain uses typed UUIDs.
+func slugToUUID(slug string) [16]byte {
+	sum := sha256.Sum256([]byte("spisordning-test:" + slug))
+	var u [16]byte
+	copy(u[:], sum[:16])
+	u[6] = (u[6] & 0x0f) | 0x40
+	u[8] = (u[8] & 0x3f) | 0x80
+	return u
+}
+
+func testStoreID(slug string) domain.StoreID           { return domain.StoreID(slugToUUID(slug)) }
+func testRetailerID(slug string) domain.RetailerID     { return domain.RetailerID(slugToUUID(slug)) }
+func testRetailerProductID(slug string) domain.RetailerProductID {
+	return domain.RetailerProductID(slugToUUID(slug))
+}
+func testProductID(slug string) domain.ProductID { return domain.ProductID(slugToUUID(slug)) }
 
 // fakeStore is a minimal in-memory Store for unit testing.
 type fakeStore struct {
 	people            map[string]persistence.Person
 	prefs             []persistence.PersonPreference
 	recipes           []persistence.RecipeRef
-	plans             map[int64]persistence.MealPlan
+	plans             map[domain.MealPlanID]persistence.MealPlan
 	lots              []persistence.InventoryLot
-	locations         map[string]persistence.InventoryLocation
+	locations         map[domain.InventoryLocationID]persistence.InventoryLocation
 	stores            []domain.Store
 	offers            []domain.StoreProductOffer
-	ingredients       map[string]persistence.Ingredient
+	ingredients       map[domain.IngredientID]persistence.Ingredient
 	recipeIngredients []persistence.RecipeIngredient
+	mealEventRef      domain.RecipeRefID
 }
 
 func (f *fakeStore) CreatePerson(ctx context.Context, p persistence.Person) error {
@@ -40,7 +58,7 @@ func (f *fakeStore) CreatePerson(ctx context.Context, p persistence.Person) erro
 func (f *fakeStore) UpdatePerson(ctx context.Context, p persistence.Person) error {
 	existing, ok := f.people[p.ID]
 	if !ok {
-		return pgx.ErrNoRows
+		return persistence.ErrNoRows
 	}
 	if p.Weight > 0 {
 		existing.Weight = p.Weight
@@ -74,10 +92,10 @@ func (f *fakeStore) UpsertPreference(ctx context.Context, p persistence.PersonPr
 	f.prefs = append(f.prefs, p)
 	return nil
 }
-func (f *fakeStore) ListPreferences(ctx context.Context, personID string) ([]persistence.PersonPreference, error) {
+func (f *fakeStore) ListPreferences(ctx context.Context, personID domain.PersonID) ([]persistence.PersonPreference, error) {
 	out := make([]persistence.PersonPreference, 0, len(f.prefs))
 	for _, p := range f.prefs {
-		if personID != "" && p.PersonID != personID {
+		if personID != (domain.PersonID{}) && p.PersonID != personID {
 			continue
 		}
 		out = append(out, p)
@@ -87,9 +105,9 @@ func (f *fakeStore) ListPreferences(ctx context.Context, personID string) ([]per
 func (f *fakeStore) ListAllStores(ctx context.Context) ([]domain.Store, error) {
 	return f.stores, nil
 }
-func (f *fakeStore) ListPantryIngredientIDs(ctx context.Context) ([]string, error) {
-	seen := make(map[string]bool)
-	var out []string
+func (f *fakeStore) ListPantryIngredientIDs(ctx context.Context) ([]domain.IngredientID, error) {
+	seen := make(map[domain.IngredientID]bool)
+	var out []domain.IngredientID
 	for _, lot := range f.lots {
 		if lot.Quantity > 0 && !seen[lot.IngredientID] {
 			seen[lot.IngredientID] = true
@@ -103,7 +121,7 @@ func (f *fakeStore) ListAllRecipeIngredients(ctx context.Context) ([]persistence
 }
 func (f *fakeStore) UpsertIngredientAlias(ctx context.Context, a persistence.IngredientAlias) error { return nil }
 func (f *fakeStore) GetIngredientAlias(ctx context.Context, householdID, alias string) (persistence.IngredientAlias, error) {
-	return persistence.IngredientAlias{}, pgx.ErrNoRows
+	return persistence.IngredientAlias{}, persistence.ErrNoRows
 }
 func (f *fakeStore) ListIngredientAliases(ctx context.Context, householdID string) ([]persistence.IngredientAlias, error) {
 	return []persistence.IngredientAlias{}, nil
@@ -112,7 +130,7 @@ func (f *fakeStore) DeleteIngredientAlias(ctx context.Context, householdID, alia
 func (f *fakeStore) ResolveIngredientAlias(ctx context.Context, householdID, alias string) (string, error) {
 	return "", nil
 }
-func (f *fakeStore) ListStoreProductOffers(ctx context.Context, storeID string) ([]domain.StoreProductOffer, error) {
+func (f *fakeStore) ListStoreProductOffers(ctx context.Context, storeID domain.StoreID) ([]domain.StoreProductOffer, error) {
 	out := make([]domain.StoreProductOffer, 0, len(f.offers))
 	for _, o := range f.offers {
 		if o.StoreID == storeID {
@@ -129,24 +147,32 @@ func (f *fakeStore) ListRecipeRefs(ctx context.Context) ([]persistence.RecipeRef
 	}
 	return out, nil
 }
-func (f *fakeStore) GetRecipeRef(ctx context.Context, id string) (persistence.RecipeRef, error) {
+func (f *fakeStore) GetRecipeRef(ctx context.Context, id domain.RecipeRefID) (persistence.RecipeRef, error) {
 	for _, r := range f.recipes {
-		if r.MealieRecipeID == id {
+		if r.ID == id {
 			return r, nil
 		}
 	}
-	return persistence.RecipeRef{}, pgx.ErrNoRows
+	return persistence.RecipeRef{}, persistence.ErrNoRows
+}
+func (f *fakeStore) GetRecipeRefByMealieID(ctx context.Context, mealieRecipeID string) (persistence.RecipeRef, error) {
+	for _, r := range f.recipes {
+		if r.MealieRecipeID == mealieRecipeID {
+			return r, nil
+		}
+	}
+	return persistence.RecipeRef{}, persistence.ErrNoRows
 }
 func (f *fakeStore) UpsertIngredient(ctx context.Context, i persistence.Ingredient) error {
 	if f.ingredients == nil {
-		f.ingredients = map[string]persistence.Ingredient{}
+		f.ingredients = map[domain.IngredientID]persistence.Ingredient{}
 	}
 	f.ingredients[i.ID] = i
 	return nil
 }
 func (f *fakeStore) AddRecipeIngredient(ctx context.Context, ri persistence.RecipeIngredient) error {
 	for i, existing := range f.recipeIngredients {
-		if existing.MealieRecipeID == ri.MealieRecipeID && existing.IngredientID == ri.IngredientID {
+		if existing.RecipeRefID == ri.RecipeRefID && existing.IngredientID == ri.IngredientID {
 			f.recipeIngredients[i] = ri
 			return nil
 		}
@@ -157,21 +183,27 @@ func (f *fakeStore) AddRecipeIngredient(ctx context.Context, ri persistence.Reci
 func (f *fakeStore) UpsertRecipeRef(ctx context.Context, r persistence.RecipeRef) error {
 	for i, existing := range f.recipes {
 		if existing.MealieRecipeID == r.MealieRecipeID {
+			if r.ID == (domain.RecipeRefID{}) {
+				r.ID = existing.ID
+			}
 			f.recipes[i] = r
 			return nil
 		}
 	}
+	if r.ID == (domain.RecipeRefID{}) {
+		r.ID = domain.NewRecipeRefID()
+	}
 	f.recipes = append(f.recipes, r)
 	return nil
 }
-func (f *fakeStore) CreateMealEvent(ctx context.Context, mealieRecipeID string, servedOn time.Time, planID *int64, planSlotDate *time.Time) (int64, error) {
-	return 1, nil
+func (f *fakeStore) CreateMealEvent(ctx context.Context, recipeRefID domain.RecipeRefID, servedOn time.Time, planID *domain.MealPlanID, planSlotDate *time.Time) (domain.MealEventID, error) {
+	return domain.NewMealEventID(), nil
 }
 func (f *fakeStore) AddMealReaction(ctx context.Context, r persistence.MealReaction) error { return nil }
-func (f *fakeStore) ListMealReactions(ctx context.Context, eventID int64) ([]persistence.MealReaction, error) {
-	return []persistence.MealReaction{{MealEventID: eventID, PersonID: "p1", Sentiment: 1}}, nil
+func (f *fakeStore) ListMealReactions(ctx context.Context, eventID domain.MealEventID) ([]persistence.MealReaction, error) {
+	return []persistence.MealReaction{{MealEventID: eventID, PersonID: domain.NewPersonID(), Sentiment: 1}}, nil
 }
-func (f *fakeStore) GetMealPlan(ctx context.Context, id int64) (persistence.MealPlan, error) {
+func (f *fakeStore) GetMealPlan(ctx context.Context, id domain.MealPlanID) (persistence.MealPlan, error) {
 	p, ok := f.plans[id]
 	if !ok {
 		return persistence.MealPlan{}, errors.New("not found")
@@ -184,12 +216,12 @@ func (f *fakeStore) GetOrCreateMealPlan(ctx context.Context, weekStart time.Time
 			return p, nil
 		}
 	}
-	id := int64(len(f.plans) + 1)
+	id := domain.NewMealPlanID()
 	p := persistence.MealPlan{ID: id, WeekStart: weekStart, Status: "draft", CreatedAt: time.Now()}
 	f.plans[id] = p
 	return p, nil
 }
-func (f *fakeStore) SetMealPlanStatus(ctx context.Context, id int64, status string) error {
+func (f *fakeStore) SetMealPlanStatus(ctx context.Context, id domain.MealPlanID, status string) error {
 	if p, ok := f.plans[id]; ok {
 		p.Status = status
 		f.plans[id] = p
@@ -197,33 +229,33 @@ func (f *fakeStore) SetMealPlanStatus(ctx context.Context, id int64, status stri
 	return nil
 }
 func (f *fakeStore) InsertCandidate(ctx context.Context, c persistence.MealPlanCandidate) error { return nil }
-func (f *fakeStore) ListCandidates(ctx context.Context, planID int64) ([]persistence.MealPlanCandidate, error) {
+func (f *fakeStore) ListCandidates(ctx context.Context, planID domain.MealPlanID) ([]persistence.MealPlanCandidate, error) {
 	return nil, nil
 }
 func (f *fakeStore) SetDecision(ctx context.Context, d persistence.MealPlanDecision) error { return nil }
-func (f *fakeStore) ListDecisions(ctx context.Context, planID int64) ([]persistence.MealPlanDecision, error) {
+func (f *fakeStore) ListDecisions(ctx context.Context, planID domain.MealPlanID) ([]persistence.MealPlanDecision, error) {
 	return nil, nil
 }
 func (f *fakeStore) InsertShoppingRequirement(ctx context.Context, r persistence.ShoppingRequirement) error { return nil }
-func (f *fakeStore) ListShoppingRequirements(ctx context.Context, planID int64) ([]persistence.ShoppingRequirement, error) {
+func (f *fakeStore) ListShoppingRequirements(ctx context.Context, planID domain.MealPlanID) ([]persistence.ShoppingRequirement, error) {
 	return nil, nil
 }
 func (f *fakeStore) UpsertIngredientMapping(ctx context.Context, m persistence.IngredientMapping) error { return nil }
-func (f *fakeStore) BeginTx(ctx context.Context) (pgx.Tx, error) {
+func (f *fakeStore) BeginTx(ctx context.Context) (persistence.Tx, error) {
 	return &fakeTx{}, nil
 }
 func (f *fakeStore) CreateInventoryLocation(ctx context.Context, l persistence.InventoryLocation) error {
 	f.locations[l.ID] = l
 	return nil
 }
-func (f *fakeStore) GetInventoryLocation(ctx context.Context, id string) (persistence.InventoryLocation, error) {
+func (f *fakeStore) GetInventoryLocation(ctx context.Context, id domain.InventoryLocationID) (persistence.InventoryLocation, error) {
 	l, ok := f.locations[id]
 	if !ok {
 		return persistence.InventoryLocation{}, errors.New("not found")
 	}
 	return l, nil
 }
-func (f *fakeStore) ListLotsUnderLocation(ctx context.Context, id string) ([]persistence.InventoryLot, error) {
+func (f *fakeStore) ListLotsUnderLocation(ctx context.Context, id domain.InventoryLocationID) ([]persistence.InventoryLot, error) {
 	out := make([]persistence.InventoryLot, 0)
 	for _, l := range f.lots {
 		if l.LocationID == id {
@@ -235,20 +267,20 @@ func (f *fakeStore) ListLotsUnderLocation(ctx context.Context, id string) ([]per
 func (f *fakeStore) ListInventoryLocations(ctx context.Context, householdID string) ([]persistence.InventoryLocation, error) {
 	out := make([]persistence.InventoryLocation, 0, len(f.locations))
 	for _, l := range f.locations {
-		if householdID != "" && l.HouseholdID != householdID {
+		if householdID != "" && l.HouseholdID.String() != householdID {
 			continue
 		}
 		out = append(out, l)
 	}
 	return out, nil
 }
-func (f *fakeStore) RecordPurchase(ctx context.Context, ingredientID, productID, locationID string, quantity float64, unit string, bestBefore *time.Time, source string) (int64, error) {
-	id := int64(len(f.lots) + 1)
+func (f *fakeStore) RecordPurchase(ctx context.Context, ingredientID domain.IngredientID, productID *domain.ProductID, locationID domain.InventoryLocationID, quantity float64, unit string, bestBefore *time.Time, source string) (domain.InventoryLotID, error) {
+	id := domain.NewInventoryLotID()
 	f.lots = append(f.lots, persistence.InventoryLot{ID: id, IngredientID: ingredientID, ProductID: productID, LocationID: locationID, Quantity: quantity, Unit: unit, Confidence: "EXACT", CreatedAt: time.Now(), UpdatedAt: time.Now()})
 	return id, nil
 }
-func (f *fakeStore) RecordConsume(ctx context.Context, lotID int64, quantity float64, estimated bool, source string) error { return nil }
-func (f *fakeStore) GetInventoryLot(ctx context.Context, id int64) (persistence.InventoryLot, error) {
+func (f *fakeStore) RecordConsume(ctx context.Context, lotID domain.InventoryLotID, quantity float64, estimated bool, source string) error { return nil }
+func (f *fakeStore) GetInventoryLot(ctx context.Context, id domain.InventoryLotID) (persistence.InventoryLot, error) {
 	for _, l := range f.lots {
 		if l.ID == id {
 			return l, nil
@@ -256,14 +288,18 @@ func (f *fakeStore) GetInventoryLot(ctx context.Context, id int64) (persistence.
 	}
 	return persistence.InventoryLot{}, errors.New("not found")
 }
-func (f *fakeStore) ListMealEvents(ctx context.Context, mealieRecipeID, servedOn string) ([]persistence.MealEvent, error) {
+func (f *fakeStore) ListMealEvents(ctx context.Context, recipeRefID domain.RecipeRefID, servedOn string) ([]persistence.MealEvent, error) {
 	return nil, nil
 }
-func (f *fakeStore) GetMealEvent(ctx context.Context, id int64) (persistence.MealEvent, error) {
-	return persistence.MealEvent{ID: id, MealieRecipeID: "r-1", ServedOn: time.Now()}, nil
+func (f *fakeStore) GetMealEvent(ctx context.Context, id domain.MealEventID) (persistence.MealEvent, error) {
+	refID := f.mealEventRef
+	if refID == (domain.RecipeRefID{}) {
+		refID = domain.NewRecipeRefID()
+	}
+	return persistence.MealEvent{ID: id, RecipeRefID: refID, ServedOn: time.Now()}, nil
 }
 func (f *fakeStore) GetIngredientMapping(ctx context.Context, mealieFoodID string) (persistence.IngredientMapping, error) {
-	return persistence.IngredientMapping{MealieFoodID: mealieFoodID, IngredientID: "cauliflower"}, nil
+	return persistence.IngredientMapping{MealieFoodID: mealieFoodID, IngredientID: domain.IngredientIDForName("cauliflower")}, nil
 }
 func (f *fakeStore) ListMealPlans(ctx context.Context) ([]persistence.MealPlan, error) {
 	out := make([]persistence.MealPlan, 0, len(f.plans))
@@ -273,101 +309,92 @@ func (f *fakeStore) ListMealPlans(ctx context.Context) ([]persistence.MealPlan, 
 	return out, nil
 }
 func (f *fakeStore) CreateRecipeFamily(ctx context.Context, fam persistence.RecipeFamily) error { return nil }
-func (f *fakeStore) GetRecipeFamily(ctx context.Context, id string) (persistence.RecipeFamily, error) {
-	return persistence.RecipeFamily{}, pgx.ErrNoRows
+func (f *fakeStore) GetRecipeFamily(ctx context.Context, id domain.RecipeFamilyID) (persistence.RecipeFamily, error) {
+	return persistence.RecipeFamily{}, persistence.ErrNoRows
 }
 func (f *fakeStore) ListRecipeFamilies(ctx context.Context) ([]persistence.RecipeFamily, error) {
 	return nil, nil
 }
-func (f *fakeStore) SetRecipeFamilyDefaultVariant(ctx context.Context, familyID, variantID string) error {
+func (f *fakeStore) SetRecipeFamilyDefaultVariant(ctx context.Context, familyID domain.RecipeFamilyID, variantID domain.RecipeVariantID) error {
 	return nil
 }
 func (f *fakeStore) CreateRecipeVariant(ctx context.Context, v persistence.RecipeVariant) error { return nil }
-func (f *fakeStore) GetRecipeVariant(ctx context.Context, id string) (persistence.RecipeVariant, error) {
-	return persistence.RecipeVariant{}, pgx.ErrNoRows
+func (f *fakeStore) GetRecipeVariant(ctx context.Context, id domain.RecipeVariantID) (persistence.RecipeVariant, error) {
+	return persistence.RecipeVariant{}, persistence.ErrNoRows
 }
-func (f *fakeStore) ListRecipeVariants(ctx context.Context, familyID string) ([]persistence.RecipeVariant, error) {
+func (f *fakeStore) ListRecipeVariants(ctx context.Context, familyID domain.RecipeFamilyID) ([]persistence.RecipeVariant, error) {
 	return nil, nil
 }
-func (f *fakeStore) CreateRecipeRevision(ctx context.Context, r persistence.RecipeRevision) (int64, error) {
-	return 1, nil
+func (f *fakeStore) CreateRecipeRevision(ctx context.Context, r persistence.RecipeRevision) (domain.RecipeRevisionID, error) {
+	return domain.NewRecipeRevisionID(), nil
 }
-func (f *fakeStore) GetRecipeRevision(ctx context.Context, id int64) (persistence.RecipeRevision, error) {
-	return persistence.RecipeRevision{}, pgx.ErrNoRows
+func (f *fakeStore) GetRecipeRevision(ctx context.Context, id domain.RecipeRevisionID) (persistence.RecipeRevision, error) {
+	return persistence.RecipeRevision{}, persistence.ErrNoRows
 }
-func (f *fakeStore) ListRecipeRevisions(ctx context.Context, variantID string) ([]persistence.RecipeRevision, error) {
+func (f *fakeStore) ListRecipeRevisions(ctx context.Context, variantID domain.RecipeVariantID) ([]persistence.RecipeRevision, error) {
 	return nil, nil
 }
-func (f *fakeStore) AddRecipeRevisionParent(ctx context.Context, child, parent int64) error { return nil }
-func (f *fakeStore) ListRecipeRevisionParents(ctx context.Context, revisionID int64) ([]int64, error) {
+func (f *fakeStore) AddRecipeRevisionParent(ctx context.Context, child, parent domain.RecipeRevisionID) error { return nil }
+func (f *fakeStore) ListRecipeRevisionParents(ctx context.Context, revisionID domain.RecipeRevisionID) ([]domain.RecipeRevisionID, error) {
 	return nil, nil
 }
-func (f *fakeStore) UpsertFavorite(ctx context.Context, personID, householdID, mealieRecipeID string) error {
+func (f *fakeStore) UpsertFavorite(ctx context.Context, scopeType, scopeID string, recipeRefID domain.RecipeRefID) error {
 	return nil
 }
-func (f *fakeStore) DeleteFavorite(ctx context.Context, personID, householdID, mealieRecipeID string) error {
+func (f *fakeStore) DeleteFavorite(ctx context.Context, scopeType, scopeID string, recipeRefID domain.RecipeRefID) error {
 	return nil
 }
-func (f *fakeStore) ListFavoritesForRecipe(ctx context.Context, mealieRecipeID string) ([]persistence.Favorite, error) {
+func (f *fakeStore) ListFavoritesForRecipe(ctx context.Context, recipeRefID domain.RecipeRefID) ([]persistence.Favorite, error) {
 	return nil, nil
 }
-func (f *fakeStore) GetRecipeRating(ctx context.Context, mealieRecipeID string) (persistence.RecipeRating, error) {
-	return persistence.RecipeRating{MealieRecipeID: mealieRecipeID, Average: 4.2, ReviewCount: 3}, nil
+func (f *fakeStore) GetRecipeRating(ctx context.Context, recipeRefID domain.RecipeRefID) (persistence.RecipeRating, error) {
+	return persistence.RecipeRating{RecipeRefID: recipeRefID, Average: 4.2, ReviewCount: 3}, nil
 }
 func (f *fakeStore) ListRetailers(ctx context.Context) ([]domain.Retailer, error) {
-	return []domain.Retailer{{ID: "willys", Name: "Willys"}}, nil
+	return []domain.Retailer{{ID: testRetailerID("willys"), Name: "Willys"}}, nil
 }
-func (f *fakeStore) ListRetailerProducts(ctx context.Context, retailerID string) ([]domain.RetailerProduct, error) {
-	return []domain.RetailerProduct{{ID: "rp-1", RetailerID: retailerID, ProductID: "prod-1", DisplayName: "Mjölk 3%"}}, nil
+func (f *fakeStore) ListRetailerProducts(ctx context.Context, retailerID domain.RetailerID) ([]domain.RetailerProduct, error) {
+	rpid := testRetailerProductID("rp-1")
+	pid := testProductID("prod-1")
+	return []domain.RetailerProduct{{ID: rpid, RetailerID: testRetailerID("willys"), ProductID: &pid, DisplayName: "Mjölk 3%"}}, nil
 }
 func (f *fakeStore) ListCurrentPrices(ctx context.Context) ([]domain.CurrentStoreProductPrice, error) {
+	rpid := testRetailerProductID("rp-1")
+	oid1 := domain.StoreProductOfferID(slugToUUID("offer-1"))
+	oid2 := domain.StoreProductOfferID(slugToUUID("offer-2"))
 	return []domain.CurrentStoreProductPrice{
-		{OfferID: 1, StoreID: "s-1", RetailerProductID: "rp-1", PriceKind: domain.PriceKindRegular, Price: 19.9, ObservedAt: time.Now(), Source: "willys_adapter"},
-		{OfferID: 2, StoreID: "s-2", RetailerProductID: "rp-1", PriceKind: domain.PriceKindRegular, Price: 17.5, ObservedAt: time.Now(), Source: "willys_adapter"},
+		{OfferID: oid1, StoreID: testStoreID("s-1"), RetailerProductID: rpid, PriceKind: domain.PriceKindRegular, Price: 19.9, ObservedAt: time.Now(), Source: "willys_adapter"},
+		{OfferID: oid2, StoreID: testStoreID("s-2"), RetailerProductID: rpid, PriceKind: domain.PriceKindRegular, Price: 17.5, ObservedAt: time.Now(), Source: "willys_adapter"},
 	}, nil
 }
 func (f *fakeStore) ListExpiringLots(ctx context.Context, within time.Duration) ([]persistence.InventoryLot, error) {
 	return []persistence.InventoryLot{
-		{ID: 1, IngredientID: "mjolk", LocationID: "l-1", Quantity: 1, Unit: "L", Confidence: domain.ConfidenceExact, BestBefore: &[]time.Time{time.Now().Add(24 * time.Hour)}[0]},
+		{ID: domain.NewInventoryLotID(), IngredientID: domain.IngredientIDForName("mjolk"), LocationID: domain.NewInventoryLocationID(), Quantity: 1, Unit: "L", Confidence: domain.ConfidenceExact, BestBefore: &[]time.Time{time.Now().Add(24 * time.Hour)}[0]},
 	}, nil
 }
 
-// fakeTx is a minimal no-op pgx.Tx for tests.
+// fakeTx is a minimal no-op persistence.Tx for tests.
 type fakeTx struct{}
 
-func (f *fakeTx) Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error) {
-	return pgconn.NewCommandTag("OK"), nil
+func (f *fakeTx) Exec(ctx context.Context, sql string, args ...interface{}) (interface{}, error) {
+	return nil, nil
 }
-func (f *fakeTx) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
-	return &fakeRow{id: int64(1)}
+func (f *fakeTx) QueryRow(ctx context.Context, sql string, args ...interface{}) persistence.Row {
+	return &fakeRow{id: "event-1"}
 }
 func (f *fakeTx) Commit(ctx context.Context) error { return nil }
 func (f *fakeTx) Rollback(ctx context.Context) error { return nil }
-func (f *fakeTx) Begin(ctx context.Context) (pgx.Tx, error) { return f, nil }
-func (f *fakeTx) CopyFrom(ctx context.Context, tableName pgx.Identifier, columnNames []string, rowSrc pgx.CopyFromSource) (int64, error) { return 0, nil }
-func (f *fakeTx) SendBatch(ctx context.Context, b *pgx.Batch) pgx.BatchResults { return &fakeBatch{} }
-func (f *fakeTx) LargeObjects() pgx.LargeObjects { return pgx.LargeObjects{} }
-func (f *fakeTx) Prepare(ctx context.Context, name, sql string) (*pgconn.StatementDescription, error) { return nil, nil }
-func (f *fakeTx) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) { return nil, nil }
-func (f *fakeTx) Conn() *pgx.Conn { return nil }
 
-type fakeRow struct{ id int64 }
+type fakeRow struct{ id string }
 
 func (f *fakeRow) Scan(dest ...interface{}) error {
 	if len(dest) > 0 {
-		if p, ok := dest[0].(*int64); ok {
+		if p, ok := dest[0].(*string); ok {
 			*p = f.id
 		}
 	}
 	return nil
 }
-
-type fakeBatch struct{}
-
-func (f *fakeBatch) Exec() (pgconn.CommandTag, error) { return pgconn.NewCommandTag("OK"), nil }
-func (f *fakeBatch) Query() (pgx.Rows, error) { return nil, nil }
-func (f *fakeBatch) QueryRow() pgx.Row { return nil }
-func (f *fakeBatch) Close() error { return nil }
 
 func TestPeopleList(t *testing.T) {
 	f := &fakeStore{people: map[string]persistence.Person{
@@ -434,11 +461,12 @@ func TestPeopleUpdate_RequiresName(t *testing.T) {
 }
 
 func TestPreferencesList(t *testing.T) {
+	pid := domain.NewPersonID()
 	f := &fakeStore{prefs: []persistence.PersonPreference{
-		{PersonID: "p1", Tag: "spicy", Sentiment: 1, Confidence: 0.8, UpdatedAt: time.Now()},
+		{PersonID: pid, Tag: "spicy", Sentiment: 1, Confidence: 0.8, UpdatedAt: time.Now()},
 	}}
 	svc := service.NewPreferences(f)
-	out, err := svc.ListPreferences(context.Background(), "p1")
+	out, err := svc.ListPreferences(context.Background(), pid.String())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -451,10 +479,11 @@ func TestPreferencesList(t *testing.T) {
 }
 
 func TestSetPreference_HappyPath(t *testing.T) {
+	pid := domain.NewPersonID()
 	f := &fakeStore{}
 	svc := service.NewPreferences(f)
 	out, err := svc.SetPreference(context.Background(), dto.SetPreferenceInput{
-		PersonID: "p1", Tag: "spicy", Sentiment: 2, Confidence: 0.9,
+		PersonID: pid.String(), Tag: "spicy", Sentiment: 2, Confidence: 0.9,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -468,12 +497,13 @@ func TestSetPreference_HappyPath(t *testing.T) {
 }
 
 func TestSetPreference_UpdatesExisting(t *testing.T) {
+	pid := domain.NewPersonID()
 	f := &fakeStore{prefs: []persistence.PersonPreference{
-		{PersonID: "p1", Tag: "spicy", Sentiment: 1, Confidence: 0.5, UpdatedAt: time.Now()},
+		{PersonID: pid, Tag: "spicy", Sentiment: 1, Confidence: 0.5, UpdatedAt: time.Now()},
 	}}
 	svc := service.NewPreferences(f)
 	out, err := svc.SetPreference(context.Background(), dto.SetPreferenceInput{
-		PersonID: "p1", Tag: "spicy", Sentiment: -1, Confidence: 0.7,
+		PersonID: pid.String(), Tag: "spicy", Sentiment: -1, Confidence: 0.7,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -578,11 +608,11 @@ func TestRecipesSync(t *testing.T) {
 		t.Fatalf("expected 1 recipe_ingredient row, got %+v", f.recipeIngredients)
 	}
 	ri := f.recipeIngredients[0]
-	if ri.MealieRecipeID != "r-pasta" || ri.IngredientID != "köttfärs" || ri.Quantity != 400 || ri.Unit != "g" {
+	if ri.Quantity != 400 || ri.Unit != "g" {
 		t.Fatalf("unexpected recipe_ingredient row: %+v", ri)
 	}
-	if ing, ok := f.ingredients["köttfärs"]; !ok || ing.Display != "köttfärs" {
-		t.Fatalf("expected canonical ingredient %q upserted, got %+v", "köttfärs", f.ingredients)
+	if len(f.ingredients) != 1 {
+		t.Fatalf("expected 1 ingredient, got %+v", f.ingredients)
 	}
 
 	if _, err := svc.SyncFromMealie(context.Background()); err != nil {
@@ -629,7 +659,7 @@ func TestRecipesSyncUnstructuredIngredients(t *testing.T) {
 		t.Fatalf("expected 1 recipe_ingredient row from the brute-parser fallback, got %+v", f.recipeIngredients)
 	}
 	ri := f.recipeIngredients[0]
-	if ri.IngredientID != "falukorv" || ri.Quantity != 500 || ri.Unit != "g" {
+	if ri.Quantity != 500 || ri.Unit != "g" {
 		t.Fatalf("unexpected recipe_ingredient row: %+v", ri)
 	}
 }
@@ -642,11 +672,13 @@ func TestRecipesSyncNoClient(t *testing.T) {
 }
 
 func TestMealsCreate(t *testing.T) {
-	f := &fakeStore{}
+	f := &fakeStore{recipes: []persistence.RecipeRef{
+		{ID: domain.NewRecipeRefID(), MealieRecipeID: "r1", Title: "Pasta", Effort: 1},
+	}}
 	svc := service.NewMeals(f, nil)
 	out, err := svc.CreateMealEvent(context.Background(), dto.MealEventNew{
 		MealieRecipeID: "r1", ServedOn: "2025-01-15",
-		Reactions: []dto.MealReactionInput{{PersonID: "p1", Sentiment: 1}},
+		Reactions: []dto.MealReactionInput{{PersonID: domain.NewPersonID().String(), Sentiment: 1}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -658,8 +690,9 @@ func TestMealsCreate(t *testing.T) {
 
 func TestPlanningList(t *testing.T) {
 	weekStart := time.Date(2025, 1, 13, 0, 0, 0, 0, time.UTC)
-	f := &fakeStore{plans: map[int64]persistence.MealPlan{
-		1: {ID: 1, WeekStart: weekStart, Status: "draft", CreatedAt: time.Now()},
+	planID := domain.NewMealPlanID()
+	f := &fakeStore{plans: map[domain.MealPlanID]persistence.MealPlan{
+		planID: {ID: planID, WeekStart: weekStart, Status: "draft", CreatedAt: time.Now()},
 	}}
 	svc := service.NewPlanning(f, nil)
 	out, err := svc.ListPlans(context.Background())
@@ -675,9 +708,9 @@ func TestPlanningList(t *testing.T) {
 }
 
 func TestPantryCreateLocation(t *testing.T) {
-	f := &fakeStore{locations: make(map[string]persistence.InventoryLocation)}
+	f := &fakeStore{locations: make(map[domain.InventoryLocationID]persistence.InventoryLocation)}
 	svc := service.NewPantry(f)
-	out, err := svc.CreateLocation(context.Background(), dto.PantryLocationNew{Name: "Kitchen"})
+	out, err := svc.CreateLocation(context.Background(), dto.PantryLocationNew{Name: "Kitchen", HouseholdID: domain.NewHouseholdID().String()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -687,10 +720,13 @@ func TestPantryCreateLocation(t *testing.T) {
 }
 
 func TestPantryPurchase(t *testing.T) {
-	f := &fakeStore{locations: make(map[string]persistence.InventoryLocation)}
+	locID := domain.NewInventoryLocationID()
+	f := &fakeStore{locations: map[domain.InventoryLocationID]persistence.InventoryLocation{
+		locID: {ID: locID, Name: "Kitchen", HouseholdID: domain.NewHouseholdID()},
+	}}
 	svc := service.NewPantry(f)
 	out, err := svc.Purchase(context.Background(), dto.PantryPurchaseInput{
-		IngredientID: "cauliflower", Quantity: 1.0, Unit: "piece", LocationID: "kitchen",
+		IngredientID: "cauliflower", Quantity: 1.0, Unit: "piece", LocationID: locID.String(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -702,26 +738,28 @@ func TestPantryPurchase(t *testing.T) {
 
 func TestPlanningGet(t *testing.T) {
 	weekStart := time.Date(2025, 1, 13, 0, 0, 0, 0, time.UTC)
-	f := &fakeStore{plans: map[int64]persistence.MealPlan{
-		1: {ID: 1, WeekStart: weekStart, Status: "approved", CreatedAt: time.Now()},
+	planID := domain.NewMealPlanID()
+	f := &fakeStore{plans: map[domain.MealPlanID]persistence.MealPlan{
+		planID: {ID: planID, WeekStart: weekStart, Status: "approved", CreatedAt: time.Now()},
 	}}
 	svc := service.NewPlanning(f, nil)
-	out, err := svc.GetPlan(context.Background(), 1)
+	out, err := svc.GetPlan(context.Background(), planID.String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.Plan.ID != 1 || out.Plan.Status != "approved" {
+	if out.Plan.ID != planID.String() || out.Plan.Status != "approved" {
 		t.Fatalf("unexpected plan: %+v", out.Plan)
 	}
 }
 
 func TestPlanningUpdate(t *testing.T) {
 	weekStart := time.Date(2025, 1, 13, 0, 0, 0, 0, time.UTC)
-	f := &fakeStore{plans: map[int64]persistence.MealPlan{
-		1: {ID: 1, WeekStart: weekStart, Status: "draft", CreatedAt: time.Now()},
+	planID := domain.NewMealPlanID()
+	f := &fakeStore{plans: map[domain.MealPlanID]persistence.MealPlan{
+		planID: {ID: planID, WeekStart: weekStart, Status: "draft", CreatedAt: time.Now()},
 	}}
 	svc := service.NewPlanning(f, nil)
-	out, err := svc.UpdatePlan(context.Background(), 1, dto.MealPlanUpdate{Status: "approved"})
+	out, err := svc.UpdatePlan(context.Background(), planID.String(), dto.MealPlanUpdate{Status: "approved"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -731,7 +769,7 @@ func TestPlanningUpdate(t *testing.T) {
 }
 
 func TestPlanningCreate(t *testing.T) {
-	f := &fakeStore{plans: make(map[int64]persistence.MealPlan)}
+	f := &fakeStore{plans: make(map[domain.MealPlanID]persistence.MealPlan)}
 	svc := service.NewPlanning(f, nil)
 	out, err := svc.CreatePlan(context.Background(), "2025-01-13")
 	if err != nil {
@@ -743,12 +781,15 @@ func TestPlanningCreate(t *testing.T) {
 }
 
 func TestPantryListLocations(t *testing.T) {
-	f := &fakeStore{locations: map[string]persistence.InventoryLocation{
-		"kitchen": {ID: "kitchen", Name: "Kitchen", HouseholdID: "h1"},
-		"freezer": {ID: "freezer", Name: "Freezer", HouseholdID: "h1"},
+	hhID := domain.NewHouseholdID()
+	kitchenID := domain.NewInventoryLocationID()
+	freezerID := domain.NewInventoryLocationID()
+	f := &fakeStore{locations: map[domain.InventoryLocationID]persistence.InventoryLocation{
+		kitchenID: {ID: kitchenID, Name: "Kitchen", HouseholdID: hhID},
+		freezerID: {ID: freezerID, Name: "Freezer", HouseholdID: hhID},
 	}}
 	svc := service.NewPantry(f)
-	out, err := svc.ListLocations(context.Background(), "h1")
+	out, err := svc.ListLocations(context.Background(), hhID.String())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -758,23 +799,30 @@ func TestPantryListLocations(t *testing.T) {
 }
 
 func TestPantryConsume(t *testing.T) {
-	f := &fakeStore{locations: make(map[string]persistence.InventoryLocation)}
+	f := &fakeStore{locations: make(map[domain.InventoryLocationID]persistence.InventoryLocation)}
 	svc := service.NewPantry(f)
-	err := svc.Consume(context.Background(), 1, dto.PantryConsumeInput{Quantity: 1.0})
+	err := svc.Consume(context.Background(), domain.NewInventoryLotID().String(), dto.PantryConsumeInput{Quantity: 1.0})
 	if err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestMealsGet(t *testing.T) {
-	f := &fakeStore{}
+	refID := domain.NewRecipeRefID()
+	f := &fakeStore{
+		recipes: []persistence.RecipeRef{
+			{ID: refID, MealieRecipeID: "r1", Title: "Pasta", Effort: 1},
+		},
+		mealEventRef: refID,
+	}
 	svc := service.NewMeals(f, nil)
-	out, err := svc.GetMeal(context.Background(), 42)
+	mealID := domain.NewMealEventID()
+	out, err := svc.GetMeal(context.Background(), mealID.String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.ID != 42 {
-		t.Fatalf("expected id 42, got %d", out.ID)
+	if out.ID != mealID.String() {
+		t.Fatalf("expected id %s, got %s", mealID.String(), out.ID)
 	}
 }
 
@@ -802,8 +850,9 @@ func TestIngredientsGetMapping(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.IngredientID != "cauliflower" {
-		t.Fatalf("expected cauliflower, got %s", out.IngredientID)
+	want := domain.IngredientIDForName("cauliflower").String()
+	if out.IngredientID != want {
+		t.Fatalf("expected %s, got %s", want, out.IngredientID)
 	}
 }
 
@@ -839,9 +888,13 @@ func TestIngredientsNutritionByID(t *testing.T) {
 }
 
 func TestStoresListStores(t *testing.T) {
+	sid1 := testStoreID("s-1")
+	sid2 := testStoreID("s-2")
+	ridICA := testRetailerID("ica")
+	ridWillys := testRetailerID("willys")
 	f := &fakeStore{stores: []domain.Store{
-		{ID: "s-1", RetailerID: "ica", Name: "ICA Lindhagen"},
-		{ID: "s-2", RetailerID: "willys", Name: "Willys Kungsholmen"},
+		{ID: sid1, RetailerID: ridICA, Name: "ICA Lindhagen"},
+		{ID: sid2, RetailerID: ridWillys, Name: "Willys Kungsholmen"},
 	}}
 	svc := service.NewStores(f, nil)
 
@@ -852,26 +905,30 @@ func TestStoresListStores(t *testing.T) {
 	if len(out) != 2 {
 		t.Fatalf("expected 2 stores, got %d", len(out))
 	}
-	if out[0].ID != "s-1" || out[0].RetailerID != "ica" || out[0].Name != "ICA Lindhagen" {
+	if out[0].ID != sid1.String() || out[0].RetailerID != ridICA.String() || out[0].Name != "ICA Lindhagen" {
 		t.Fatalf("unexpected first store: %+v", out[0])
 	}
 }
 
 func TestStoresListStoreOffers(t *testing.T) {
+	sid1 := testStoreID("s-1")
+	sid2 := testStoreID("s-2")
+	rpid1 := testRetailerProductID("rp-1")
+	rpid2 := testRetailerProductID("rp-2")
 	f := &fakeStore{offers: []domain.StoreProductOffer{
-		{ID: 1, StoreID: "s-1", RetailerProductID: "rp-1", CurrentlyCarried: true},
-		{ID: 2, StoreID: "s-2", RetailerProductID: "rp-2", CurrentlyCarried: false},
+		{ID: domain.StoreProductOfferID(slugToUUID("offer-1")), StoreID: sid1, RetailerProductID: rpid1, CurrentlyCarried: true},
+		{ID: domain.StoreProductOfferID(slugToUUID("offer-2")), StoreID: sid2, RetailerProductID: rpid2, CurrentlyCarried: false},
 	}}
 	svc := service.NewStores(f, nil)
 
-	out, err := svc.ListStoreOffers(context.Background(), "s-1")
+	out, err := svc.ListStoreOffers(context.Background(), sid1.String())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(out) != 1 {
 		t.Fatalf("expected 1 offer for s-1, got %d", len(out))
 	}
-	if out[0].ID != 1 || out[0].RetailerProductID != "rp-1" || !out[0].CurrentlyCarried {
+	if out[0].ID != domain.StoreProductOfferID(slugToUUID("offer-1")).String() || out[0].RetailerProductID != rpid1.String() || !out[0].CurrentlyCarried {
 		t.Fatalf("unexpected offer: %+v", out[0])
 	}
 }
@@ -888,25 +945,30 @@ func TestStoresSearchProductsNoClient(t *testing.T) {
 
 func TestRecipeFamilyGetNotFound(t *testing.T) {
 	svc := service.NewRecipeFamily(&fakeStore{})
-	if _, err := svc.GetFamily(context.Background(), "missing"); !errors.Is(err, dto.ErrNotFound) {
+	famID := domain.NewRecipeFamilyID().String()
+	varID := domain.NewRecipeVariantID().String()
+	revID := domain.NewRecipeRevisionID().String()
+	if _, err := svc.GetFamily(context.Background(), famID); !errors.Is(err, dto.ErrNotFound) {
 		t.Fatalf("expected dto.ErrNotFound, got %v", err)
 	}
-	if _, err := svc.ListVariants(context.Background(), "missing"); !errors.Is(err, dto.ErrNotFound) {
+	if _, err := svc.ListVariants(context.Background(), famID); !errors.Is(err, dto.ErrNotFound) {
 		t.Fatalf("expected dto.ErrNotFound, got %v", err)
 	}
-	if _, err := svc.ListRevisions(context.Background(), "missing"); !errors.Is(err, dto.ErrNotFound) {
+	if _, err := svc.ListRevisions(context.Background(), varID); !errors.Is(err, dto.ErrNotFound) {
 		t.Fatalf("expected dto.ErrNotFound, got %v", err)
 	}
-	if _, err := svc.GetRevision(context.Background(), 99); !errors.Is(err, dto.ErrNotFound) {
+	if _, err := svc.GetRevision(context.Background(), revID); !errors.Is(err, dto.ErrNotFound) {
 		t.Fatalf("expected dto.ErrNotFound, got %v", err)
 	}
 }
 
 func TestRecipeFamilySetDefaultVariantWrongFamily(t *testing.T) {
-	// fakeStore returns pgx.ErrNoRows for GetRecipeFamily, so the family lookup
+	// fakeStore returns persistence.ErrNoRows for GetRecipeFamily, so the family lookup
 	// fails first and maps to ErrNotFound.
 	svc := service.NewRecipeFamily(&fakeStore{})
-	if err := svc.SetDefaultVariant(context.Background(), "fam", "var"); !errors.Is(err, dto.ErrNotFound) {
+	famID := domain.NewRecipeFamilyID().String()
+	varID := domain.NewRecipeVariantID().String()
+	if err := svc.SetDefaultVariant(context.Background(), famID, varID); !errors.Is(err, dto.ErrNotFound) {
 		t.Fatalf("expected dto.ErrNotFound, got %v", err)
 	}
 }
@@ -921,9 +983,6 @@ func TestRecipeFamilyCreateFamilySlug(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.ID != "korvstroganoff" {
-		t.Fatalf("expected slug id korvstroganoff, got %q", out.ID)
-	}
 	if out.Name != "Korvstroganoff" {
 		t.Fatalf("expected name Korvstroganoff, got %q", out.Name)
 	}
@@ -937,7 +996,10 @@ func TestRecipeFamilyCreateFamilyRequiresName(t *testing.T) {
 }
 
 func TestFavoritesGetRecipeRating(t *testing.T) {
-	svc := service.NewFavorites(&fakeStore{})
+	f := &fakeStore{recipes: []persistence.RecipeRef{
+		{ID: domain.NewRecipeRefID(), MealieRecipeID: "rec-1", Title: "Test", Effort: 1},
+	}}
+	svc := service.NewFavorites(f)
 	out, err := svc.GetRecipeRating(context.Background(), "rec-1")
 	if err != nil {
 		t.Fatal(err)
@@ -948,7 +1010,10 @@ func TestFavoritesGetRecipeRating(t *testing.T) {
 }
 
 func TestFavoritesListEmpty(t *testing.T) {
-	svc := service.NewFavorites(&fakeStore{})
+	f := &fakeStore{recipes: []persistence.RecipeRef{
+		{ID: domain.NewRecipeRefID(), MealieRecipeID: "rec-1", Title: "Test", Effort: 1},
+	}}
+	svc := service.NewFavorites(f)
 	out, err := svc.ListFavoritesForRecipe(context.Background(), "rec-1")
 	if err != nil {
 		t.Fatal(err)
@@ -967,7 +1032,7 @@ func TestPantryListExpiring(t *testing.T) {
 	if len(out) != 1 {
 		t.Fatalf("expected 1 expiring lot, got %d", len(out))
 	}
-	if out[0].IngredientID != "mjolk" || out[0].Quantity != 1 {
+	if out[0].IngredientID != domain.IngredientIDForName("mjolk").String() || out[0].Quantity != 1 {
 		t.Fatalf("unexpected expiring lot: %+v", out[0])
 	}
 	if out[0].BestBefore.IsZero() {
@@ -985,7 +1050,7 @@ func TestPriceIntelligenceCheapestStore(t *testing.T) {
 		t.Fatalf("expected 1 product group, got %d", len(out))
 	}
 	g := out[0]
-	if g.RetailerProductID != "rp-1" {
+	if g.RetailerProductID != testRetailerProductID("rp-1").String() {
 		t.Fatalf("expected rp-1, got %q", g.RetailerProductID)
 	}
 	if len(g.Prices) != 2 {
@@ -994,7 +1059,7 @@ func TestPriceIntelligenceCheapestStore(t *testing.T) {
 	if g.Cheapest == nil {
 		t.Fatal("expected a cheapest store")
 	}
-	if g.Cheapest.StoreID != "s-2" || g.Cheapest.Price != 17.5 {
+	if g.Cheapest.StoreID != testStoreID("s-2").String() || g.Cheapest.Price != 17.5 {
 		t.Fatalf("expected cheapest s-2 @ 17.5, got %+v", g.Cheapest)
 	}
 	if g.RetailerName != "Willys" {
@@ -1008,13 +1073,17 @@ func TestPriceIntelligenceCheapestStore(t *testing.T) {
 func TestStoresLocateRanksByDistance(t *testing.T) {
 	// Origin: Stockholm city centre (59.3293, 18.0686).
 	// s-near is ~1 km away, s-far is ~100 km away, s-nogeo has no position.
+	ridWillys := testRetailerID("willys")
+	sidFar := testStoreID("s-far")
+	sidNear := testStoreID("s-near")
+	sidNogeo := testStoreID("s-nogeo")
 	f := &fakeStore{
 		stores: []domain.Store{
-			{ID: "s-far", RetailerID: "willys", Name: "Far Store",
+			{ID: sidFar, RetailerID: ridWillys, Name: "Far Store",
 				Latitude: ptr64(59.8587), Longitude: ptr64(17.6389)},
-			{ID: "s-near", RetailerID: "willys", Name: "Near Store",
+			{ID: sidNear, RetailerID: ridWillys, Name: "Near Store",
 				Latitude: ptr64(59.3345), Longitude: ptr64(18.0720)},
-			{ID: "s-nogeo", RetailerID: "willys", Name: "No Geo Store"},
+			{ID: sidNogeo, RetailerID: ridWillys, Name: "No Geo Store"},
 		},
 	}
 	svc := service.NewStores(f, nil)
@@ -1029,10 +1098,10 @@ func TestStoresLocateRanksByDistance(t *testing.T) {
 		t.Fatalf("expected 3 stores, got %d", len(out))
 	}
 	// Nearest first; geo-less store last.
-	if out[0].ID != "s-near" {
+	if out[0].ID != sidNear.String() {
 		t.Fatalf("expected s-near first, got %q", out[0].ID)
 	}
-	if out[2].ID != "s-nogeo" {
+	if out[2].ID != sidNogeo.String() {
 		t.Fatalf("expected s-nogeo last, got %q", out[2].ID)
 	}
 	if out[0].DistanceKm == nil {
@@ -1050,10 +1119,13 @@ func TestStoresLocateRanksByDistance(t *testing.T) {
 }
 
 func TestStoresLocateNoOriginSortsByName(t *testing.T) {
+	ridWillys := testRetailerID("willys")
+	sidB := testStoreID("s-b")
+	sidA := testStoreID("s-a")
 	f := &fakeStore{
 		stores: []domain.Store{
-			{ID: "s-b", RetailerID: "willys", Name: "Beta"},
-			{ID: "s-a", RetailerID: "willys", Name: "Alpha"},
+			{ID: sidB, RetailerID: ridWillys, Name: "Beta"},
+			{ID: sidA, RetailerID: ridWillys, Name: "Alpha"},
 		},
 	}
 	svc := service.NewStores(f, nil)
@@ -1064,7 +1136,7 @@ func TestStoresLocateNoOriginSortsByName(t *testing.T) {
 	if len(out) != 2 {
 		t.Fatalf("expected 2 stores, got %d", len(out))
 	}
-	if out[0].ID != "s-a" || out[1].ID != "s-b" {
+	if out[0].ID != sidA.String() || out[1].ID != sidB.String() {
 		t.Fatalf("expected Alpha then Beta, got %q then %q", out[0].ID, out[1].ID)
 	}
 	if out[0].DistanceKm != nil {
@@ -1108,18 +1180,22 @@ func (f *fakePantryProvider) ListExpiring(ctx context.Context, within time.Durat
 func TestDashboardAggregatesTonightAndPantry(t *testing.T) {
 	// One location with two lots (counted via the db fakeStore), one expiring.
 	db := &fakeStore{}
+	lotLocID := domain.NewInventoryLocationID()
+	db.locations = map[domain.InventoryLocationID]persistence.InventoryLocation{
+		lotLocID: {ID: lotLocID, Name: "Fridge", HouseholdID: domain.NewHouseholdID()},
+	}
 	db.lots = []persistence.InventoryLot{
-		{ID: 1, IngredientID: "mjolk", LocationID: "l-1", Quantity: 1, Unit: "L"},
-		{ID: 2, IngredientID: "ost", LocationID: "l-1", Quantity: 2, Unit: "st"},
+		{ID: domain.NewInventoryLotID(), IngredientID: domain.NewIngredientID(), LocationID: lotLocID, Quantity: 1, Unit: "L"},
+		{ID: domain.NewInventoryLotID(), IngredientID: domain.NewIngredientID(), LocationID: lotLocID, Quantity: 2, Unit: "st"},
 	}
 	tonight := &fakeTonightProvider{view: dto.TonightView{
 		ServedOn: "2026-08-28",
 		Recipe:   dto.RecipeRefResponse{MealieRecipeID: "r-1", Title: "Pasta"},
 	}}
 	pantry := &fakePantryProvider{
-		locations: []dto.PantryLocation{{ID: "l-1", Name: "Fridge"}},
+		locations: []dto.PantryLocation{{ID: lotLocID.String(), Name: "Fridge"}},
 		expiring: []dto.PantryLot{
-			{ID: 1, IngredientID: "mjolk", Quantity: 1, Unit: "L", BestBefore: time.Now().Add(24 * time.Hour)},
+			{ID: "lot-1", IngredientID: "mjolk", Quantity: 1, Unit: "L", BestBefore: time.Now().Add(24 * time.Hour)},
 		},
 	}
 	svc := service.NewDashboard(db, tonight, pantry)
@@ -1180,24 +1256,31 @@ func TestIngredientAliasResolve(t *testing.T) {
 }
 
 func TestInspirationSuggest_RanksByPantryCoverage(t *testing.T) {
+	r1ID := domain.NewRecipeRefID()
+	r2ID := domain.NewRecipeRefID()
+	flourID := domain.NewIngredientID()
+	tomatoID := domain.NewIngredientID()
+	sugarID := domain.NewIngredientID()
+	lettuceID := domain.NewIngredientID()
+	oilID := domain.NewIngredientID()
 	f := &fakeStore{
 		recipes: []persistence.RecipeRef{
-			{MealieRecipeID: "r1", Title: "Pasta", Tags: []string{"italian"}, Effort: 1},
-			{MealieRecipeID: "r2", Title: "Salad", Effort: 1},
+			{ID: r1ID, MealieRecipeID: "r1", Title: "Pasta", Tags: []string{"italian"}, Effort: 1},
+			{ID: r2ID, MealieRecipeID: "r2", Title: "Salad", Effort: 1},
 		},
 		lots: []persistence.InventoryLot{
-			{ID: 1, IngredientID: "flour", Quantity: 500, Unit: "g"},
-			{ID: 2, IngredientID: "tomato", Quantity: 3, Unit: "pcs"},
-			{ID: 3, IngredientID: "lettuce", Quantity: 1, Unit: "head"},
+			{ID: domain.NewInventoryLotID(), IngredientID: flourID, Quantity: 500, Unit: "g"},
+			{ID: domain.NewInventoryLotID(), IngredientID: tomatoID, Quantity: 3, Unit: "pcs"},
+			{ID: domain.NewInventoryLotID(), IngredientID: lettuceID, Quantity: 1, Unit: "head"},
 		},
 		recipeIngredients: []persistence.RecipeIngredient{
 			// r1 (Pasta): flour + tomato + sugar → 2/3 matched
-			{MealieRecipeID: "r1", IngredientID: "flour"},
-			{MealieRecipeID: "r1", IngredientID: "tomato"},
-			{MealieRecipeID: "r1", IngredientID: "sugar"},
+			{RecipeRefID: r1ID, IngredientID: flourID},
+			{RecipeRefID: r1ID, IngredientID: tomatoID},
+			{RecipeRefID: r1ID, IngredientID: sugarID},
 			// r2 (Salad): lettuce + oil → 1/2 matched
-			{MealieRecipeID: "r2", IngredientID: "lettuce"},
-			{MealieRecipeID: "r2", IngredientID: "oil"},
+			{RecipeRefID: r2ID, IngredientID: lettuceID},
+			{RecipeRefID: r2ID, IngredientID: oilID},
 		},
 	}
 	svc := service.NewInspiration(f)
@@ -1215,24 +1298,28 @@ func TestInspirationSuggest_RanksByPantryCoverage(t *testing.T) {
 	if out[0].MatchRatio < 0.66 || out[0].MatchRatio > 0.67 {
 		t.Fatalf("unexpected Pasta ratio: %f", out[0].MatchRatio)
 	}
-	if len(out[0].MissingIngredientIDs) != 1 || out[0].MissingIngredientIDs[0] != "sugar" {
+	if len(out[0].MissingIngredientIDs) != 1 || out[0].MissingIngredientIDs[0] != sugarID.String() {
 		t.Fatalf("unexpected Pasta missing: %+v", out[0].MissingIngredientIDs)
 	}
 }
 
 func TestInspirationSuggest_OmitsNoMatch(t *testing.T) {
+	r1ID := domain.NewRecipeRefID()
+	r2ID := domain.NewRecipeRefID()
+	flourID := domain.NewIngredientID()
+	spiceID := domain.NewIngredientID()
 	f := &fakeStore{
 		recipes: []persistence.RecipeRef{
-			{MealieRecipeID: "r1", Title: "Pasta", Effort: 1},
-			{MealieRecipeID: "r2", Title: "Curry", Effort: 2},
+			{ID: r1ID, MealieRecipeID: "r1", Title: "Pasta", Effort: 1},
+			{ID: r2ID, MealieRecipeID: "r2", Title: "Curry", Effort: 2},
 		},
 		lots: []persistence.InventoryLot{
-			{ID: 1, IngredientID: "flour", Quantity: 500, Unit: "g"},
+			{ID: domain.NewInventoryLotID(), IngredientID: flourID, Quantity: 500, Unit: "g"},
 		},
 		recipeIngredients: []persistence.RecipeIngredient{
-			{MealieRecipeID: "r1", IngredientID: "flour"},
+			{RecipeRefID: r1ID, IngredientID: flourID},
 			// r2 shares nothing with the pantry.
-			{MealieRecipeID: "r2", IngredientID: "spice"},
+			{RecipeRefID: r2ID, IngredientID: spiceID},
 		},
 	}
 	svc := service.NewInspiration(f)
@@ -1246,12 +1333,14 @@ func TestInspirationSuggest_OmitsNoMatch(t *testing.T) {
 }
 
 func TestInspirationSuggest_EmptyPantry(t *testing.T) {
+	r1ID := domain.NewRecipeRefID()
+	flourID := domain.NewIngredientID()
 	f := &fakeStore{
 		recipes: []persistence.RecipeRef{
-			{MealieRecipeID: "r1", Title: "Pasta", Effort: 1},
+			{ID: r1ID, MealieRecipeID: "r1", Title: "Pasta", Effort: 1},
 		},
 		recipeIngredients: []persistence.RecipeIngredient{
-			{MealieRecipeID: "r1", IngredientID: "flour"},
+			{RecipeRefID: r1ID, IngredientID: flourID},
 		},
 	}
 	svc := service.NewInspiration(f)

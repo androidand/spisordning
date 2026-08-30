@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -29,7 +30,7 @@ func (f *fakeShoppingListSvc) CreateShoppingList(_ context.Context, in ShoppingL
 	if f.err != nil {
 		return ShoppingListResponse{}, f.err
 	}
-	return ShoppingListResponse{ID: 1, Name: in.Name, Status: "active", CreatedAt: time.Now()}, nil
+	return ShoppingListResponse{ID: "01900000-0000-7000-8000-000000000001", Name: in.Name, Status: "active", CreatedAt: time.Now()}, nil
 }
 
 func (f *fakeShoppingListSvc) CreateFromChecklist(_ context.Context, in ShoppingListFromChecklistInput) (ShoppingListFromChecklistResponse, error) {
@@ -39,24 +40,24 @@ func (f *fakeShoppingListSvc) CreateFromChecklist(_ context.Context, in Shopping
 	items := make([]ShoppingListItemResponse, 0, len(in.Items))
 	for i, it := range in.Items {
 		items = append(items, ShoppingListItemResponse{
-			ID: i + 1, ShoppingListID: 1, Label: &it.Label,
+			ID: fmt.Sprintf("01900000-0000-7000-8000-0000000000%02d", i+1), ShoppingListID: "01900000-0000-7000-8000-000000000001", Label: &it.Label,
 			Quantity: it.Quantity, Unit: it.Unit, Checked: false, AddedAt: time.Now(),
 		})
 	}
 	return ShoppingListFromChecklistResponse{
-		ShoppingListResponse: ShoppingListResponse{ID: 1, Name: in.Name, Status: "active", CreatedAt: time.Now()},
+		ShoppingListResponse: ShoppingListResponse{ID: "01900000-0000-7000-8000-000000000001", Name: in.Name, Status: "active", CreatedAt: time.Now()},
 		Items:                items,
 	}, nil
 }
 
-func (f *fakeShoppingListSvc) GetShoppingList(_ context.Context, listID int64) (ShoppingListResponse, error) {
+func (f *fakeShoppingListSvc) GetShoppingList(_ context.Context, listID string) (ShoppingListResponse, error) {
 	if f.err != nil {
 		return ShoppingListResponse{}, f.err
 	}
-	return ShoppingListResponse{ID: int(listID), Name: "Test", Status: "active", CreatedAt: time.Now()}, nil
+	return ShoppingListResponse{ID: listID, Name: "Test", Status: "active", CreatedAt: time.Now()}, nil
 }
 
-func (f *fakeShoppingListSvc) ArchiveShoppingList(_ context.Context, listID int64) error {
+func (f *fakeShoppingListSvc) ArchiveShoppingList(_ context.Context, listID string) error {
 	if f.err != nil {
 		return f.err
 	}
@@ -65,7 +66,7 @@ func (f *fakeShoppingListSvc) ArchiveShoppingList(_ context.Context, listID int6
 
 func TestListShoppingLists_HappyPath(t *testing.T) {
 	svc := &fakeShoppingListSvc{
-		lists: []ShoppingListResponse{{ID: 1, Name: "Vecka 30", Status: "active"}},
+		lists: []ShoppingListResponse{{ID: "01900000-0000-7000-8000-000000000001", Name: "Vecka 30", Status: "active"}},
 	}
 	mux := newMux(t, Dependencies{ShoppingLists: svc})
 	rec := doGet(t, mux, "/shopping-lists")
@@ -113,7 +114,7 @@ func TestCreateShoppingListFromChecklist_HappyPath(t *testing.T) {
 	}
 	var got ShoppingListFromChecklistResponse
 	mustJSON(t, rec.Body.Bytes(), &got)
-	if got.ID != 1 || got.Name != "Köp Mat Andreas" || got.Status != "active" {
+	if got.ID != "01900000-0000-7000-8000-000000000001" || got.Name != "Köp Mat Andreas" || got.Status != "active" {
 		t.Fatalf("unexpected list: %+v", got.ShoppingListResponse)
 	}
 	if len(got.Items) != 2 {
@@ -163,8 +164,8 @@ func TestGetShoppingList_HappyPath(t *testing.T) {
 	}
 	var got ShoppingListResponse
 	mustJSON(t, rec.Body.Bytes(), &got)
-	if got.ID != 42 {
-		t.Fatalf("unexpected id: %d", got.ID)
+	if got.ID != "42" {
+		t.Fatalf("unexpected id: %s", got.ID)
 	}
 }
 
@@ -195,28 +196,28 @@ type fakeShoppingListItemSvc struct {
 	err   error
 }
 
-func (f *fakeShoppingListItemSvc) ListShoppingListItems(_ context.Context, listID int64) ([]ShoppingListItemResponse, error) {
+func (f *fakeShoppingListItemSvc) ListShoppingListItems(_ context.Context, listID string) ([]ShoppingListItemResponse, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
 	return f.items, nil
 }
 
-func (f *fakeShoppingListItemSvc) AddShoppingListItem(_ context.Context, listID int64, in ShoppingListItemInput) (ShoppingListItemResponse, error) {
+func (f *fakeShoppingListItemSvc) AddShoppingListItem(_ context.Context, listID string, in ShoppingListItemInput) (ShoppingListItemResponse, error) {
 	if f.err != nil {
 		return ShoppingListItemResponse{}, f.err
 	}
-	return ShoppingListItemResponse{ID: 1, ShoppingListID: int(listID), Quantity: in.Quantity, Unit: in.Unit, Checked: false}, nil
+	return ShoppingListItemResponse{ID: "01900000-0000-7000-8000-000000000001", ShoppingListID: listID, Quantity: in.Quantity, Unit: in.Unit, Checked: false}, nil
 }
 
-func (f *fakeShoppingListItemSvc) ToggleShoppingListItem(_ context.Context, listID, itemID int64, checked bool) (ShoppingListItemResponse, error) {
+func (f *fakeShoppingListItemSvc) ToggleShoppingListItem(_ context.Context, listID, itemID string, checked bool) (ShoppingListItemResponse, error) {
 	if f.err != nil {
 		return ShoppingListItemResponse{}, f.err
 	}
-	return ShoppingListItemResponse{ID: int(itemID), ShoppingListID: int(listID), Checked: checked}, nil
+	return ShoppingListItemResponse{ID: itemID, ShoppingListID: listID, Checked: checked}, nil
 }
 
-func (f *fakeShoppingListItemSvc) DeleteShoppingListItem(_ context.Context, listID, itemID int64) error {
+func (f *fakeShoppingListItemSvc) DeleteShoppingListItem(_ context.Context, listID, itemID string) error {
 	if f.err != nil {
 		return f.err
 	}
@@ -225,7 +226,7 @@ func (f *fakeShoppingListItemSvc) DeleteShoppingListItem(_ context.Context, list
 
 func TestListShoppingListItems_HappyPath(t *testing.T) {
 	svc := &fakeShoppingListItemSvc{
-		items: []ShoppingListItemResponse{{ID: 1, ShoppingListID: 1, Quantity: 500, Unit: "g", Checked: false}},
+		items: []ShoppingListItemResponse{{ID: "01900000-0000-7000-8000-000000000001", ShoppingListID: "01900000-0000-7000-8000-000000000001", Quantity: 500, Unit: "g", Checked: false}},
 	}
 	mux := newMux(t, Dependencies{ShoppingListItems: svc})
 	rec := doGet(t, mux, "/shopping-lists/1/items")
@@ -313,21 +314,21 @@ type fakeShoppingPushSvc struct {
 	err     error
 }
 
-func (f *fakeShoppingPushSvc) PushShoppingList(_ context.Context, listID int64, retailer string) (RetailerListBindingResponse, error) {
+func (f *fakeShoppingPushSvc) PushShoppingList(_ context.Context, listID string, retailer string) (RetailerListBindingResponse, error) {
 	if f.err != nil {
 		return RetailerListBindingResponse{}, f.err
 	}
-	return RetailerListBindingResponse{ID: 1, ShoppingListID: int(listID), Retailer: retailer, ExternalListID: "wl-123", SyncDirection: "outbound"}, nil
+	return RetailerListBindingResponse{ShoppingListID: listID, Retailer: retailer, ExternalListID: "wl-123", SyncDirection: "outbound"}, nil
 }
 
-func (f *fakeShoppingPushSvc) ListShoppingCarts(_ context.Context, listID int64) ([]ShoppingCartResponse, error) {
+func (f *fakeShoppingPushSvc) ListShoppingCarts(_ context.Context, listID string) ([]ShoppingCartResponse, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
 	return f.carts, nil
 }
 
-func (f *fakeShoppingPushSvc) ToCart(_ context.Context, listID int64, retailer string) (ShoppingCartResponse, error) {
+func (f *fakeShoppingPushSvc) ToCart(_ context.Context, listID string, retailer string) (ShoppingCartResponse, error) {
 	if f.err != nil {
 		return ShoppingCartResponse{}, f.err
 	}
@@ -353,7 +354,7 @@ func TestPushShoppingList_HappyPath(t *testing.T) {
 
 func TestListShoppingCarts_HappyPath(t *testing.T) {
 	svc := &fakeShoppingPushSvc{
-		carts: []ShoppingCartResponse{{ID: 1, RetailerListBindingID: 1, Status: "created"}},
+		carts: []ShoppingCartResponse{{ID: "01900000-0000-7000-8000-000000000001", Status: "created"}},
 	}
 	mux := newMux(t, Dependencies{ShoppingPush: svc})
 	rec := doGet(t, mux, "/shopping-lists/1/carts")
@@ -369,7 +370,7 @@ func TestListShoppingCarts_HappyPath(t *testing.T) {
 
 func TestToCart_HappyPath(t *testing.T) {
 	svc := &fakeShoppingPushSvc{
-		carts: []ShoppingCartResponse{{ID: 1, RetailerListBindingID: 1, Status: "created"}},
+		carts: []ShoppingCartResponse{{ID: "01900000-0000-7000-8000-000000000001", Status: "created"}},
 	}
 	mux := newMux(t, Dependencies{ShoppingPush: svc})
 	rec := doPost(t, mux, "/shopping-lists/1/push/to-cart?retailer=willys", "")
@@ -378,7 +379,7 @@ func TestToCart_HappyPath(t *testing.T) {
 	}
 	var got ShoppingCartResponse
 	mustJSON(t, rec.Body.Bytes(), &got)
-	if got.ID != 1 {
+	if got.ID != "01900000-0000-7000-8000-000000000001" {
 		t.Fatalf("unexpected cart: %+v", got)
 	}
 }
@@ -392,7 +393,7 @@ type fakeOrderSvc struct {
 	err    error
 }
 
-func (f *fakeOrderSvc) ListOrders(_ context.Context, retailer *string, cartID *int64) ([]OrderResponse, error) {
+func (f *fakeOrderSvc) ListOrders(_ context.Context, retailer *string, cartID *string) ([]OrderResponse, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -401,7 +402,7 @@ func (f *fakeOrderSvc) ListOrders(_ context.Context, retailer *string, cartID *i
 		if retailer != nil && o.Retailer != *retailer {
 			continue
 		}
-		if cartID != nil && (o.ShoppingCartID == nil || int64(*o.ShoppingCartID) != *cartID) {
+		if cartID != nil && (o.ShoppingCartID == nil || *o.ShoppingCartID != *cartID) {
 			continue
 		}
 		out = append(out, o)
@@ -409,14 +410,14 @@ func (f *fakeOrderSvc) ListOrders(_ context.Context, retailer *string, cartID *i
 	return out, nil
 }
 
-func (f *fakeOrderSvc) GetOrder(_ context.Context, orderID int64) (OrderViewResponse, error) {
+func (f *fakeOrderSvc) GetOrder(_ context.Context, orderID string) (OrderViewResponse, error) {
 	if f.err != nil {
 		return OrderViewResponse{}, f.err
 	}
 	return f.view, nil
 }
 
-func (f *fakeOrderSvc) ListOrderItems(_ context.Context, orderID int64) ([]OrderItemResponse, error) {
+func (f *fakeOrderSvc) ListOrderItems(_ context.Context, orderID string) ([]OrderItemResponse, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -425,7 +426,7 @@ func (f *fakeOrderSvc) ListOrderItems(_ context.Context, orderID int64) ([]Order
 
 func TestListOrders_HappyPath(t *testing.T) {
 	svc := &fakeOrderSvc{
-		orders: []OrderResponse{{ID: 1, Retailer: "willys", Source: "manual"}},
+		orders: []OrderResponse{{ID: "01900000-0000-7000-8000-000000000001", Retailer: "willys", Source: "manual"}},
 	}
 	mux := newMux(t, Dependencies{Orders: svc})
 	rec := doGet(t, mux, "/orders")
@@ -442,8 +443,8 @@ func TestListOrders_HappyPath(t *testing.T) {
 func TestGetOrder_HappyPath(t *testing.T) {
 	svc := &fakeOrderSvc{
 		view: OrderViewResponse{
-			Order: OrderResponse{ID: 1, Retailer: "willys", Source: "manual"},
-			Items: []OrderItemResponse{{ID: 1, OrderID: 1, RetailerProductID: "prod-1", Quantity: 2}},
+			Order: OrderResponse{ID: "01900000-0000-7000-8000-000000000001", Retailer: "willys", Source: "manual"},
+			Items: []OrderItemResponse{{ID: "01900000-0000-7000-8000-000000000002", OrderID: "01900000-0000-7000-8000-000000000001", RetailerProductID: "prod-1", Quantity: 2}},
 		},
 	}
 	mux := newMux(t, Dependencies{Orders: svc})
@@ -453,14 +454,14 @@ func TestGetOrder_HappyPath(t *testing.T) {
 	}
 	var got OrderViewResponse
 	mustJSON(t, rec.Body.Bytes(), &got)
-	if got.Order.ID != 1 || len(got.Items) != 1 {
+	if got.Order.ID != "01900000-0000-7000-8000-000000000001" || len(got.Items) != 1 {
 		t.Fatalf("unexpected view: %+v", got)
 	}
 }
 
 func TestListOrderItems_HappyPath(t *testing.T) {
 	svc := &fakeOrderSvc{
-		items: []OrderItemResponse{{ID: 1, OrderID: 1, RetailerProductID: "prod-1", Quantity: 2}},
+		items: []OrderItemResponse{{ID: "01900000-0000-7000-8000-000000000001", OrderID: "01900000-0000-7000-8000-000000000001", RetailerProductID: "prod-1", Quantity: 2}},
 	}
 	mux := newMux(t, Dependencies{Orders: svc})
 	rec := doGet(t, mux, "/orders/1/items")
@@ -476,7 +477,7 @@ func TestListOrderItems_HappyPath(t *testing.T) {
 
 func TestListOrders_FilterByRetailer(t *testing.T) {
 	svc := &fakeOrderSvc{
-		orders: []OrderResponse{{ID: 1, Retailer: "willys"}, {ID: 2, Retailer: "ica"}},
+		orders: []OrderResponse{{ID: "01900000-0000-7000-8000-000000000001", Retailer: "willys"}, {ID: "01900000-0000-7000-8000-000000000002", Retailer: "ica"}},
 	}
 	mux := newMux(t, Dependencies{Orders: svc})
 	rec := doGet(t, mux, "/orders?retailer=willys")

@@ -174,7 +174,7 @@ func TestListRecipeCandidates_InvalidDate(t *testing.T) {
 
 func TestRecordMealReaction(t *testing.T) {
 	reactions := &fakeReactions{res: mcptools.RecordReactionResult{
-		MealEventID: 42, Recipe: "r1", ServedOn: "2026-08-20", PersonID: "p1", Sentiment: 2,
+		MealEventID: "meal-42", Recipe: "r1", ServedOn: "2026-08-20", PersonID: "p1", Sentiment: 2,
 	}}
 	cs := connectServer(t, mcptools.Dependencies{Reactions: reactions})
 
@@ -191,7 +191,7 @@ func TestRecordMealReaction(t *testing.T) {
 		t.Fatalf("unexpected tool error: %+v", res)
 	}
 	got := structured[mcptools.RecordReactionResult](t, res)
-	if got.MealEventID != 42 || got.Sentiment != 2 {
+	if got.MealEventID != "meal-42" || got.Sentiment != 2 {
 		t.Fatalf("unexpected result: %+v", got)
 	}
 	if reactions.calls != 1 {

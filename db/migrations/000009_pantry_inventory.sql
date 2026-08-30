@@ -14,12 +14,13 @@ CREATE EXTENSION IF NOT EXISTS unaccent;
 -- distinct locations. parent_location_id supports arbitrary-depth nesting; most locations are
 -- expected to stay flat (NULL parent) — nesting is opt-in, not imposed (D9).
 CREATE TABLE inventory_location (
-    id                  TEXT PRIMARY KEY,
-    household_id        TEXT NOT NULL REFERENCES household(id) ON DELETE CASCADE,
+    id                  UUID PRIMARY KEY,
+    slug                TEXT NOT NULL UNIQUE,
+    household_id        UUID NOT NULL REFERENCES household(id) ON DELETE CASCADE,
     name                TEXT NOT NULL,
     location_type       TEXT CHECK (location_type IN
                           ('CUPBOARD','DRAWER','FRIDGE','FREEZER','BASEMENT','BALCONY','BREADBOX','OTHER')),
-    parent_location_id  TEXT REFERENCES inventory_location(id),
+    parent_location_id  UUID REFERENCES inventory_location(id),
     archived_at         TIMESTAMPTZ
 );
 CREATE INDEX ON inventory_location (household_id);
@@ -32,11 +33,11 @@ CREATE INDEX ON inventory_location (parent_location_id);
 -- transaction as the inventory_event causing it (D2, invariant 3) — application code is the
 -- only thing enforcing that, not a trigger, matching this schema's existing style.
 CREATE TABLE inventory_lot (
-    id            BIGSERIAL PRIMARY KEY,
-    ingredient_id TEXT NOT NULL REFERENCES ingredient(id),
-    product_id    TEXT REFERENCES product(id),
-    location_id   TEXT NOT NULL REFERENCES inventory_location(id),
-    quantity      DOUBLE PRECISION NOT NULL,
+    id            UUID PRIMARY KEY,
+    ingredient_id UUID NOT NULL REFERENCES ingredient(id),
+    product_id    UUID REFERENCES product(id),
+    location_id   UUID NOT NULL REFERENCES inventory_location(id),
+    quantity      numeric(12,3) NOT NULL,
     unit          TEXT NOT NULL,
     confidence    TEXT NOT NULL CHECK (confidence IN ('EXACT','LIKELY','ESTIMATED','UNKNOWN')),
     best_before   DATE,
@@ -55,15 +56,15 @@ CREATE INDEX ON inventory_lot (confidence) WHERE confidence = 'UNKNOWN';
 -- invariant 6). ingredient_id/product_id are only populated on PURCHASE, where they establish a
 -- new lot's identity (product_id nullable per D8); other kinds reference the lot they mutate.
 CREATE TABLE inventory_event (
-    id                BIGSERIAL PRIMARY KEY,
+    id                UUID PRIMARY KEY,
     kind              TEXT NOT NULL CHECK (kind IN
                         ('PURCHASE','CONSUME','DISCARD','ADJUST','TRANSFER','OPEN')),
-    lot_id            BIGINT REFERENCES inventory_lot(id),
-    ingredient_id     TEXT REFERENCES ingredient(id),
-    product_id        TEXT REFERENCES product(id),
-    from_location_id  TEXT REFERENCES inventory_location(id),
-    to_location_id    TEXT REFERENCES inventory_location(id),
-    quantity_delta    DOUBLE PRECISION NOT NULL,
+    lot_id            UUID REFERENCES inventory_lot(id),
+    ingredient_id     UUID REFERENCES ingredient(id),
+    product_id        UUID REFERENCES product(id),
+    from_location_id  UUID REFERENCES inventory_location(id),
+    to_location_id    UUID REFERENCES inventory_location(id),
+    quantity_delta    numeric(12,3) NOT NULL,
     reason            TEXT,
     source            TEXT NOT NULL,
     recorded_at       TIMESTAMPTZ NOT NULL DEFAULT now()

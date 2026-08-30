@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"strconv"
 	"testing"
 	"time"
 
@@ -28,8 +27,8 @@ func TestIntegration_PlanLifecycle(t *testing.T) {
 	if plan.Status != "draft" {
 		t.Fatalf("status = %q, want draft", plan.Status)
 	}
-	if plan.ID == 0 {
-		t.Fatal("plan ID is 0")
+	if plan.ID == "" {
+		t.Fatal("plan ID is empty")
 	}
 
 	// 2. List plans — should include the created plan.
@@ -51,19 +50,19 @@ func TestIntegration_PlanLifecycle(t *testing.T) {
 	}
 
 	// 3. Get plan — should return plan with empty candidates/decisions.
-	rec = doGet(t, mux, "/plans/"+strconv.Itoa(plan.ID))
+	rec = doGet(t, mux, "/plans/"+plan.ID)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("get plan: status = %d, body: %s", rec.Code, rec.Body)
 	}
 	var view PlanView
 	mustJSON(t, rec.Body.Bytes(), &view)
 	if view.Plan.ID != plan.ID {
-		t.Fatalf("plan ID mismatch: %d vs %d", view.Plan.ID, plan.ID)
+		t.Fatalf("plan ID mismatch: %s vs %s", view.Plan.ID, plan.ID)
 	}
 
 	// 4. Update plan status to approved.
 	body, _ = json.Marshal(map[string]string{"status": "approved"})
-	rec = doPatch(t, mux, "/plans/"+strconv.Itoa(plan.ID), string(body))
+	rec = doPatch(t, mux, "/plans/"+plan.ID, string(body))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("update plan: status = %d, body: %s", rec.Code, rec.Body)
 	}
@@ -74,7 +73,7 @@ func TestIntegration_PlanLifecycle(t *testing.T) {
 	}
 
 	// 5. Get plan after approval.
-	rec = doGet(t, mux, "/plans/"+strconv.Itoa(plan.ID))
+	rec = doGet(t, mux, "/plans/"+plan.ID)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("get plan after approve: status = %d", rec.Code)
 	}
@@ -117,7 +116,7 @@ func TestIntegration_PlanDecisions(t *testing.T) {
 		{SlotDate: types.Date{Time: time.Date(2026, 9, 2, 0, 0, 0, 0, time.UTC)}, MealieRecipeID: "r-2"},
 	}
 	body, _ = json.Marshal(decisions)
-	rec = doPost(t, mux, "/plans/"+strconv.Itoa(plan.ID)+"/decisions", string(body))
+	rec = doPost(t, mux, "/plans/"+plan.ID+"/decisions", string(body))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("set decisions: status = %d, body: %s", rec.Code, rec.Body)
 	}
@@ -128,7 +127,7 @@ func TestIntegration_PlanDecisions(t *testing.T) {
 	}
 
 	// Verify via get plan.
-	rec = doGet(t, mux, "/plans/"+strconv.Itoa(plan.ID))
+	rec = doGet(t, mux, "/plans/"+plan.ID)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("get plan: status = %d", rec.Code)
 	}
@@ -207,7 +206,7 @@ func TestIntegration_PlanningConstraint(t *testing.T) {
 		}
 	}
 	if !constraintFound {
-		t.Fatalf("created constraint %d not found in list of %d constraints", constraint.ID, len(constraints))
+		t.Fatalf("created constraint %s not found in list of %d constraints", constraint.ID, len(constraints))
 	}
 }
 
@@ -226,7 +225,7 @@ func TestIntegration_ShoppingRequirements(t *testing.T) {
 	mustJSON(t, rec.Body.Bytes(), &plan)
 
 	// List shopping requirements — should be empty.
-	rec = doGet(t, mux, "/plans/"+strconv.Itoa(plan.ID)+"/shopping-requirements")
+	rec = doGet(t, mux, "/plans/"+plan.ID+"/shopping-requirements")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("list shopping reqs: status = %d", rec.Code)
 	}

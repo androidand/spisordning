@@ -17,7 +17,7 @@ func TestNewPersonRestriction(t *testing.T) {
 	}
 	for _, c := range valid {
 		t.Run(c.name, func(t *testing.T) {
-			r, err := NewPersonRestriction("p1", "peanut", c.kind, "peanut allergy", "parent", at)
+			r, err := NewPersonRestriction(NewPersonID(), "peanut", c.kind, "peanut allergy", "parent", at)
 			if err != nil {
 				t.Fatalf("NewPersonRestriction(%s): %v", c.kind, err)
 			}
@@ -32,15 +32,15 @@ func TestNewPersonRestriction(t *testing.T) {
 
 	invalid := []struct {
 		name       string
-		personID   string
+		personID   PersonID
 		tag        string
 		kind       RestrictionKind
 		recordedBy string
 	}{
-		{"invalid kind", "p1", "peanut", RestrictionKind("LIKES"), "parent"},
-		{"empty person", "", "peanut", RestrictionAllergy, "parent"},
-		{"empty tag", "p1", "", RestrictionAllergy, "parent"},
-		{"unattributed", "p1", "peanut", RestrictionAllergy, ""},
+		{"invalid kind", NewPersonID(), "peanut", RestrictionKind("LIKES"), "parent"},
+		{"empty person", PersonID{}, "peanut", RestrictionAllergy, "parent"},
+		{"empty tag", NewPersonID(), "", RestrictionAllergy, "parent"},
+		{"unattributed", NewPersonID(), "peanut", RestrictionAllergy, ""},
 	}
 	for _, c := range invalid {
 		t.Run(c.name, func(t *testing.T) {
@@ -53,7 +53,7 @@ func TestNewPersonRestriction(t *testing.T) {
 
 func TestPersonRestrictionClear(t *testing.T) {
 	at := time.Now()
-	r, err := NewPersonRestriction("p1", "peanut", RestrictionAllergy, "", "parent", at)
+	r, err := NewPersonRestriction(NewPersonID(), "peanut", RestrictionAllergy, "", "parent", at)
 	if err != nil {
 		t.Fatalf("NewPersonRestriction: %v", err)
 	}
@@ -78,9 +78,9 @@ func TestPersonRestrictionClear(t *testing.T) {
 
 func TestAvoidTagsOnlyFromRestrictions(t *testing.T) {
 	at := time.Now()
-	allergy, _ := NewPersonRestriction("p1", "peanut", RestrictionAllergy, "", "parent", at)
-	hard, _ := NewPersonRestriction("p1", "gluten", RestrictionHardRestriction, "", "parent", at)
-	cleared, _ := NewPersonRestriction("p1", "dairy", RestrictionAllergy, "", "parent", at)
+	allergy, _ := NewPersonRestriction(NewPersonID(), "peanut", RestrictionAllergy, "", "parent", at)
+	hard, _ := NewPersonRestriction(NewPersonID(), "gluten", RestrictionHardRestriction, "", "parent", at)
+	cleared, _ := NewPersonRestriction(NewPersonID(), "dairy", RestrictionAllergy, "", "parent", at)
 	cleared, _ = cleared.Clear("parent", at)
 
 	avoid := AvoidTags([]PersonRestriction{allergy, hard, cleared})
@@ -95,14 +95,14 @@ func TestAvoidTagsOnlyFromRestrictions(t *testing.T) {
 	// Invariant 2/3 made concrete: a scored DISLIKE is a Preference, a different
 	// type that cannot reach AvoidTags. A strong negative preference is advisory,
 	// never a safety constraint — the avoid set is built only from restrictions.
-	_ = []Preference{{PersonID: "p1", Tag: "peanut", Sentiment: Hates, Confidence: 1.0}}
+	_ = []Preference{{PersonID: NewPersonID(), Tag: "peanut", Sentiment: Hates, Confidence: 1.0}}
 }
 
 func TestHouseholdMembershipActive(t *testing.T) {
-	if !(HouseholdMembership{HouseholdID: "h1", PersonID: "p1"}).Active() {
+	if !(HouseholdMembership{HouseholdID: NewHouseholdID(), PersonID: NewPersonID()}).Active() {
 		t.Error("a membership with no ended_at should be active")
 	}
-	if (HouseholdMembership{HouseholdID: "h1", PersonID: "p1", EndedAt: time.Now()}).Active() {
+	if (HouseholdMembership{HouseholdID: NewHouseholdID(), PersonID: NewPersonID(), EndedAt: time.Now()}).Active() {
 		t.Error("a membership with an ended_at should not be active")
 	}
 }
