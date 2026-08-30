@@ -331,16 +331,25 @@ confidently match back to one it ingested — if the note was hand-edited betwee
 that breaks the match, skip that item and leave it alone rather than guess. This avoids ever
 destroying something Andreas typed by hand.
 
-- [ ] 8.1 Design the match key: how an outbound "this item is resolved" write finds the right
+- [x] 8.1 Design the match key: how an outbound "this item is resolved" write finds the right
       checklist line again after a round trip (normalized label + originating `shopping_list_id`
       stored in spisordning, not fuzzy text matching against the live note each time).
+
+      ✅ Done 2026-08-31. `domain.NormalizeLabel` produces the normalized label; the
+      `note_match_key` column (migration `000017_shopping_list_item_note_sync.sql`) stores it
+      alongside the originating `shopping_list_id`, so the outbound write matches on the stored key
+      rather than fuzzy-matching the live note.
 - [ ] 8.2 Design what "resolved" means for the write-back: at minimum, checked off once pushed to
       a retailer wishlist (`push_shopping_wishlist` already has this event) — decide whether price
       gets appended as an annotation (e.g. "- Mjölk (29,90 kr, Willys)") or left off to keep the
       note clean; this is Andreas's call, ask rather than assume.
-- [ ] 8.3 Add a spisordning-side endpoint (or extend the existing shopping-list item update path)
+- [x] 8.3 Add a spisordning-side endpoint (or extend the existing shopping-list item update path)
       that returns "items resolved since last sync" for a given list, so the Mac-side bridge has
       something cheap to poll instead of re-diffing the whole list every run.
+
+      ✅ Done 2026-08-31. `GET /shopping-lists/{id}/items/resolved-since?since=<rfc3339>` is
+      served by `httpapi/shopping.go` and backed by `persistence.ListResolvedItemsSince`, returning
+      only items resolved after the given timestamp for the given list.
 - [ ] 8.4 Extend `apps/notes-sync/spisordning-bridge.ts` (sibling `willys-client` repo) with the
       write-back half: poll the new endpoint, then use `notes.ts`'s existing osascript writer (or
       add one, matching its established pattern) to check off just the matched lines.
