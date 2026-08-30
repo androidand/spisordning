@@ -13,6 +13,7 @@ import (
 
 	"github.com/androidand/spisordning/internal/config"
 	"github.com/androidand/spisordning/internal/domain"
+	"github.com/androidand/spisordning/internal/dto"
 	"github.com/androidand/spisordning/internal/mcptools"
 	"github.com/androidand/spisordning/internal/persistence"
 	"github.com/androidand/spisordning/internal/planning"
@@ -34,6 +35,8 @@ type mcpStoreAdapter struct {
 	// that as an error rather than nil-dereferencing, same degrade-gracefully
 	// pattern as the rest of buildMCPDeps.
 	recipes *service.Recipes
+	// discovery delegates the recipe-discovery tools to the application layer.
+	discovery *service.Discovery
 }
 
 // PlanDinners loads the household and recipe candidates, then delegates to the
@@ -265,6 +268,78 @@ func (a mcpStoreAdapter) StructureRecipe(ctx context.Context, rawText string) (m
 		})
 	}
 	return out, nil
+}
+
+// DiscoverFromURL fetches an external recipe URL, stages it as a review
+// candidate, and maps the result onto the mcptools DTO.
+func (a mcpStoreAdapter) DiscoverFromURL(ctx context.Context, in mcptools.DiscoverRecipeInput) (mcptools.ImportCandidate, error) {
+	res, err := a.discovery.DiscoverFromURL(ctx, dto.DiscoverRecipeInput{URL: in.URL, SourceID: in.SourceID})
+	if err != nil {
+		return mcptools.ImportCandidate{}, err
+	}
+	return toMCPCandidate(res), nil
+}
+
+// ListCandidates lists staged recipe import candidates, optionally filtered by
+// status, and maps them onto the mcptools DTO.
+func (a mcpStoreAdapter) ListCandidates(ctx context.Context, status *string) ([]mcptools.ImportCandidate, error) {
+	res, err := a.discovery.ListCandidates(ctx, status)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]mcptools.ImportCandidate, 0, len(res))
+	for _, c := range res {
+		out = append(out, toMCPCandidate(c))
+	}
+	return out, nil
+}
+
+// GetCandidate fetches one staged recipe import candidate by id and maps it
+// onto the mcptools DTO.
+func (a mcpStoreAdapter) GetCandidate(ctx context.Context, id string) (mcptools.ImportCandidate, error) {
+	res, err := a.discovery.GetCandidate(ctx, id)
+	if err != nil {
+		return mcptools.ImportCandidate{}, err
+	}
+	return toMCPCandidate(res), nil
+}
+
+// RejectCandidate rejects a staged recipe import candidate that has not been
+// promoted.
+func (a mcpStoreAdapter) RejectCandidate(ctx context.Context, id string) error {
+	return a.discovery.RejectCandidate(ctx, id)
+}
+
+// PromoteCandidate promotes a staged recipe import candidate into the native
+// recipe_family hierarchy and maps the result onto the mcptools DTO.
+func (a mcpStoreAdapter) PromoteCandidate(ctx context.Context, id string, familyID *string) (mcptools.PromoteCandidateResult, error) {
+	res, err := a.discovery.PromoteCandidate(ctx, id, dto.PromoteCandidateInput{FamilyID: familyID})
+	if err != nil {
+		return mcptools.PromoteCandidateResult{}, err
+	}
+	return mcptools.PromoteCandidateResult{
+		FamilyID: res.FamilyID, VariantID: res.VariantID, RevisionID: res.RevisionID, CandidateStatus: res.CandidateStatus,
+	}, nil
+}
+
+// toMCPCandidate maps a dto.ImportCandidateResponse onto the mcptools view.
+func toMCPCandidate(c dto.ImportCandidateResponse) mcptools.ImportCandidate {
+	out := mcptools.ImportCandidate{
+		ID: c.ID, SourceID: c.SourceID, SourceURL: c.SourceURL, ExternalID: c.ExternalID,
+		Title: c.Title, Description: c.Description, ImageURL: c.ImageURL, Servings: c.Servings,
+		PrepTimeSec: c.PrepTimeSec, CookTimeSec: c.CookTimeSec, TotalTimeSec: c.TotalTimeSec,
+		Category: c.Category, Cuisine: c.Cuisine, Attribution: c.Attribution, Rating: c.Rating,
+		RatingCount: c.RatingCount, LicenseNote: c.LicenseNote, ImportedAt: c.ImportedAt,
+		Status: c.Status, PromotedVariantID: c.PromotedVariantID,
+	}
+	out.Ingredients = make([]mcptools.DiscoveryIngredient, 0, len(c.Ingredients))
+	for _, ing := range c.Ingredients {
+		out.Ingredients = append(out.Ingredients, mcptools.DiscoveryIngredient{
+			LineNo: ing.LineNo, RawText: ing.RawText, Quantity: ing.Quantity, Unit: ing.Unit,
+			IngredientID: ing.IngredientID, NeedsReview: ing.NeedsReview,
+		})
+	}
+	return out
 }
 
 // loadCandidates builds the planner's candidate list from the cached recipe

@@ -101,12 +101,14 @@ func buildMCPDeps(logger *slog.Logger) mcptools.Dependencies {
 	} else {
 		logger.Warn("no Mealie instance configured (MEALIE_BASE_URL/MEALIE_API_TOKEN unset); structure_recipe not registered")
 	}
+	adapter.discovery = service.NewDiscovery(store, service.NewRecipeFamily(store), nil)
 	deps.Planner = adapter
 	deps.Reactions = adapter
 	deps.Requirements = adapter
 	deps.ShoppingList = adapter
 	deps.Compare = adapter
 	deps.Wishlist = adapter
+	deps.Discovery = adapter
 	if adapter.recipes != nil {
 		deps.RecipeStructuring = adapter
 	}

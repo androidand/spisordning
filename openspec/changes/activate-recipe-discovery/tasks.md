@@ -65,16 +65,17 @@
 
 ## 7. MCP tools
 
-- [ ] 7.1 Add MCP input/output types for discovery in `internal/mcptools/mcptools.go`.
-- [ ] 7.2 Add a `DiscoveryService` interface to `mcptools` matching the service surface needed by
+- [x] 7.1 Add MCP input/output types for discovery in `internal/mcptools/mcptools.go`.
+  Done in `internal/mcptools/discovery.go` (input/output types, service interface, handlers).
+- [x] 7.2 Add a `DiscoveryService` interface to `mcptools` matching the service surface needed by
   the tools.
-- [ ] 7.3 Add `Discovery` to `mcptools.Dependencies`.
-- [ ] 7.4 Register `discover_recipe` when `deps.Discovery != nil`.
-- [ ] 7.5 Register `list_import_candidates` when `deps.Discovery != nil`.
-- [ ] 7.6 Register `get_import_candidate` when `deps.Discovery != nil`.
-- [ ] 7.7 Register `reject_import_candidate` when `deps.Discovery != nil`.
-- [ ] 7.8 Register `promote_import_candidate` when `deps.Discovery != nil`.
-- [ ] 7.9 Implement the `cmd/mcp-server` adapter methods that delegate to `service.Discovery`.
+- [x] 7.3 Add `Discovery` to `mcptools.Dependencies`.
+- [x] 7.4 Register `discover_recipe` when `deps.Discovery != nil`.
+- [x] 7.5 Register `list_import_candidates` when `deps.Discovery != nil`.
+- [x] 7.6 Register `get_import_candidate` when `deps.Discovery != nil`.
+- [x] 7.7 Register `reject_import_candidate` when `deps.Discovery != nil`.
+- [x] 7.8 Register `promote_import_candidate` when `deps.Discovery != nil`.
+- [x] 7.9 Implement the `cmd/mcp-server` adapter methods that delegate to `service.Discovery`.
 
 ## 8. Frontend
 

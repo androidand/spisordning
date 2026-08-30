@@ -59,6 +59,48 @@ func (f *fakeRequirements) ShoppingRequirements(_ context.Context, _ []string) (
 	return f.reqs, nil
 }
 
+type fakeDiscovery struct {
+	calls       int
+	lastURL     string
+	lastStatus  *string
+	lastID      string
+	lastFamily  *string
+	candidate   mcptools.ImportCandidate
+	candidates  []mcptools.ImportCandidate
+	promoteRes  mcptools.PromoteCandidateResult
+}
+
+func (f *fakeDiscovery) DiscoverFromURL(_ context.Context, in mcptools.DiscoverRecipeInput) (mcptools.ImportCandidate, error) {
+	f.calls++
+	f.lastURL = in.URL
+	return f.candidate, nil
+}
+
+func (f *fakeDiscovery) ListCandidates(_ context.Context, status *string) ([]mcptools.ImportCandidate, error) {
+	f.calls++
+	f.lastStatus = status
+	return f.candidates, nil
+}
+
+func (f *fakeDiscovery) GetCandidate(_ context.Context, id string) (mcptools.ImportCandidate, error) {
+	f.calls++
+	f.lastID = id
+	return f.candidate, nil
+}
+
+func (f *fakeDiscovery) RejectCandidate(_ context.Context, id string) error {
+	f.calls++
+	f.lastID = id
+	return nil
+}
+
+func (f *fakeDiscovery) PromoteCandidate(_ context.Context, id string, familyID *string) (mcptools.PromoteCandidateResult, error) {
+	f.calls++
+	f.lastID = id
+	f.lastFamily = familyID
+	return f.promoteRes, nil
+}
+
 // startServer builds the real MCP server with the given deps and serves it over
 // Streamable HTTP on a throwaway httptest server, returning the MCP endpoint URL.
 func startServer(t *testing.T, deps mcptools.Dependencies) string {
@@ -250,4 +292,119 @@ func TestIntegration_SevenDayPlanWithAllSlots(t *testing.T) {
 	if reactions.last.Slot != "breakfast" {
 		t.Errorf("slot = %q, want breakfast", reactions.last.Slot)
 	}
+}
+
+// TestIntegration_DiscoveryTools drives the five recipe-discovery tools end-to-end
+// over Streamable HTTP via the SDK client: list the tools, discover a URL, and
+// promote a candidate, asserting both the responses and the side effects on the
+// fake service.
+func TestIntegration_DiscoveryTools(t *testing.T) {
+	candidate := mcptools.ImportCandidate{
+		ID: "cand-1", SourceID: "web-jsonld", SourceURL: "https://example.com/recipe",
+		Title: "Pasta", Status: "candidate", ImportedAt: time.Now(),
+		Ingredients: []mcptools.DiscoveryIngredient{{LineNo: 1, RawText: "200 g spaghetti", Quantity: ptr(200.0), Unit: "g", NeedsReview: false}},
+	}
+	discovery := &fakeDiscovery{
+		candidate:  candidate,
+		candidates: []mcptools.ImportCandidate{candidate},
+		promoteRes: mcptools.PromoteCandidateResult{FamilyID: "fam-1", VariantID: "var-1", RevisionID: "rev-1", CandidateStatus: "promoted"},
+	}
+	deps := mcptools.Dependencies{Discovery: discovery}
+
+	cs := connectClient(t, startServer(t, deps))
+
+	list, err := cs.ListTools(context.Background(), &mcp.ListToolsParams{})
+	if err != nil {
+		t.Fatalf("list tools: %v", err)
+	}
+	names := toolNames(list.Tools)
+	for _, want := range []string{"discover_recipe", "list_import_candidates", "get_import_candidate", "reject_import_candidate", "promote_import_candidate"} {
+		if !contains(names, want) {
+			t.Fatalf("expected tool %q to be registered, got %v", want, names)
+		}
+	}
+
+	// discover_recipe stages a URL and returns the candidate.
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "discover_recipe",
+		Arguments: map[string]any{"url": "https://example.com/recipe"},
+	})
+	if err != nil {
+		t.Fatalf("call discover_recipe: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected tool error: %+v", res)
+	}
+	got := structured[mcptools.ImportCandidate](t, res)
+	if got.ID != "cand-1" || got.Title != "Pasta" {
+		t.Fatalf("unexpected discover result: %+v", got)
+	}
+	if discovery.lastURL != "https://example.com/recipe" {
+		t.Fatalf("fake discovery lastURL = %q, want the requested URL", discovery.lastURL)
+	}
+
+	// list_import_candidates with a status filter passes the filter through.
+	res, err = cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "list_import_candidates",
+		Arguments: map[string]any{"status": "candidate"},
+	})
+	if err != nil {
+		t.Fatalf("call list_import_candidates: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected tool error: %+v", res)
+	}
+	gotList := structured[[]mcptools.ImportCandidate](t, res)
+	if len(gotList) != 1 || gotList[0].ID != "cand-1" {
+		t.Fatalf("unexpected list result: %+v", gotList)
+	}
+	if discovery.lastStatus == nil || *discovery.lastStatus != "candidate" {
+		t.Fatalf("fake discovery lastStatus = %v, want candidate", discovery.lastStatus)
+	}
+
+	// reject_import_candidate marks the candidate rejected.
+	res, err = cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "reject_import_candidate",
+		Arguments: map[string]any{"id": "cand-1"},
+	})
+	if err != nil {
+		t.Fatalf("call reject_import_candidate: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected tool error: %+v", res)
+	}
+	gotReject := structured[mcptools.RejectCandidateResult](t, res)
+	if gotReject.ID != "cand-1" || gotReject.Status != "rejected" {
+		t.Fatalf("unexpected reject result: %+v", gotReject)
+	}
+
+	// promote_import_candidate promotes the candidate and returns the family/variant/revision.
+	res, err = cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "promote_import_candidate",
+		Arguments: map[string]any{"id": "cand-1"},
+	})
+	if err != nil {
+		t.Fatalf("call promote_import_candidate: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected tool error: %+v", res)
+	}
+	gotPromote := structured[mcptools.PromoteCandidateResult](t, res)
+	if gotPromote.FamilyID != "fam-1" || gotPromote.VariantID != "var-1" || gotPromote.RevisionID != "rev-1" || gotPromote.CandidateStatus != "promoted" {
+		t.Fatalf("unexpected promote result: %+v", gotPromote)
+	}
+	if discovery.lastFamily != nil {
+		t.Fatalf("fake discovery lastFamily = %v, want nil (no family_id given)", discovery.lastFamily)
+	}
+}
+
+func ptr(v float64) *float64 { return &v }
+
+func contains(xs []string, want string) bool {
+	for _, x := range xs {
+		if x == want {
+			return true
+		}
+	}
+	return false
 }

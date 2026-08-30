@@ -117,6 +117,9 @@ type Dependencies struct {
 	Compare           PriceComparisonService
 	Wishlist          WishlistService
 	RecipeStructuring RecipeStructuringService
+	// Discovery is optional: when nil, the five recipe-discovery tools are
+	// not registered.
+	Discovery DiscoveryService
 }
 
 // RegisterTools adds the initial tool set to s. Each tool calls exactly one
@@ -163,6 +166,28 @@ func RegisterTools(s *mcp.Server, deps Dependencies) {
 			Name:        "structure_recipe",
 			Description: "Turn a freeform pasted recipe (a title line, a loose ingredient list, and an optional \"Gör så här\"/\"Instruktioner\"-style steps block) into a real, structured Mealie recipe. Handles real home-cook shorthand: inconsistent quantities, brand asides, bare ingredients with no amount. Returns the created recipe plus which ingredient lines it wasn't confident about, so the caller can flag them rather than presenting a guess as fact.",
 		}, structureRecipeHandler(deps.RecipeStructuring))
+	}
+	if deps.Discovery != nil {
+		mcp.AddTool(s, &mcp.Tool{
+			Name:        "discover_recipe",
+			Description: "Fetch an external recipe URL, extract its JSON-LD, and stage it as a review candidate. Returns the staged candidate with its parsed ingredients and any lines that need review.",
+		}, discoverRecipeHandler(deps.Discovery))
+		mcp.AddTool(s, &mcp.Tool{
+			Name:        "list_import_candidates",
+			Description: "List staged recipe import candidates, optionally filtered by status (candidate, promoted, rejected).",
+		}, listImportCandidatesHandler(deps.Discovery))
+		mcp.AddTool(s, &mcp.Tool{
+			Name:        "get_import_candidate",
+			Description: "Fetch one staged recipe import candidate by id, including its parsed ingredient lines and provenance.",
+		}, getImportCandidateHandler(deps.Discovery))
+		mcp.AddTool(s, &mcp.Tool{
+			Name:        "reject_import_candidate",
+			Description: "Reject a staged recipe import candidate that has not been promoted.",
+		}, rejectImportCandidateHandler(deps.Discovery))
+		mcp.AddTool(s, &mcp.Tool{
+			Name:        "promote_import_candidate",
+			Description: "Promote a staged recipe import candidate into the native recipe_family hierarchy (creates a family, variant, and revision; reuses an existing family when family_id is given).",
+		}, promoteImportCandidateHandler(deps.Discovery))
 	}
 }
 
