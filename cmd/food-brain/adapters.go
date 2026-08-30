@@ -75,6 +75,10 @@ func buildDependencies() httpapi.Dependencies {
 	deps.Meals = service.NewMeals(store, nil)
 	deps.Pantry = service.NewPantry(store)
 	deps.RecipeFamily = service.NewRecipeFamily(store)
+	// Discovery reuses the RecipeFamily service (promotion creates family /
+	// variant / revision through it) and a default HTTP client for fetching
+	// external recipe URLs.
+	deps.Discovery = service.NewDiscovery(store, deps.RecipeFamily, nil)
 	deps.Favorites = service.NewFavorites(store)
 	deps.PriceIntelligence = service.NewPriceIntelligence(store)
 

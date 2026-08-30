@@ -50,16 +50,11 @@
 
 ## 5. HTTP API
 
-- [ ] 5.1 Create `internal/httpapi/recipe_discovery.go`.
-- [ ] 5.2 Add a `Discovery` field to `httpapi.Dependencies`.
-- [ ] 5.3 Register routes in `internal/httpapi/people.go` when `deps.Discovery != nil`:
-  - `POST /recipes/discover`
-  - `GET /recipes/discovery/candidates`
-  - `GET /recipes/discovery/candidates/{id}`
-  - `POST /recipes/discovery/candidates/{id}/reject`
-  - `POST /recipes/discovery/candidates/{id}/promote`
-- [ ] 5.4 Implement handlers that map `dto.ErrNotFound` to 404 and validation errors to 400.
-- [ ] 5.5 Wire `service.NewDiscovery` in the composition root (`cmd/food-brain` or equivalent).
+- [x] 5.1 Create `internal/httpapi/recipe_discovery.go` — Created `recipeDiscoveryHandler` with `discover`, `listCandidates`, `getCandidate`, `rejectCandidate`, `promoteCandidate`.
+- [x] 5.2 Add a `Discovery` field to `httpapi.Dependencies` — Added `Discovery dto.DiscoveryService` to the struct.
+- [x] 5.3 Register routes in `internal/httpapi/people.go` when `deps.Discovery != nil` — Registered all five routes (`POST /recipes/discover`, `GET /recipes/discovery/candidates`, `GET /recipes/discovery/candidates/{id}`, `POST .../reject`, `POST .../promote`).
+- [x] 5.4 Implement handlers that map `dto.ErrNotFound` to 404 and validation errors to 400 — `errors.Is(err, dto.ErrNotFound)` → 404; missing `url` / malformed JSON → 400; other errors → 500.
+- [x] 5.5 Wire `service.NewDiscovery` in the composition root (`cmd/food-brain` or equivalent) — `deps.Discovery = service.NewDiscovery(store, deps.RecipeFamily, nil)` in `buildDependencies`.
 
 ## 6. OpenAPI and codegen
 
@@ -103,7 +98,7 @@
 - [ ] 9.3 Add service tests for promotion creating family/variant/revision and updating candidate
   status.
 - [ ] 9.4 Add service tests for idempotent promotion of an already-promoted candidate.
-- [ ] 9.5 Add HTTP handler tests for the discovery routes.
+- [x] 9.5 Add HTTP handler tests for the discovery routes — `internal/httpapi/recipe_discovery_test.go` covers discover (happy/missing-url), list, get (happy/not-found), reject (happy/not-found), promote (happy/not-found).
 - [ ] 9.6 Add MCP tool tests for input validation and service delegation.
 
 ## 10. Verification

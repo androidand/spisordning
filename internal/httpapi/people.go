@@ -45,6 +45,10 @@ type Dependencies struct {
 	// RecipeFamily is the git-like recipe hierarchy (family -> variant ->
 	// revision). Backs the /recipe-families routes.
 	RecipeFamily dto.RecipeFamilyService
+	// Discovery fetches external recipe URLs, stages them as review
+	// candidates, and promotes/rejects them into the recipe_family hierarchy.
+	// Backs the /recipes/discover and /recipes/discovery routes.
+	Discovery dto.DiscoveryService
 	// Favorites is the explicit recipe favorite + rating surface. Backs the
 	// /recipes/{id}/favorites and /recipes/{id}/rating routes.
 	Favorites dto.FavoritesService
@@ -268,6 +272,14 @@ func RegisterHandlers(mux *http.ServeMux, deps Dependencies) {
 		h := retailerCredentialHandler{svc: deps.RetailerCredentials}
 		mux.HandleFunc("POST /retailers/{retailer}/elevated-credential", h.upload)
 		mux.HandleFunc("GET /retailers/{retailer}/elevated-credential", h.get)
+	}
+	if deps.Discovery != nil {
+		h := recipeDiscoveryHandler{svc: deps.Discovery}
+		mux.HandleFunc("POST /recipes/discover", h.discover)
+		mux.HandleFunc("GET /recipes/discovery/candidates", h.listCandidates)
+		mux.HandleFunc("GET /recipes/discovery/candidates/{id}", h.getCandidate)
+		mux.HandleFunc("POST /recipes/discovery/candidates/{id}/reject", h.rejectCandidate)
+		mux.HandleFunc("POST /recipes/discovery/candidates/{id}/promote", h.promoteCandidate)
 	}
 }
 
