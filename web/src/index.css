@@ -361,6 +361,17 @@ code {
   margin-top: 0.25rem;
 }
 
+.lot-actions {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.lot-actions .row {
+  margin-top: 0;
+}
+
 .item input[type="checkbox"] {
   width: 1.1rem;
   height: 1.1rem;

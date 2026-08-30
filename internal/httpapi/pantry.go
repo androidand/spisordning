@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -82,6 +83,99 @@ func (h *pantryHandler) consume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (h *pantryHandler) discard(w http.ResponseWriter, r *http.Request) {
+	lotID := r.PathValue("id")
+	var in dto.PantryDiscardInput
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid JSON body: " + err.Error()})
+		return
+	}
+	if in.Quantity <= 0 {
+		writeJSON(w, http.StatusBadRequest, errorBody{Message: "field 'quantity' must be > 0"})
+		return
+	}
+	out, err := h.svc.Discard(r.Context(), lotID, in)
+	if err != nil {
+		writePantryServiceError(w, "discard", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (h *pantryHandler) adjust(w http.ResponseWriter, r *http.Request) {
+	lotID := r.PathValue("id")
+	var in dto.PantryAdjustInput
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid JSON body: " + err.Error()})
+		return
+	}
+	if in.Quantity < 0 {
+		writeJSON(w, http.StatusBadRequest, errorBody{Message: "field 'quantity' must be >= 0"})
+		return
+	}
+	out, err := h.svc.Adjust(r.Context(), lotID, in)
+	if err != nil {
+		writePantryServiceError(w, "adjust", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (h *pantryHandler) markEmpty(w http.ResponseWriter, r *http.Request) {
+	lotID := r.PathValue("id")
+	out, err := h.svc.MarkEmpty(r.Context(), lotID)
+	if err != nil {
+		writePantryServiceError(w, "mark empty", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (h *pantryHandler) open(w http.ResponseWriter, r *http.Request) {
+	lotID := r.PathValue("id")
+	var in dto.PantryOpenInput
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid JSON body: " + err.Error()})
+		return
+	}
+	out, err := h.svc.Open(r.Context(), lotID, in)
+	if err != nil {
+		writePantryServiceError(w, "open", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (h *pantryHandler) transfer(w http.ResponseWriter, r *http.Request) {
+	lotID := r.PathValue("id")
+	var in dto.PantryTransferInput
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid JSON body: " + err.Error()})
+		return
+	}
+	if in.LocationID == "" || in.Quantity <= 0 {
+		writeJSON(w, http.StatusBadRequest, errorBody{Message: "field 'location_id' is required and 'quantity' must be > 0"})
+		return
+	}
+	out, err := h.svc.Transfer(r.Context(), lotID, in)
+	if err != nil {
+		writePantryServiceError(w, "transfer", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func writePantryServiceError(w http.ResponseWriter, action string, err error) {
+	switch {
+	case errors.Is(err, dto.ErrNotFound):
+		writeJSON(w, http.StatusNotFound, errorBody{Message: action + ": " + err.Error()})
+	case errors.Is(err, dto.ErrInvalid):
+		writeJSON(w, http.StatusBadRequest, errorBody{Message: action + ": " + err.Error()})
+	default:
+		writeError(w, http.StatusInternalServerError, action+": "+err.Error())
+	}
 }
 
 // listExpiring returns non-empty lots whose best_before is within ?within

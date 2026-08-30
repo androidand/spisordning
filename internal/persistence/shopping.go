@@ -27,8 +27,8 @@ const (
 		VALUES ($1, $2, $3, $4) RETURNING id`
 
 	createShoppingListItemSQL = `INSERT INTO shopping_list_item
-		(id, shopping_list_id, shopping_requirement_id, ingredient_id, label, quantity, unit, checked)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`
+		(id, shopping_list_id, shopping_requirement_id, ingredient_id, label, quantity, unit, checked, note_match_key)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`
 )
 
 // CreateShoppingList inserts a new shopping_list and returns its id. An empty
@@ -103,6 +103,13 @@ type ShoppingListItem struct {
 	Unit                  string
 	Checked               bool
 	AddedAt               time.Time
+	// NoteMatchKey is the normalized label captured at from-checklist ingestion
+	// (see domain.NormalizeLabel); it lets the notes-bridge match the item back
+	// to its checklist line on write-back. NULL for non-checklist items.
+	NoteMatchKey *string
+	// ResolvedAt is when the item was last confidently resolved and pushed to a
+	// retailer wishlist (NULL = not yet resolved).
+	ResolvedAt *time.Time
 }
 
 // CreateShoppingListItem inserts a new item and returns its id.
@@ -110,7 +117,7 @@ func (s *Store) CreateShoppingListItem(ctx context.Context, item ShoppingListIte
 	id := domain.NewShoppingListItemID()
 	var returnedID domain.ShoppingListItemID
 	err := s.db.QueryRow(ctx, createShoppingListItemSQL, id, item.ShoppingListID, item.ShoppingRequirementID, item.IngredientID,
-		item.Label, item.Quantity, item.Unit, item.Checked).Scan(&returnedID)
+		item.Label, item.Quantity, item.Unit, item.Checked, item.NoteMatchKey).Scan(&returnedID)
 	if err != nil {
 		return domain.ShoppingListItemID{}, fmt.Errorf("persistence: create shopping_list_item: %w", err)
 	}
@@ -141,7 +148,7 @@ func (s *Store) CreateShoppingListWithItems(ctx context.Context, l ShoppingList,
 		id := domain.NewShoppingListItemID()
 		var returnedID domain.ShoppingListItemID
 		if err := tx.QueryRow(ctx, createShoppingListItemSQL, id, listID, item.ShoppingRequirementID, item.IngredientID,
-			item.Label, item.Quantity, item.Unit, item.Checked).Scan(&returnedID); err != nil {
+			item.Label, item.Quantity, item.Unit, item.Checked, item.NoteMatchKey).Scan(&returnedID); err != nil {
 			return domain.ShoppingListID{}, nil, fmt.Errorf("persistence: create shopping_list_item: %w", err)
 		}
 		itemIDs = append(itemIDs, returnedID)
@@ -153,17 +160,63 @@ func (s *Store) CreateShoppingListWithItems(ctx context.Context, l ShoppingList,
 	return listID, itemIDs, nil
 }
 
+// shoppingListItemColumns is the full column list for a shopping_list_item
+// SELECT, shared by every query that feeds scanShoppingListItems.
+const shoppingListItemColumns = `id, shopping_list_id, shopping_requirement_id, ingredient_id, label,
+	quantity, unit, checked, added_at, note_match_key, resolved_at`
+
 // ListShoppingListItems returns all items for a list, ordered by added_at.
 func (s *Store) ListShoppingListItems(ctx context.Context, listID domain.ShoppingListID) ([]ShoppingListItem, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT id, shopping_list_id, shopping_requirement_id, ingredient_id, label,
-			quantity, unit, checked, added_at
+		SELECT `+shoppingListItemColumns+`
 		FROM shopping_list_item WHERE shopping_list_id = $1 ORDER BY added_at`, listID)
 	if err != nil {
 		return nil, fmt.Errorf("persistence: list shopping_list_items: %w", err)
 	}
 	defer rows.Close()
 	return scanShoppingListItems(rows)
+}
+
+// ListResolvedItemsSince returns the items in the list that have been resolved
+// (resolved_at IS NOT NULL), optionally filtered to those resolved at or after
+// since. A zero since returns all resolved items. Ordered by resolved_at, id.
+func (s *Store) ListResolvedItemsSince(ctx context.Context, listID domain.ShoppingListID, since time.Time) ([]ShoppingListItem, error) {
+	var (
+		rows pgx.Rows
+		err  error
+	)
+	if since.IsZero() {
+		rows, err = s.db.Query(ctx, `
+			SELECT `+shoppingListItemColumns+`
+			FROM shopping_list_item
+			WHERE shopping_list_id = $1 AND resolved_at IS NOT NULL
+			ORDER BY resolved_at, id`, listID)
+	} else {
+		rows, err = s.db.Query(ctx, `
+			SELECT `+shoppingListItemColumns+`
+			FROM shopping_list_item
+			WHERE shopping_list_id = $1 AND resolved_at IS NOT NULL AND resolved_at >= $2
+			ORDER BY resolved_at, id`, listID, since)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("persistence: list resolved shopping_list_items: %w", err)
+	}
+	defer rows.Close()
+	return scanShoppingListItems(rows)
+}
+
+// MarkShoppingListItemsResolved stamps resolved_at = now() on the given items,
+// recording that they were confidently resolved and pushed to a retailer
+// wishlist. A nil or empty slice is a no-op.
+func (s *Store) MarkShoppingListItemsResolved(ctx context.Context, itemIDs []domain.ShoppingListItemID) error {
+	if len(itemIDs) == 0 {
+		return nil
+	}
+	const q = `UPDATE shopping_list_item SET resolved_at = now() WHERE id = ANY($1)`
+	if _, err := s.db.Exec(ctx, q, itemIDs); err != nil {
+		return fmt.Errorf("persistence: mark shopping_list_items resolved: %w", err)
+	}
+	return nil
 }
 
 func scanShoppingListItems(rows pgx.Rows) ([]ShoppingListItem, error) {
@@ -173,7 +226,7 @@ func scanShoppingListItems(rows pgx.Rows) ([]ShoppingListItem, error) {
 		var item ShoppingListItem
 		if err := rows.Scan(&item.ID, &item.ShoppingListID, &item.ShoppingRequirementID,
 			&item.IngredientID, &item.Label, &item.Quantity, &item.Unit,
-			&item.Checked, &item.AddedAt); err != nil {
+			&item.Checked, &item.AddedAt, &item.NoteMatchKey, &item.ResolvedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, item)

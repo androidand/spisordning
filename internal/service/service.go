@@ -54,6 +54,11 @@ type Store interface {
 	ListInventoryLocations(ctx context.Context, householdID string) ([]persistence.InventoryLocation, error)
 	RecordPurchase(ctx context.Context, ingredientID domain.IngredientID, productID *domain.ProductID, locationID domain.InventoryLocationID, quantity float64, unit string, bestBefore *time.Time, source string) (domain.InventoryLotID, error)
 	RecordConsume(ctx context.Context, lotID domain.InventoryLotID, quantity float64, estimated bool, source string) error
+	RecordDiscard(ctx context.Context, lotID domain.InventoryLotID, quantity float64, estimated bool, reason, source string) error
+	RecordAdjust(ctx context.Context, lotID domain.InventoryLotID, newQuantity float64, estimated bool, reason, source string) error
+	RecordMarkEmpty(ctx context.Context, lotID domain.InventoryLotID) error
+	RecordOpen(ctx context.Context, lotID domain.InventoryLotID, source string) error
+	RecordTransfer(ctx context.Context, lotID domain.InventoryLotID, toLocationID domain.InventoryLocationID, quantity float64, source string) (domain.InventoryLotID, error)
 	GetInventoryLot(ctx context.Context, id domain.InventoryLotID) (persistence.InventoryLot, error)
 	ListMealEvents(ctx context.Context, recipeRefID domain.RecipeRefID, servedOn string) ([]persistence.MealEvent, error)
 	GetMealEvent(ctx context.Context, id domain.MealEventID) (persistence.MealEvent, error)
@@ -88,6 +93,16 @@ type Store interface {
 	ListExpiringLots(ctx context.Context, within time.Duration) ([]persistence.InventoryLot, error)
 	ListPantryIngredientIDs(ctx context.Context) ([]domain.IngredientID, error)
 	ListAllRecipeIngredients(ctx context.Context) ([]persistence.RecipeIngredient, error)
+	// Discovery operations (activate-recipe-discovery).
+	GetExternalRecipeSource(ctx context.Context, id string) (persistence.ExternalRecipeSource, error)
+	UpsertExternalRecipeSource(ctx context.Context, src persistence.ExternalRecipeSource) error
+	SaveImportCandidate(ctx context.Context, c persistence.ImportCandidate) error
+	SaveCandidateIngredients(ctx context.Context, candidateID domain.RecipeImportCandidateID, lines []persistence.ImportCandidateIngredient) error
+	GetImportCandidate(ctx context.Context, id domain.RecipeImportCandidateID) (persistence.ImportCandidate, error)
+	ListImportCandidates(ctx context.Context, status *string) ([]persistence.ImportCandidate, error)
+	ListCandidateIngredients(ctx context.Context, candidateID domain.RecipeImportCandidateID) ([]persistence.ImportCandidateIngredient, error)
+	SetCandidateStatus(ctx context.Context, id domain.RecipeImportCandidateID, status string) error
+	SetCandidatePromoted(ctx context.Context, id domain.RecipeImportCandidateID, variantID domain.RecipeVariantID) error
 }
 
 // txConn is the minimal transaction surface the Meals service needs.

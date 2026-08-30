@@ -18,6 +18,7 @@ type fakePantrySvc struct {
 	locations []dto.PantryLocation
 	lots      []dto.PantryLot
 	purchased dto.PantryLot
+	updated   dto.PantryLot
 	err       error
 }
 
@@ -58,6 +59,41 @@ func (f *fakePantrySvc) ListExpiring(ctx context.Context, within time.Duration) 
 		return nil, f.err
 	}
 	return f.lots, nil
+}
+
+func (f *fakePantrySvc) Discard(ctx context.Context, lotID string, in dto.PantryDiscardInput) (dto.PantryLot, error) {
+	if f.err != nil {
+		return dto.PantryLot{}, f.err
+	}
+	return f.updated, nil
+}
+
+func (f *fakePantrySvc) Adjust(ctx context.Context, lotID string, in dto.PantryAdjustInput) (dto.PantryLot, error) {
+	if f.err != nil {
+		return dto.PantryLot{}, f.err
+	}
+	return f.updated, nil
+}
+
+func (f *fakePantrySvc) MarkEmpty(ctx context.Context, lotID string) (dto.PantryLot, error) {
+	if f.err != nil {
+		return dto.PantryLot{}, f.err
+	}
+	return f.updated, nil
+}
+
+func (f *fakePantrySvc) Open(ctx context.Context, lotID string, in dto.PantryOpenInput) (dto.PantryLot, error) {
+	if f.err != nil {
+		return dto.PantryLot{}, f.err
+	}
+	return f.updated, nil
+}
+
+func (f *fakePantrySvc) Transfer(ctx context.Context, lotID string, in dto.PantryTransferInput) (dto.PantryLot, error) {
+	if f.err != nil {
+		return dto.PantryLot{}, f.err
+	}
+	return f.updated, nil
 }
 
 func TestListLocations_HappyPath(t *testing.T) {
@@ -157,6 +193,122 @@ func TestConsume_BadLotID(t *testing.T) {
 	rec := doPost(t, mux, "/pantry/lots/abc/consume", `{"quantity":1.0}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+}
+
+func TestDiscard_HappyPath(t *testing.T) {
+	svc := &fakePantrySvc{updated: dto.PantryLot{ID: "lot-1", Quantity: 1.0}}
+	mux := newMux(t, Dependencies{Pantry: svc})
+
+	rec := doPost(t, mux, "/pantry/lots/lot-1/discard", `{"quantity":1.0,"source":"manual"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body)
+	}
+	var got dto.PantryLot
+	mustJSON(t, rec.Body.Bytes(), &got)
+	if got.ID != "lot-1" || got.Quantity != 1.0 {
+		t.Fatalf("unexpected lot: %+v", got)
+	}
+}
+
+func TestDiscard_ZeroQuantity(t *testing.T) {
+	mux := newMux(t, Dependencies{Pantry: &fakePantrySvc{}})
+
+	rec := doPost(t, mux, "/pantry/lots/lot-1/discard", `{"quantity":0,"source":"manual"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", rec.Code, rec.Body)
+	}
+}
+
+func TestDiscard_NotFound(t *testing.T) {
+	svc := &fakePantrySvc{err: dto.ErrNotFound}
+	mux := newMux(t, Dependencies{Pantry: svc})
+
+	rec := doPost(t, mux, "/pantry/lots/missing/discard", `{"quantity":1.0,"source":"manual"}`)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body: %s", rec.Code, rec.Body)
+	}
+}
+
+func TestAdjust_HappyPath(t *testing.T) {
+	svc := &fakePantrySvc{updated: dto.PantryLot{ID: "lot-1", Quantity: 0.5}}
+	mux := newMux(t, Dependencies{Pantry: svc})
+
+	rec := doPost(t, mux, "/pantry/lots/lot-1/adjust", `{"quantity":0.5,"source":"manual"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body)
+	}
+	var got dto.PantryLot
+	mustJSON(t, rec.Body.Bytes(), &got)
+	if got.Quantity != 0.5 {
+		t.Fatalf("unexpected lot: %+v", got)
+	}
+}
+
+func TestAdjust_NegativeQuantity(t *testing.T) {
+	mux := newMux(t, Dependencies{Pantry: &fakePantrySvc{}})
+
+	rec := doPost(t, mux, "/pantry/lots/lot-1/adjust", `{"quantity":-1,"source":"manual"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", rec.Code, rec.Body)
+	}
+}
+
+func TestMarkEmpty_HappyPath(t *testing.T) {
+	svc := &fakePantrySvc{updated: dto.PantryLot{ID: "lot-1", Quantity: 0}}
+	mux := newMux(t, Dependencies{Pantry: svc})
+
+	rec := doPost(t, mux, "/pantry/lots/lot-1/mark-empty", ``)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body)
+	}
+	var got dto.PantryLot
+	mustJSON(t, rec.Body.Bytes(), &got)
+	if got.Quantity != 0 {
+		t.Fatalf("unexpected lot: %+v", got)
+	}
+}
+
+func TestOpen_InvalidSource(t *testing.T) {
+	svc := &fakePantrySvc{err: dto.ErrInvalid}
+	mux := newMux(t, Dependencies{Pantry: svc})
+
+	rec := doPost(t, mux, "/pantry/lots/lot-1/open", `{}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", rec.Code, rec.Body)
+	}
+}
+
+func TestTransfer_HappyPath(t *testing.T) {
+	svc := &fakePantrySvc{updated: dto.PantryLot{ID: "lot-2", LocationID: "fridge", Quantity: 1.0}}
+	mux := newMux(t, Dependencies{Pantry: svc})
+
+	rec := doPost(t, mux, "/pantry/lots/lot-1/transfer", `{"location_id":"fridge","quantity":1.0,"source":"manual"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body)
+	}
+	var got dto.PantryLot
+	mustJSON(t, rec.Body.Bytes(), &got)
+	if got.ID != "lot-2" || got.LocationID != "fridge" {
+		t.Fatalf("unexpected lot: %+v", got)
+	}
+}
+
+func TestTransfer_MissingLocation(t *testing.T) {
+	mux := newMux(t, Dependencies{Pantry: &fakePantrySvc{}})
+
+	rec := doPost(t, mux, "/pantry/lots/lot-1/transfer", `{"quantity":1.0,"source":"manual"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", rec.Code, rec.Body)
+	}
+}
+
+func TestTransfer_ZeroQuantity(t *testing.T) {
+	mux := newMux(t, Dependencies{Pantry: &fakePantrySvc{}})
+
+	rec := doPost(t, mux, "/pantry/lots/lot-1/transfer", `{"location_id":"fridge","quantity":0,"source":"manual"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", rec.Code, rec.Body)
 	}
 }
 

@@ -72,10 +72,24 @@ export default function PantryPage() {
   const [pIng, setPIng] = useState("");
   const [pQty, setPQty] = useState("1");
   const [pUnit, setPUnit] = useState("pcs");
+  const [actionLot, setActionLot] = useState<Lot | null>(null);
+  const [discardQty, setDiscardQty] = useState("");
+  const [adjustQty, setAdjustQty] = useState("");
+  const [transferLocation, setTransferLocation] = useState("");
+  const [transferQty, setTransferQty] = useState("");
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["pantry-locations"] });
     queryClient.invalidateQueries({ queryKey: ["pantry-lots", activeId] });
+    queryClient.invalidateQueries({ queryKey: ["pantry-expiring"] });
+  };
+
+  const closeActions = () => {
+    setActionLot(null);
+    setDiscardQty("");
+    setAdjustQty("");
+    setTransferLocation("");
+    setTransferQty("");
   };
 
   const createLocation = useMutation({
@@ -128,6 +142,83 @@ export default function PantryPage() {
     },
     onSuccess: () => invalidate(),
   });
+
+  const discard = useMutation({
+    mutationFn: async (lot: Lot) => {
+      const { error, response } = await apiClient.POST("/pantry/lots/{id}/discard", {
+        params: { path: { id: lot.id } },
+        body: { quantity: Number(discardQty) || 0, estimated: false, source: "manual" },
+      });
+      if (error) throw new Error(errorMessage(error));
+      if (!response.ok) throw new Error(`Failed to discard (${response.status})`);
+    },
+    onSuccess: () => {
+      closeActions();
+      invalidate();
+    },
+  });
+
+  const adjust = useMutation({
+    mutationFn: async (lot: Lot) => {
+      const { error, response } = await apiClient.POST("/pantry/lots/{id}/adjust", {
+        params: { path: { id: lot.id } },
+        body: { quantity: Number(adjustQty) || 0, estimated: false, source: "manual" },
+      });
+      if (error) throw new Error(errorMessage(error));
+      if (!response.ok) throw new Error(`Failed to adjust (${response.status})`);
+    },
+    onSuccess: () => {
+      closeActions();
+      invalidate();
+    },
+  });
+
+  const markEmpty = useMutation({
+    mutationFn: async (lot: Lot) => {
+      const { error, response } = await apiClient.POST("/pantry/lots/{id}/mark-empty", {
+        params: { path: { id: lot.id } },
+      });
+      if (error) throw new Error(errorMessage(error));
+      if (!response.ok) throw new Error(`Failed to mark empty (${response.status})`);
+    },
+    onSuccess: () => {
+      closeActions();
+      invalidate();
+    },
+  });
+
+  const openLot = useMutation({
+    mutationFn: async (lot: Lot) => {
+      const { error, response } = await apiClient.POST("/pantry/lots/{id}/open", {
+        params: { path: { id: lot.id } },
+        body: { source: "manual" },
+      });
+      if (error) throw new Error(errorMessage(error));
+      if (!response.ok) throw new Error(`Failed to open lot (${response.status})`);
+    },
+    onSuccess: () => {
+      closeActions();
+      invalidate();
+    },
+  });
+
+  const transfer = useMutation({
+    mutationFn: async (lot: Lot) => {
+      const { error, response } = await apiClient.POST("/pantry/lots/{id}/transfer", {
+        params: { path: { id: lot.id } },
+        body: { location_id: transferLocation, quantity: Number(transferQty) || 0, source: "manual" },
+      });
+      if (error) throw new Error(errorMessage(error));
+      if (!response.ok) throw new Error(`Failed to transfer (${response.status})`);
+    },
+    onSuccess: () => {
+      closeActions();
+      invalidate();
+    },
+  });
+
+  const actionError =
+    discard.error?.message ?? adjust.error?.message ?? markEmpty.error?.message ?? openLot.error?.message ?? transfer.error?.message;
 
   if (locationsQuery.isLoading) return <Spinner label="Loading pantry" />;
   if (locationsQuery.isError) return <ErrorState message={locationsQuery.error.message} />;
@@ -203,18 +294,103 @@ export default function PantryPage() {
             <EmptyState>Nothing in stock here.</EmptyState>
           ) : (
             <div className="items">
-              {lots.map((lot) => (
-                <Card key={lot.id} className="item">
-                  <span className="item-qty">{quantityLabel(lot.quantity, lot.unit)}</span>
-                  <span className="item-name">{lot.ingredient_id}</span>
-                  <span className="item-forms">
-                    {lot.best_before ? `best before ${formatDate(lot.best_before)}` : "no expiry"}
-                  </span>
-                  <Button variant="danger" onClick={() => consume.mutate(lot)} disabled={consume.isPending}>
-                    Consume
-                  </Button>
-                </Card>
-              ))}
+              {lots.map((lot) => {
+                const managing = actionLot?.id === lot.id;
+                return (
+                  <Card key={lot.id} className="item">
+                    <span className="item-qty">{quantityLabel(lot.quantity, lot.unit)}</span>
+                    <span className="item-name">{lot.ingredient_id}</span>
+                    <span className="item-forms">
+                      {lot.best_before ? `best before ${formatDate(lot.best_before)}` : "no expiry"}
+                    </span>
+                    <Button variant="danger" onClick={() => consume.mutate(lot)} disabled={consume.isPending || lot.quantity <= 0}>
+                      Consume
+                    </Button>
+                    <Button onClick={() => (managing ? closeActions() : setActionLot(lot))}>
+                      {managing ? "Close" : "Manage"}
+                    </Button>
+                    {managing && (
+                      <div className="lot-actions">
+                        <div className="row">
+                          <TextInput
+                            type="number"
+                            className="input-narrow"
+                            placeholder="Discard"
+                            value={discardQty}
+                            onChange={(e) => setDiscardQty(e.target.value)}
+                          />
+                          <Button
+                            variant="danger"
+                            onClick={() => discard.mutate(lot)}
+                            disabled={discard.isPending || !(Number(discardQty) > 0) || Number(discardQty) > lot.quantity}
+                          >
+                            Discard
+                          </Button>
+                        </div>
+                        <div className="row">
+                          <TextInput
+                            type="number"
+                            className="input-narrow"
+                            placeholder="New quantity"
+                            value={adjustQty}
+                            onChange={(e) => setAdjustQty(e.target.value)}
+                          />
+                          <Button onClick={() => adjust.mutate(lot)} disabled={adjust.isPending || adjustQty.trim() === ""}>
+                            Adjust
+                          </Button>
+                        </div>
+                        <div className="row">
+                          <select
+                            className="input"
+                            value={transferLocation}
+                            onChange={(e) => setTransferLocation(e.target.value)}
+                          >
+                            <option value="">Move to…</option>
+                            {locations
+                              .filter((l) => l.id !== lot.location_id)
+                              .map((l) => (
+                                <option key={l.id} value={l.id}>
+                                  {l.name}
+                                </option>
+                              ))}
+                          </select>
+                          <TextInput
+                            type="number"
+                            className="input-narrow"
+                            placeholder="Qty"
+                            value={transferQty}
+                            onChange={(e) => setTransferQty(e.target.value)}
+                          />
+                          <Button
+                            onClick={() => transfer.mutate(lot)}
+                            disabled={
+                              transfer.isPending ||
+                              !transferLocation ||
+                              !(Number(transferQty) > 0) ||
+                              Number(transferQty) > lot.quantity
+                            }
+                          >
+                            Transfer
+                          </Button>
+                        </div>
+                        <div className="row">
+                          <Button onClick={() => openLot.mutate(lot)} disabled={openLot.isPending || !!lot.opened_at}>
+                            Open
+                          </Button>
+                          <Button
+                            variant="danger"
+                            onClick={() => markEmpty.mutate(lot)}
+                            disabled={markEmpty.isPending || lot.quantity <= 0}
+                          >
+                            Mark empty
+                          </Button>
+                        </div>
+                        {actionError && <ErrorState message={actionError} />}
+                      </div>
+                    )}
+                  </Card>
+                );
+              })}
             </div>
           )}
         </>

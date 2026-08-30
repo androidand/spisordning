@@ -64,6 +64,13 @@ func (f *fakeShoppingListSvc) ArchiveShoppingList(_ context.Context, listID stri
 	return nil
 }
 
+func (f *fakeShoppingListSvc) ListResolvedItemsSince(_ context.Context, _ string, _ time.Time) ([]ResolvedItemResponse, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return nil, nil
+}
+
 func TestListShoppingLists_HappyPath(t *testing.T) {
 	svc := &fakeShoppingListSvc{
 		lists: []ShoppingListResponse{{ID: "01900000-0000-7000-8000-000000000001", Name: "Vecka 30", Status: "active"}},

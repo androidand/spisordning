@@ -539,6 +539,22 @@ type OrderView struct {
 	Order Order       `json:"order"`
 }
 
+// PantryAdjustNew defines model for PantryAdjustNew.
+type PantryAdjustNew struct {
+	Estimated *bool   `json:"estimated,omitempty"`
+	Quantity  float32 `json:"quantity"`
+	Reason    *string `json:"reason,omitempty"`
+	Source    string  `json:"source"`
+}
+
+// PantryDiscardNew defines model for PantryDiscardNew.
+type PantryDiscardNew struct {
+	Estimated *bool   `json:"estimated,omitempty"`
+	Quantity  float32 `json:"quantity"`
+	Reason    *string `json:"reason,omitempty"`
+	Source    string  `json:"source"`
+}
+
 // PantryLot defines model for PantryLot.
 type PantryLot struct {
 	BestBefore   *time.Time `json:"best_before,omitempty"`
@@ -552,6 +568,18 @@ type PantryLot struct {
 	Quantity     float32    `json:"quantity"`
 	Unit         string     `json:"unit"`
 	UpdatedAt    time.Time  `json:"updated_at"`
+}
+
+// PantryOpenNew defines model for PantryOpenNew.
+type PantryOpenNew struct {
+	Source string `json:"source"`
+}
+
+// PantryTransferNew defines model for PantryTransferNew.
+type PantryTransferNew struct {
+	LocationId string  `json:"location_id"`
+	Quantity   float32 `json:"quantity"`
+	Source     string  `json:"source"`
 }
 
 // Person defines model for Person.
@@ -914,8 +942,14 @@ type ShoppingListId = int
 // ShoppingListItemId defines model for ShoppingListItemId.
 type ShoppingListItemId = int
 
+// BadRequest defines model for BadRequest.
+type BadRequest = Error
+
 // Conflict defines model for Conflict.
 type Conflict = Error
+
+// InternalServerError defines model for InternalServerError.
+type InternalServerError = Error
 
 // NotFound defines model for NotFound.
 type NotFound = Error
@@ -1051,6 +1085,18 @@ type ResolveIngredientMappingJSONRequestBody = IngredientMappingResolve
 
 // CreateMealEventJSONRequestBody defines body for CreateMealEvent for application/json ContentType.
 type CreateMealEventJSONRequestBody = MealEventNew
+
+// AdjustPantryLotJSONRequestBody defines body for AdjustPantryLot for application/json ContentType.
+type AdjustPantryLotJSONRequestBody = PantryAdjustNew
+
+// DiscardPantryLotJSONRequestBody defines body for DiscardPantryLot for application/json ContentType.
+type DiscardPantryLotJSONRequestBody = PantryDiscardNew
+
+// OpenPantryLotJSONRequestBody defines body for OpenPantryLot for application/json ContentType.
+type OpenPantryLotJSONRequestBody = PantryOpenNew
+
+// TransferPantryLotJSONRequestBody defines body for TransferPantryLot for application/json ContentType.
+type TransferPantryLotJSONRequestBody = PantryTransferNew
 
 // CreatePersonJSONRequestBody defines body for CreatePerson for application/json ContentType.
 type CreatePersonJSONRequestBody = PersonNew

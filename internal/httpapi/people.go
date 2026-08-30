@@ -109,6 +109,11 @@ func RegisterHandlers(mux *http.ServeMux, deps Dependencies) {
 		mux.HandleFunc("GET /pantry/locations/{id}/lots", h.listLots)
 		mux.HandleFunc("POST /pantry/lots/purchase", h.purchase)
 		mux.HandleFunc("POST /pantry/lots/{id}/consume", h.consume)
+		mux.HandleFunc("POST /pantry/lots/{id}/discard", h.discard)
+		mux.HandleFunc("POST /pantry/lots/{id}/adjust", h.adjust)
+		mux.HandleFunc("POST /pantry/lots/{id}/mark-empty", h.markEmpty)
+		mux.HandleFunc("POST /pantry/lots/{id}/open", h.open)
+		mux.HandleFunc("POST /pantry/lots/{id}/transfer", h.transfer)
 		mux.HandleFunc("GET /pantry/expiring", h.listExpiring)
 	}
 	if deps.Ingredients != nil {
@@ -178,6 +183,8 @@ func RegisterHandlers(mux *http.ServeMux, deps Dependencies) {
 		mux.HandleFunc("GET /shopping-lists/{listId}", h4.getShoppingList)
 		h5 := shoppingListArchiveHandler{svc: deps.ShoppingLists}
 		mux.HandleFunc("DELETE /shopping-lists/{listId}", h5.archiveShoppingList)
+		h6 := shoppingListResolvedSinceHandler{svc: deps.ShoppingLists}
+		mux.HandleFunc("GET /shopping-lists/{listId}/resolved-since", h6.listResolvedItemsSince)
 	}
 	if deps.ShoppingListItems != nil {
 		h := shoppingItemListHandler{svc: deps.ShoppingListItems}

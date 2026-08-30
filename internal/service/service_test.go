@@ -280,13 +280,124 @@ func (f *fakeStore) RecordPurchase(ctx context.Context, ingredientID domain.Ingr
 	return id, nil
 }
 func (f *fakeStore) RecordConsume(ctx context.Context, lotID domain.InventoryLotID, quantity float64, estimated bool, source string) error { return nil }
+func (f *fakeStore) RecordDiscard(ctx context.Context, lotID domain.InventoryLotID, quantity float64, estimated bool, reason, source string) error {
+	for i, l := range f.lots {
+		if l.ID != lotID {
+			continue
+		}
+		if quantity <= 0 || quantity > l.Quantity {
+			return errors.New("invalid discard quantity")
+		}
+		l.Quantity -= quantity
+		l.UpdatedAt = time.Now()
+		f.lots[i] = l
+		return nil
+	}
+	return persistence.ErrNoRows
+}
+func (f *fakeStore) RecordAdjust(ctx context.Context, lotID domain.InventoryLotID, newQuantity float64, estimated bool, reason, source string) error {
+	for i, l := range f.lots {
+		if l.ID != lotID {
+			continue
+		}
+		if newQuantity < 0 {
+			return errors.New("invalid adjust quantity")
+		}
+		l.Quantity = newQuantity
+		l.UpdatedAt = time.Now()
+		f.lots[i] = l
+		return nil
+	}
+	return persistence.ErrNoRows
+}
+func (f *fakeStore) RecordMarkEmpty(ctx context.Context, lotID domain.InventoryLotID) error {
+	for i, l := range f.lots {
+		if l.ID != lotID {
+			continue
+		}
+		l.Quantity = 0
+		l.UpdatedAt = time.Now()
+		f.lots[i] = l
+		return nil
+	}
+	return persistence.ErrNoRows
+}
+func (f *fakeStore) RecordOpen(ctx context.Context, lotID domain.InventoryLotID, source string) error {
+	for i, l := range f.lots {
+		if l.ID != lotID {
+			continue
+		}
+		now := time.Now()
+		l.OpenedAt = &now
+		l.UpdatedAt = now
+		f.lots[i] = l
+		return nil
+	}
+	return persistence.ErrNoRows
+}
+func (f *fakeStore) RecordTransfer(ctx context.Context, lotID domain.InventoryLotID, toLocationID domain.InventoryLocationID, quantity float64, source string) (domain.InventoryLotID, error) {
+	for i, l := range f.lots {
+		if l.ID != lotID {
+			continue
+		}
+		if quantity <= 0 || quantity > l.Quantity {
+			return domain.InventoryLotID{}, errors.New("invalid transfer quantity")
+		}
+		now := time.Now()
+		if quantity == l.Quantity {
+			l.LocationID = toLocationID
+			l.UpdatedAt = now
+			f.lots[i] = l
+			return l.ID, nil
+		}
+		l.Quantity -= quantity
+		l.UpdatedAt = now
+		f.lots[i] = l
+		dest := l
+		dest.ID = domain.NewInventoryLotID()
+		dest.LocationID = toLocationID
+		dest.Quantity = quantity
+		dest.CreatedAt = now
+		dest.UpdatedAt = now
+		f.lots = append(f.lots, dest)
+		return dest.ID, nil
+	}
+	return domain.InventoryLotID{}, persistence.ErrNoRows
+}
 func (f *fakeStore) GetInventoryLot(ctx context.Context, id domain.InventoryLotID) (persistence.InventoryLot, error) {
 	for _, l := range f.lots {
 		if l.ID == id {
 			return l, nil
 		}
 	}
-	return persistence.InventoryLot{}, errors.New("not found")
+	return persistence.InventoryLot{}, persistence.ErrNoRows
+}
+func (f *fakeStore) GetExternalRecipeSource(ctx context.Context, id string) (persistence.ExternalRecipeSource, error) {
+	return persistence.ExternalRecipeSource{}, persistence.ErrNoRows
+}
+func (f *fakeStore) UpsertExternalRecipeSource(ctx context.Context, src persistence.ExternalRecipeSource) error {
+	return nil
+}
+func (f *fakeStore) SaveImportCandidate(ctx context.Context, c persistence.ImportCandidate) error {
+	return nil
+}
+func (f *fakeStore) SaveCandidateIngredients(ctx context.Context, candidateID domain.RecipeImportCandidateID, lines []persistence.ImportCandidateIngredient) error {
+	return nil
+}
+func (f *fakeStore) GetImportCandidate(ctx context.Context, id domain.RecipeImportCandidateID) (persistence.ImportCandidate, error) {
+	return persistence.ImportCandidate{}, persistence.ErrNoRows
+}
+func (f *fakeStore) ListImportCandidates(ctx context.Context, status *string) ([]persistence.ImportCandidate, error) {
+	return nil, nil
+}
+func (f *fakeStore) ListCandidateIngredients(ctx context.Context, candidateID domain.RecipeImportCandidateID) ([]persistence.ImportCandidateIngredient, error) {
+	return nil, nil
+}
+func (f *fakeStore) SetCandidateStatus(ctx context.Context, id domain.RecipeImportCandidateID, status string) error {
+	return nil
+}
+func (f *fakeStore) SetCandidatePromoted(ctx context.Context, id domain.RecipeImportCandidateID, variantID domain.RecipeVariantID) error {
+	return nil
 }
 func (f *fakeStore) ListMealEvents(ctx context.Context, recipeRefID domain.RecipeRefID, servedOn string) ([]persistence.MealEvent, error) {
 	return nil, nil
@@ -804,6 +915,144 @@ func TestPantryConsume(t *testing.T) {
 	err := svc.Consume(context.Background(), domain.NewInventoryLotID().String(), dto.PantryConsumeInput{Quantity: 1.0})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func newPantryLedgerFixture(t *testing.T) (*fakeStore, domain.InventoryLocationID, domain.InventoryLocationID, domain.InventoryLotID) {
+	t.Helper()
+	src := domain.NewInventoryLocationID()
+	dst := domain.NewInventoryLocationID()
+	lot := domain.NewInventoryLotID()
+	f := &fakeStore{
+		locations: map[domain.InventoryLocationID]persistence.InventoryLocation{
+			src: {ID: src, Name: "Kitchen", HouseholdID: domain.NewHouseholdID()},
+			dst: {ID: dst, Name: "Fridge", HouseholdID: domain.NewHouseholdID()},
+		},
+		lots: []persistence.InventoryLot{{
+			ID: lot, IngredientID: domain.IngredientIDForName("mjolk"), LocationID: src,
+			Quantity: 2.0, Unit: "L", Confidence: "EXACT",
+		}},
+	}
+	return f, src, dst, lot
+}
+
+func TestPantryDiscard(t *testing.T) {
+	f, _, _, lot := newPantryLedgerFixture(t)
+	svc := service.NewPantry(f)
+	out, err := svc.Discard(context.Background(), lot.String(), dto.PantryDiscardInput{Quantity: 1.0, Source: "manual"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Quantity != 1.0 {
+		t.Fatalf("expected remaining quantity 1.0, got %v", out.Quantity)
+	}
+}
+
+func TestPantryDiscardInvalid(t *testing.T) {
+	f, _, _, lot := newPantryLedgerFixture(t)
+	svc := service.NewPantry(f)
+	if _, err := svc.Discard(context.Background(), lot.String(), dto.PantryDiscardInput{Quantity: 3.0, Source: "manual"}); !errors.Is(err, dto.ErrInvalid) {
+		t.Fatalf("expected dto.ErrInvalid for oversized discard, got %v", err)
+	}
+	if _, err := svc.Discard(context.Background(), lot.String(), dto.PantryDiscardInput{Quantity: 1.0}); !errors.Is(err, dto.ErrInvalid) {
+		t.Fatalf("expected dto.ErrInvalid for missing source, got %v", err)
+	}
+	if _, err := svc.Discard(context.Background(), "not-a-lot", dto.PantryDiscardInput{Quantity: 1.0, Source: "manual"}); !errors.Is(err, dto.ErrInvalid) {
+		t.Fatalf("expected dto.ErrInvalid for malformed lot id, got %v", err)
+	}
+}
+
+func TestPantryDiscardNotFound(t *testing.T) {
+	svc := service.NewPantry(&fakeStore{})
+	if _, err := svc.Discard(context.Background(), domain.NewInventoryLotID().String(), dto.PantryDiscardInput{Quantity: 1.0, Source: "manual"}); !errors.Is(err, dto.ErrNotFound) {
+		t.Fatalf("expected dto.ErrNotFound, got %v", err)
+	}
+}
+
+func TestPantryAdjust(t *testing.T) {
+	f, _, _, lot := newPantryLedgerFixture(t)
+	svc := service.NewPantry(f)
+	out, err := svc.Adjust(context.Background(), lot.String(), dto.PantryAdjustInput{Quantity: 0.5, Source: "manual"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Quantity != 0.5 {
+		t.Fatalf("expected adjusted quantity 0.5, got %v", out.Quantity)
+	}
+}
+
+func TestPantryAdjustInvalid(t *testing.T) {
+	f, _, _, lot := newPantryLedgerFixture(t)
+	svc := service.NewPantry(f)
+	if _, err := svc.Adjust(context.Background(), lot.String(), dto.PantryAdjustInput{Quantity: -1, Source: "manual"}); !errors.Is(err, dto.ErrInvalid) {
+		t.Fatalf("expected dto.ErrInvalid for negative adjustment, got %v", err)
+	}
+}
+
+func TestPantryMarkEmpty(t *testing.T) {
+	f, _, _, lot := newPantryLedgerFixture(t)
+	svc := service.NewPantry(f)
+	out, err := svc.MarkEmpty(context.Background(), lot.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Quantity != 0 {
+		t.Fatalf("expected empty lot, got %v", out.Quantity)
+	}
+}
+
+func TestPantryOpen(t *testing.T) {
+	f, _, _, lot := newPantryLedgerFixture(t)
+	svc := service.NewPantry(f)
+	out, err := svc.Open(context.Background(), lot.String(), dto.PantryOpenInput{Source: "manual"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.OpenedAt.IsZero() {
+		t.Fatal("expected opened_at to be set")
+	}
+}
+
+func TestPantryOpenInvalid(t *testing.T) {
+	f, _, _, lot := newPantryLedgerFixture(t)
+	svc := service.NewPantry(f)
+	if _, err := svc.Open(context.Background(), lot.String(), dto.PantryOpenInput{}); !errors.Is(err, dto.ErrInvalid) {
+		t.Fatalf("expected dto.ErrInvalid for missing source, got %v", err)
+	}
+}
+
+func TestPantryTransferFull(t *testing.T) {
+	f, _, dst, lot := newPantryLedgerFixture(t)
+	svc := service.NewPantry(f)
+	out, err := svc.Transfer(context.Background(), lot.String(), dto.PantryTransferInput{LocationID: dst.String(), Quantity: 2.0, Source: "manual"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.ID != lot.String() || out.LocationID != dst.String() || out.Quantity != 2.0 {
+		t.Fatalf("unexpected transferred lot: %+v", out)
+	}
+}
+
+func TestPantryTransferPartial(t *testing.T) {
+	f, _, dst, lot := newPantryLedgerFixture(t)
+	svc := service.NewPantry(f)
+	out, err := svc.Transfer(context.Background(), lot.String(), dto.PantryTransferInput{LocationID: dst.String(), Quantity: 1.0, Source: "manual"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.ID == lot.String() || out.LocationID != dst.String() || out.Quantity != 1.0 {
+		t.Fatalf("unexpected partial transfer lot: %+v", out)
+	}
+}
+
+func TestPantryTransferInvalid(t *testing.T) {
+	f, _, dst, lot := newPantryLedgerFixture(t)
+	svc := service.NewPantry(f)
+	if _, err := svc.Transfer(context.Background(), lot.String(), dto.PantryTransferInput{LocationID: dst.String(), Quantity: 3.0, Source: "manual"}); !errors.Is(err, dto.ErrInvalid) {
+		t.Fatalf("expected dto.ErrInvalid for oversized transfer, got %v", err)
+	}
+	if _, err := svc.Transfer(context.Background(), lot.String(), dto.PantryTransferInput{Quantity: 1.0, Source: "manual"}); !errors.Is(err, dto.ErrInvalid) {
+		t.Fatalf("expected dto.ErrInvalid for missing destination, got %v", err)
 	}
 }
 

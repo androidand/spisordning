@@ -60,12 +60,13 @@ transfer, or a new lot ID for a partial transfer).
 `source` is required in the body, matching the existing `Consume` and `Purchase` routes. The UI
 sends `"manual"` for user-initiated actions.
 
-### D3: Validation stays at the persistence layer
+### D3: Persistence remains authoritative; the service classifies errors
 
-The service and handlers do not re-implement the ledger's invariants (quantity must be positive,
-transfer quantity cannot exceed the lot's quantity, adjust target must be non-negative). The
-persistence layer already enforces these atomically. The service parses IDs and maps errors; the
-handler maps validation errors to 400 and not-found errors to 404.
+The persistence layer remains the authority for the ledger's invariants (quantity must be positive,
+transfer quantity cannot exceed the lot's quantity, adjust target must be non-negative). The service
+performs a best-effort pre-read and pre-validation only to classify missing-lot and invalid-input
+errors before invoking the persistence command. The handler maps `dto.ErrInvalid` to 400 and
+`dto.ErrNotFound` to 404.
 
 ### D4: The UI adds compact per-lot actions
 

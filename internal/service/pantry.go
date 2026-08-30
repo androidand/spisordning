@@ -3,6 +3,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -175,6 +176,145 @@ func (s *Pantry) ListExpiring(ctx context.Context, within time.Duration) ([]dto.
 		})
 	}
 	return out, nil
+}
+
+func (s *Pantry) Discard(ctx context.Context, lotID string, in dto.PantryDiscardInput) (dto.PantryLot, error) {
+	lot, err := s.getLot(ctx, lotID)
+	if err != nil {
+		return dto.PantryLot{}, err
+	}
+	if in.Source == "" || in.Quantity <= 0 || in.Quantity > lot.Quantity {
+		return dto.PantryLot{}, fmt.Errorf("%w: discard quantity must be > 0 and <= lot quantity, and source is required", dto.ErrInvalid)
+	}
+	if err := s.db.RecordDiscard(ctx, lot.ID, in.Quantity, in.Estimated, in.Reason, in.Source); err != nil {
+		if errors.Is(err, persistence.ErrNoRows) {
+			return dto.PantryLot{}, fmt.Errorf("%w: lot %s not found", dto.ErrNotFound, lotID)
+		}
+		return dto.PantryLot{}, fmt.Errorf("service: discard: %w", err)
+	}
+	updated, err := s.db.GetInventoryLot(ctx, lot.ID)
+	if err != nil {
+		return dto.PantryLot{}, fmt.Errorf("service: discard: read lot: %w", err)
+	}
+	return pantryLotDTO(updated), nil
+}
+
+func (s *Pantry) Adjust(ctx context.Context, lotID string, in dto.PantryAdjustInput) (dto.PantryLot, error) {
+	if _, err := s.getLot(ctx, lotID); err != nil {
+		return dto.PantryLot{}, err
+	}
+	if in.Source == "" || in.Quantity < 0 {
+		return dto.PantryLot{}, fmt.Errorf("%w: adjust quantity must be >= 0, and source is required", dto.ErrInvalid)
+	}
+	lid, err := domain.ParseInventoryLotID(lotID)
+	if err != nil {
+		return dto.PantryLot{}, fmt.Errorf("%w: invalid lot id", dto.ErrInvalid)
+	}
+	if err := s.db.RecordAdjust(ctx, lid, in.Quantity, in.Estimated, in.Reason, in.Source); err != nil {
+		if errors.Is(err, persistence.ErrNoRows) {
+			return dto.PantryLot{}, fmt.Errorf("%w: lot %s not found", dto.ErrNotFound, lotID)
+		}
+		return dto.PantryLot{}, fmt.Errorf("service: adjust: %w", err)
+	}
+	updated, err := s.db.GetInventoryLot(ctx, lid)
+	if err != nil {
+		return dto.PantryLot{}, fmt.Errorf("service: adjust: read lot: %w", err)
+	}
+	return pantryLotDTO(updated), nil
+}
+
+func (s *Pantry) MarkEmpty(ctx context.Context, lotID string) (dto.PantryLot, error) {
+	lot, err := s.getLot(ctx, lotID)
+	if err != nil {
+		return dto.PantryLot{}, err
+	}
+	if err := s.db.RecordMarkEmpty(ctx, lot.ID); err != nil {
+		if errors.Is(err, persistence.ErrNoRows) {
+			return dto.PantryLot{}, fmt.Errorf("%w: lot %s not found", dto.ErrNotFound, lotID)
+		}
+		return dto.PantryLot{}, fmt.Errorf("service: mark empty: %w", err)
+	}
+	updated, err := s.db.GetInventoryLot(ctx, lot.ID)
+	if err != nil {
+		return dto.PantryLot{}, fmt.Errorf("service: mark empty: read lot: %w", err)
+	}
+	return pantryLotDTO(updated), nil
+}
+
+func (s *Pantry) Open(ctx context.Context, lotID string, in dto.PantryOpenInput) (dto.PantryLot, error) {
+	lot, err := s.getLot(ctx, lotID)
+	if err != nil {
+		return dto.PantryLot{}, err
+	}
+	if in.Source == "" {
+		return dto.PantryLot{}, fmt.Errorf("%w: source is required", dto.ErrInvalid)
+	}
+	if err := s.db.RecordOpen(ctx, lot.ID, in.Source); err != nil {
+		if errors.Is(err, persistence.ErrNoRows) {
+			return dto.PantryLot{}, fmt.Errorf("%w: lot %s not found", dto.ErrNotFound, lotID)
+		}
+		return dto.PantryLot{}, fmt.Errorf("service: open: %w", err)
+	}
+	updated, err := s.db.GetInventoryLot(ctx, lot.ID)
+	if err != nil {
+		return dto.PantryLot{}, fmt.Errorf("service: open: read lot: %w", err)
+	}
+	return pantryLotDTO(updated), nil
+}
+
+func (s *Pantry) Transfer(ctx context.Context, lotID string, in dto.PantryTransferInput) (dto.PantryLot, error) {
+	lot, err := s.getLot(ctx, lotID)
+	if err != nil {
+		return dto.PantryLot{}, err
+	}
+	if in.Source == "" || in.LocationID == "" || in.Quantity <= 0 || in.Quantity > lot.Quantity {
+		return dto.PantryLot{}, fmt.Errorf("%w: transfer quantity must be > 0 and <= lot quantity, and location_id and source are required", dto.ErrInvalid)
+	}
+	toLocationID, err := domain.ParseInventoryLocationID(in.LocationID)
+	if err != nil {
+		return dto.PantryLot{}, fmt.Errorf("%w: invalid destination location id", dto.ErrInvalid)
+	}
+	newLotID, err := s.db.RecordTransfer(ctx, lot.ID, toLocationID, in.Quantity, in.Source)
+	if err != nil {
+		if errors.Is(err, persistence.ErrNoRows) {
+			return dto.PantryLot{}, fmt.Errorf("%w: lot %s not found", dto.ErrNotFound, lotID)
+		}
+		return dto.PantryLot{}, fmt.Errorf("service: transfer: %w", err)
+	}
+	updated, err := s.db.GetInventoryLot(ctx, newLotID)
+	if err != nil {
+		return dto.PantryLot{}, fmt.Errorf("service: transfer: read lot: %w", err)
+	}
+	return pantryLotDTO(updated), nil
+}
+
+func (s *Pantry) getLot(ctx context.Context, lotID string) (persistence.InventoryLot, error) {
+	lid, err := domain.ParseInventoryLotID(lotID)
+	if err != nil {
+		return persistence.InventoryLot{}, fmt.Errorf("%w: invalid lot id", dto.ErrInvalid)
+	}
+	lot, err := s.db.GetInventoryLot(ctx, lid)
+	if err != nil {
+		if errors.Is(err, persistence.ErrNoRows) {
+			return persistence.InventoryLot{}, fmt.Errorf("%w: lot %s not found", dto.ErrNotFound, lotID)
+		}
+		return persistence.InventoryLot{}, fmt.Errorf("service: get lot: %w", err)
+	}
+	return lot, nil
+}
+
+func pantryLotDTO(l persistence.InventoryLot) dto.PantryLot {
+	var productID *string
+	if l.ProductID != nil {
+		p := l.ProductID.String()
+		productID = &p
+	}
+	return dto.PantryLot{
+		ID: l.ID.String(), IngredientID: l.IngredientID.String(), ProductID: productID,
+		LocationID: l.LocationID.String(), Quantity: l.Quantity, Unit: l.Unit,
+		Confidence: string(l.Confidence), BestBefore: nilOrTime(l.BestBefore),
+		OpenedAt: nilOrTime(l.OpenedAt), CreatedAt: l.CreatedAt, UpdatedAt: l.UpdatedAt,
+	}
 }
 
 func nilOrTime(t *time.Time) time.Time {

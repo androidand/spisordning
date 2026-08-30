@@ -55,15 +55,18 @@ API, OpenAPI, and frontend.
 
 - **Affected code:**
   - `internal/dto/pantry.go`
+  - `internal/dto/errors.go`
   - `internal/service/pantry.go`
+  - `internal/service/service.go`
   - `internal/httpapi/pantry.go`
   - `internal/httpapi/people.go`
   - `api/openapi.yaml`
   - `internal/openapi/types.gen.go`
   - `web/src/generated/spisordning.ts`
   - `web/src/pages/PantryPage.tsx`
-- **No persistence changes:** `internal/persistence/pantry.go` already implements the required
-  behavior.
+- **No persistence behavior changes:** `internal/persistence/pantry.go` already implements the
+  required ledger behavior. `GetInventoryLot` returns `persistence.ErrNoRows` for missing lots so
+  the service can classify 404 responses without string matching.
 - **No domain changes:** the event kinds, confidence rules, and source semantics already exist.
 - **No MCP changes:** this change is about the household product surface, not the MCP tool surface.
 - **No planner changes:** pantry reads used by planning/inspiration continue to work as before.

@@ -705,6 +705,34 @@ func (a storeAdapter) CreateFromChecklist(ctx context.Context, in httpapi.Shoppi
 	}, nil
 }
 
+// ListResolvedItemsSince returns the list's items that were confidently resolved
+// and pushed to a retailer wishlist since the given time (all resolved items when
+// since is the zero time). This is the cheap read the Apple Notes bridge polls to
+// learn which checklist lines to check off.
+func (a storeAdapter) ListResolvedItemsSince(ctx context.Context, listID string, since time.Time) ([]httpapi.ResolvedItemResponse, error) {
+	id, err := domain.ParseShoppingListID(listID)
+	if err != nil {
+		return nil, httpapi.ErrNotFound
+	}
+	items, err := a.db.ListResolvedItemsSince(ctx, id, since)
+	if err != nil {
+		return nil, fmt.Errorf("list resolved items: %w", err)
+	}
+	out := make([]httpapi.ResolvedItemResponse, 0, len(items))
+	for _, it := range items {
+		ri := httpapi.ResolvedItemResponse{
+			ID:           it.ID.String(),
+			Label:        it.Label,
+			NoteMatchKey: it.NoteMatchKey,
+		}
+		if it.ResolvedAt != nil {
+			ri.ResolvedAt = *it.ResolvedAt
+		}
+		out = append(out, ri)
+	}
+	return out, nil
+}
+
 func (a storeAdapter) GetShoppingList(ctx context.Context, listID string) (httpapi.ShoppingListResponse, error) {
 	id, err := domain.ParseShoppingListID(listID)
 	if err != nil {

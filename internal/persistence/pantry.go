@@ -213,7 +213,7 @@ func (s *Store) GetInventoryLot(ctx context.Context, id domain.InventoryLotID) (
 		return InventoryLot{}, err
 	}
 	if len(lots) == 0 {
-		return InventoryLot{}, fmt.Errorf("persistence: inventory_lot %s not found", id)
+		return InventoryLot{}, fmt.Errorf("persistence: inventory_lot %s: %w", id, ErrNoRows)
 	}
 	return lots[0], nil
 }

@@ -723,13 +723,102 @@ export type paths = {
   };
   "/pantry/lots/{id}/consume": {
     post: {
-      parameters: { query?: never; header?: never; path: { id: number }; cookie?: never };
+      parameters: { query?: never; header?: never; path: { id: string }; cookie?: never };
       requestBody: {
         content: { "application/json": components["schemas"]["ConsumeNew"] };
       };
       responses: {
         200: {
           content: { "application/json": { status: string } };
+        };
+        404: {
+          content: { "application/json": components["schemas"]["Error"] };
+        };
+      };
+    };
+  };
+  "/pantry/lots/{id}/discard": {
+    post: {
+      parameters: { query?: never; header?: never; path: { id: string }; cookie?: never };
+      requestBody: {
+        content: { "application/json": components["schemas"]["PantryDiscardNew"] };
+      };
+      responses: {
+        200: {
+          content: { "application/json": components["schemas"]["PantryLot"] };
+        };
+        400: {
+          content: { "application/json": components["schemas"]["Error"] };
+        };
+        404: {
+          content: { "application/json": components["schemas"]["Error"] };
+        };
+      };
+    };
+  };
+  "/pantry/lots/{id}/adjust": {
+    post: {
+      parameters: { query?: never; header?: never; path: { id: string }; cookie?: never };
+      requestBody: {
+        content: { "application/json": components["schemas"]["PantryAdjustNew"] };
+      };
+      responses: {
+        200: {
+          content: { "application/json": components["schemas"]["PantryLot"] };
+        };
+        400: {
+          content: { "application/json": components["schemas"]["Error"] };
+        };
+        404: {
+          content: { "application/json": components["schemas"]["Error"] };
+        };
+      };
+    };
+  };
+  "/pantry/lots/{id}/mark-empty": {
+    post: {
+      parameters: { query?: never; header?: never; path: { id: string }; cookie?: never };
+      responses: {
+        200: {
+          content: { "application/json": components["schemas"]["PantryLot"] };
+        };
+        404: {
+          content: { "application/json": components["schemas"]["Error"] };
+        };
+      };
+    };
+  };
+  "/pantry/lots/{id}/open": {
+    post: {
+      parameters: { query?: never; header?: never; path: { id: string }; cookie?: never };
+      requestBody: {
+        content: { "application/json": components["schemas"]["PantryOpenNew"] };
+      };
+      responses: {
+        200: {
+          content: { "application/json": components["schemas"]["PantryLot"] };
+        };
+        400: {
+          content: { "application/json": components["schemas"]["Error"] };
+        };
+        404: {
+          content: { "application/json": components["schemas"]["Error"] };
+        };
+      };
+    };
+  };
+  "/pantry/lots/{id}/transfer": {
+    post: {
+      parameters: { query?: never; header?: never; path: { id: string }; cookie?: never };
+      requestBody: {
+        content: { "application/json": components["schemas"]["PantryTransferNew"] };
+      };
+      responses: {
+        200: {
+          content: { "application/json": components["schemas"]["PantryLot"] };
+        };
+        400: {
+          content: { "application/json": components["schemas"]["Error"] };
         };
         404: {
           content: { "application/json": components["schemas"]["Error"] };
@@ -1666,9 +1755,24 @@ export interface components {
 
     /** InventoryLot — a quantity of an ingredient at a location. */
     InventoryLot: {
-      id: number;
+      id: string;
       ingredient_id: string;
-      product_id: string;
+      product_id?: string | null;
+      location_id: string;
+      quantity: number;
+      unit: string;
+      confidence: string;
+      best_before?: string;
+      opened_at?: string;
+      created_at: string;
+      updated_at: string;
+    };
+
+    /** PantryLot — pantry lot returned by the pantry event ledger. */
+    PantryLot: {
+      id: string;
+      ingredient_id: string;
+      product_id?: string | null;
       location_id: string;
       quantity: number;
       unit: string;
@@ -1694,6 +1798,34 @@ export interface components {
     ConsumeNew: {
       quantity: number;
       estimated: boolean;
+      source: string;
+    };
+
+    /** PantryDiscardNew — discard part or all of a pantry lot. */
+    PantryDiscardNew: {
+      quantity: number;
+      estimated?: boolean;
+      reason?: string;
+      source: string;
+    };
+
+    /** PantryAdjustNew — correct the observed quantity of a pantry lot. */
+    PantryAdjustNew: {
+      quantity: number;
+      estimated?: boolean;
+      reason?: string;
+      source: string;
+    };
+
+    /** PantryOpenNew — record that a sealed pantry lot was opened. */
+    PantryOpenNew: {
+      source: string;
+    };
+
+    /** PantryTransferNew — move part or all of a pantry lot. */
+    PantryTransferNew: {
+      location_id: string;
+      quantity: number;
       source: string;
     };
 

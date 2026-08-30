@@ -2,71 +2,51 @@
 
 ## 1. Migration: activate the existing discovery schema
 
-- [ ] 1.1 Create `db/migrations/000019_recipe_discovery_activation.sql`.
-- [ ] 1.2 Seed the default `web-jsonld` source in `external_recipe_source` with
-  `kind = 'jsonld_web'`, `decision = 'integrate_now'`, and `enabled = true`.
-- [ ] 1.3 Add the deferred foreign key from `recipe_import_candidate.promoted_variant_id` to
-  `recipe_variant(id)` with `ON DELETE SET NULL`.
-- [ ] 1.4 Add a `+goose Down` section that drops the foreign key and deletes the seeded source.
+- [x] 1.1 Create `db/migrations/000019_recipe_discovery_activation.sql` — Created migration that seeds `web-jsonld` source and binds the deferred FK from `recipe_import_candidate.promoted_variant_id` to `recipe_variant(id)` with `ON DELETE SET NULL`. Build passes; openspec validate passes.
+- [x] 1.2 Seed the default `web-jsonld` source in `external_recipe_source` with
+  `kind = 'jsonld_web'`, `decision = 'integrate_now'`, and `enabled = true` — Done as part of 1.1 migration (INSERT ... ON CONFLICT DO NOTHING).
+- [x] 1.3 Add the deferred foreign key from `recipe_import_candidate.promoted_variant_id` to
+  `recipe_variant(id)` with `ON DELETE SET NULL` — Done as part of 1.1 migration. Original 000003 used RESTRICT; this migration drops and re-adds with SET NULL so promoted variants can be deleted.
+- [x] 1.4 Add a `+goose Down` section that drops the foreign key and deletes the seeded source — Done as part of 1.1 migration (DROP CONSTRAINT + DELETE WHERE id = 'web-jsonld').
 
 ## 2. Persistence layer
 
-- [ ] 2.1 Create `internal/persistence/recipe_discovery.go`.
-- [ ] 2.2 Define persistence types for `ExternalRecipeSource`, `ImportCandidate`, and
-  `ImportCandidateIngredient`.
-- [ ] 2.3 Implement `GetExternalRecipeSource(ctx, id)` and `UpsertExternalRecipeSource(ctx, src)`.
-- [ ] 2.4 Implement `SaveImportCandidate(ctx, c)` that upserts the candidate row using the
-  existing unique indexes (`source_id + external_id` or `source_url`).
-- [ ] 2.5 Implement `SaveCandidateIngredients(ctx, candidateID, lines)` that replaces the
-  candidate's ingredient lines.
-- [ ] 2.6 Implement `GetImportCandidate(ctx, id)` returning the candidate plus its ingredient
-  lines.
-- [ ] 2.7 Implement `ListImportCandidates(ctx, status)` returning candidates ordered by
-  `imported_at DESC`.
-- [ ] 2.8 Implement `SetCandidateStatus(ctx, id, status)`.
-- [ ] 2.9 Implement `SetCandidatePromoted(ctx, id, variantID)` that sets status to `promoted` and
-  sets `promoted_variant_id`.
+- [x] 2.1 Create `internal/persistence/recipe_discovery.go` — Created with types `ExternalRecipeSource`, `ImportCandidate`, `ImportCandidateIngredient` and methods: `GetExternalRecipeSource`, `UpsertExternalRecipeSource`, `SaveImportCandidate`, `SaveCandidateIngredients`, `GetImportCandidate`, `ListImportCandidates`, `SetCandidateStatus`, `SetCandidatePromoted`, `ListCandidateIngredients`. Build passes; openspec validate passes.
+- [x] 2.2 Define persistence types for `ExternalRecipeSource`, `ImportCandidate`, and
+  `ImportCandidateIngredient` — Done as part of 2.1.
+- [x] 2.3 Implement `GetExternalRecipeSource(ctx, id)` and `UpsertExternalRecipeSource(ctx, src)` — Done as part of 2.1.
+- [x] 2.4 Implement `SaveImportCandidate(ctx, c)` that upserts the candidate row using the
+  existing unique indexes (`source_id + external_id` or `source_url`) — Done as part of 2.1. Two code paths handle the dual unique indexes.
+- [x] 2.5 Implement `SaveCandidateIngredients(ctx, candidateID, lines)` that replaces the
+  candidate's ingredient lines — DELETE existing + re-insert all lines. Done as part of 2.1.
+- [x] 2.6 Implement `GetImportCandidate(ctx, id)` returning the candidate plus its ingredient
+  lines — `GetImportCandidate` returns the candidate row; `ListCandidateIngredients` fetches the lines separately. Done as part of 2.1.
+- [x] 2.7 Implement `ListImportCandidates(ctx, status)` returning candidates ordered by
+  `imported_at DESC` — Done as part of 2.1. Optional status filter supported.
+- [x] 2.8 Implement `SetCandidateStatus(ctx, id, status)` — Done as part of 2.1.
+- [x] 2.9 Implement `SetCandidatePromoted(ctx, id, variantID)` that sets status to `promoted` and
+  sets `promoted_variant_id` — Done as part of 2.1.
 
 ## 3. DTOs and service interface
 
-- [ ] 3.1 Create `internal/dto/recipe_discovery.go`.
-- [ ] 3.2 Define `DiscoverRecipeInput` with `url` and optional `source_id`.
-- [ ] 3.3 Define `ImportCandidateResponse` with id, source id, source URL, external id, title,
-  description, image URL, servings, times, category, cuisine, attribution, rating, license note,
-  imported at, status, promoted variant id, and ingredients.
-- [ ] 3.4 Define `ImportCandidateIngredientResponse` with line number, raw text, quantity, unit,
-  ingredient id, and `needs_review`.
-- [ ] 3.5 Define `PromoteCandidateInput` with optional `family_id`.
-- [ ] 3.6 Define `PromoteCandidateResponse` with family id, variant id, revision id, and candidate
-  status.
-- [ ] 3.7 Define the `DiscoveryService` interface: `DiscoverFromURL`, `ListCandidates`,
-  `GetCandidate`, `RejectCandidate`, `PromoteCandidate`.
+- [x] 3.1 Create `internal/dto/recipe_discovery.go` — Created with `DiscoverRecipeInput`, `ImportCandidateIngredientResponse`, `ImportCandidateResponse`, `PromoteCandidateInput`, `PromoteCandidateResponse`, and `DiscoveryService` interface. Build passes.
+- [x] 3.2 Define `DiscoverRecipeInput` with `url` and optional `source_id` — Done as part of 3.1.
+- [x] 3.3 Define `ImportCandidateResponse` — Done as part of 3.1. Includes all requested fields plus `ingredients`.
+- [x] 3.4 Define `ImportCandidateIngredientResponse` — Done as part of 3.1.
+- [x] 3.5 Define `PromoteCandidateInput` with optional `family_id` — Done as part of 3.1.
+- [x] 3.6 Define `PromoteCandidateResponse` — Done as part of 3.1.
+- [x] 3.7 Define the `DiscoveryService` interface — Done as part of 3.1.
 
 ## 4. Discovery service
 
-- [ ] 4.1 Create `internal/service/discovery.go`.
-- [ ] 4.2 Implement `NewDiscovery(db Store, family dto.RecipeFamilyService, httpClient *http.Client)`.
-- [ ] 4.3 Implement `DiscoverFromURL`:
-  - validate the URL scheme is `http` or `https`,
-  - fetch the page with a timeout,
-  - call `recipeimport.ExtractRecipeJSONLD`,
-  - call `recipeimport.ParseRecipe`,
-  - resolve the source (default `web-jsonld`),
-  - call `recipeimport.CandidateFromParsed`,
-  - persist the candidate and its ingredient lines,
-  - return the stored candidate.
-- [ ] 4.4 Implement `ListCandidates` with optional status filtering.
-- [ ] 4.5 Implement `GetCandidate` mapping persistence rows to DTOs.
-- [ ] 4.6 Implement `RejectCandidate`, rejecting only candidates that are not already promoted.
-- [ ] 4.7 Implement `PromoteCandidate`:
-  - load the candidate,
-  - if already promoted, return the existing linked content,
-  - create or reuse the target family,
-  - create a variant with source attribution from the candidate,
-  - create the initial revision from the candidate's parsed content,
-  - set the new variant as default when a new family was created,
-  - mark the candidate promoted and link `promoted_variant_id`.
-- [ ] 4.8 Ensure promotion preserves raw ingredient text for unresolved lines.
+- [x] 4.1 Create `internal/service/discovery.go` — Created with `NewDiscovery`, `DiscoverFromURL`, `ListCandidates`, `GetCandidate`, `RejectCandidate`, `PromoteCandidate`. Also added discovery methods to the `Store` interface in `service.go`. Build passes; openspec validate passes.
+- [x] 4.2 Implement `NewDiscovery(db Store, family dto.RecipeFamilyService, httpClient *http.Client)` — Done as part of 4.1. Uses default HTTP client when nil.
+- [x] 4.3 Implement `DiscoverFromURL` — Done as part of 4.1. Validates URL scheme, fetches page, extracts JSON-LD, parses, resolves source (default `web-jsonld`), persists candidate + ingredients, returns DTO.
+- [x] 4.4 Implement `ListCandidates` with optional status filtering — Done as part of 4.1.
+- [x] 4.5 Implement `GetCandidate` mapping persistence rows to DTOs — Done as part of 4.1.
+- [x] 4.6 Implement `RejectCandidate`, rejecting only candidates that are not already promoted — Done as part of 4.1.
+- [x] 4.7 Implement `PromoteCandidate` — Done as part of 4.1. Idempotent for already-promoted candidates. Creates family (or reuses), variant, revision; re-parses raw_jsonld for instructions/ingredients.
+- [x] 4.8 Ensure promotion preserves raw ingredient text for unresolved lines — Raw text is stored in `recipe_import_candidate_ingredient.raw_text` and also in the revision's `ingredients` JSONB via `domain.Ingredient.RawText`.
 
 ## 5. HTTP API
 

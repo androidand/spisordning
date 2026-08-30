@@ -519,6 +519,83 @@ func (a dbAdapter) Consume(ctx context.Context, lotID string, in dto.PantryConsu
 	return a.store.RecordConsume(ctx, id, in.Quantity, in.Estimated, in.Source)
 }
 
+func (a dbAdapter) Discard(ctx context.Context, lotID string, in dto.PantryDiscardInput) (dto.PantryLot, error) {
+	id, err := domain.ParseInventoryLotID(lotID)
+	if err != nil {
+		return dto.PantryLot{}, err
+	}
+	if err := a.store.RecordDiscard(ctx, id, in.Quantity, in.Estimated, in.Reason, in.Source); err != nil {
+		return dto.PantryLot{}, err
+	}
+	return a.lotAfter(ctx, id)
+}
+
+func (a dbAdapter) Adjust(ctx context.Context, lotID string, in dto.PantryAdjustInput) (dto.PantryLot, error) {
+	id, err := domain.ParseInventoryLotID(lotID)
+	if err != nil {
+		return dto.PantryLot{}, err
+	}
+	if err := a.store.RecordAdjust(ctx, id, in.Quantity, in.Estimated, in.Reason, in.Source); err != nil {
+		return dto.PantryLot{}, err
+	}
+	return a.lotAfter(ctx, id)
+}
+
+func (a dbAdapter) MarkEmpty(ctx context.Context, lotID string) (dto.PantryLot, error) {
+	id, err := domain.ParseInventoryLotID(lotID)
+	if err != nil {
+		return dto.PantryLot{}, err
+	}
+	if err := a.store.RecordMarkEmpty(ctx, id); err != nil {
+		return dto.PantryLot{}, err
+	}
+	return a.lotAfter(ctx, id)
+}
+
+func (a dbAdapter) Open(ctx context.Context, lotID string, in dto.PantryOpenInput) (dto.PantryLot, error) {
+	id, err := domain.ParseInventoryLotID(lotID)
+	if err != nil {
+		return dto.PantryLot{}, err
+	}
+	if err := a.store.RecordOpen(ctx, id, in.Source); err != nil {
+		return dto.PantryLot{}, err
+	}
+	return a.lotAfter(ctx, id)
+}
+
+func (a dbAdapter) Transfer(ctx context.Context, lotID string, in dto.PantryTransferInput) (dto.PantryLot, error) {
+	id, err := domain.ParseInventoryLotID(lotID)
+	if err != nil {
+		return dto.PantryLot{}, err
+	}
+	toLocationID, err := domain.ParseInventoryLocationID(in.LocationID)
+	if err != nil {
+		return dto.PantryLot{}, err
+	}
+	newLotID, err := a.store.RecordTransfer(ctx, id, toLocationID, in.Quantity, in.Source)
+	if err != nil {
+		return dto.PantryLot{}, err
+	}
+	return a.lotAfter(ctx, newLotID)
+}
+
+func (a dbAdapter) lotAfter(ctx context.Context, id domain.InventoryLotID) (dto.PantryLot, error) {
+	lot, err := a.store.GetInventoryLot(ctx, id)
+	if err != nil {
+		return dto.PantryLot{}, err
+	}
+	var productID *string
+	if lot.ProductID != nil {
+		p := lot.ProductID.String()
+		productID = &p
+	}
+	return dto.PantryLot{
+		ID: lot.ID.String(), IngredientID: lot.IngredientID.String(), ProductID: productID,
+		LocationID: lot.LocationID.String(), Quantity: lot.Quantity, Unit: lot.Unit,
+		Confidence: string(lot.Confidence), CreatedAt: lot.CreatedAt,
+	}, nil
+}
+
 func (a dbAdapter) ListExpiring(ctx context.Context, within time.Duration) ([]dto.PantryLot, error) {
 	lots, err := a.store.ListExpiringLots(ctx, within)
 	if err != nil {

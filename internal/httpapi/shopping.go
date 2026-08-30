@@ -19,6 +19,21 @@ type ShoppingListService interface {
 	CreateFromChecklist(ctx context.Context, in ShoppingListFromChecklistInput) (ShoppingListFromChecklistResponse, error)
 	GetShoppingList(ctx context.Context, listID string) (ShoppingListResponse, error)
 	ArchiveShoppingList(ctx context.Context, listID string) error
+	// ListResolvedItemsSince returns the list's items that were confidently
+	// resolved and pushed to a retailer wishlist since the given time (all
+	// resolved items when since is the zero time). This is the cheap read the
+	// Apple Notes bridge polls to learn which checklist lines to check off.
+	ListResolvedItemsSince(ctx context.Context, listID string, since time.Time) ([]ResolvedItemResponse, error)
+}
+
+// ResolvedItemResponse is the JSON view for GET /shopping-lists/{listId}/
+// resolved-since. It carries the normalized note_match_key so the notes-bridge
+// can match the item back to its checklist line without re-parsing the note.
+type ResolvedItemResponse struct {
+	ID           string    `json:"id"`
+	Label        *string   `json:"label,omitempty"`
+	NoteMatchKey *string   `json:"note_match_key,omitempty"`
+	ResolvedAt   time.Time `json:"resolved_at"`
 }
 
 // ShoppingListResponse is the JSON view (openapi: components/schemas/ShoppingList).
@@ -66,6 +81,7 @@ type shoppingListCreateHandler struct{ svc ShoppingListService }
 type shoppingListFromChecklistHandler struct{ svc ShoppingListService }
 type shoppingListGetHandler struct{ svc ShoppingListService }
 type shoppingListArchiveHandler struct{ svc ShoppingListService }
+type shoppingListResolvedSinceHandler struct{ svc ShoppingListService }
 
 func (h *shoppingListListHandler) listShoppingLists(w http.ResponseWriter, r *http.Request) {
 	out, err := h.svc.ListShoppingLists(r.Context())
@@ -157,6 +173,32 @@ func (h *shoppingListArchiveHandler) archiveShoppingList(w http.ResponseWriter, 
 		return
 	}
 	writeJSON(w, http.StatusOK, ShoppingListResponse{})
+}
+
+// listResolvedItemsSince handles GET /shopping-lists/{listId}/resolved-since.
+// The optional ?since=<RFC3339> bounds the result to items resolved at or after
+// that time; omitting it returns every resolved item on the list.
+func (h *shoppingListResolvedSinceHandler) listResolvedItemsSince(w http.ResponseWriter, r *http.Request) {
+	listID := r.PathValue("listId")
+	var since time.Time
+	if v := r.URL.Query().Get("since"); v != "" {
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, errorBody{Message: "invalid 'since' (want RFC3339)"})
+			return
+		}
+		since = t
+	}
+	out, err := h.svc.ListResolvedItemsSince(r.Context(), listID, since)
+	if errors.Is(err, ErrNotFound) {
+		writeJSON(w, http.StatusNotFound, errorBody{Message: "shopping list " + listID + " not found"})
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "list resolved items: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // ── Shopping list items service ───────────────────────────────────────────────

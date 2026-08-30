@@ -1192,6 +1192,125 @@ paths:
                 type: array
                 items: { $ref: '#/components/schemas/PantryLot' }
 
+  /pantry/lots/{id}/discard:
+    post:
+      summary: Discard part or all of a pantry lot
+      operationId: discardPantryLot
+      tags: [pantry]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PantryDiscardNew' }
+      responses:
+        '200':
+          description: updated lot
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PantryLot' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /pantry/lots/{id}/adjust:
+    post:
+      summary: Correct the observed quantity of a pantry lot
+      operationId: adjustPantryLot
+      tags: [pantry]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PantryAdjustNew' }
+      responses:
+        '200':
+          description: updated lot
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PantryLot' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /pantry/lots/{id}/mark-empty:
+    post:
+      summary: Mark a pantry lot as empty
+      operationId: markPantryLotEmpty
+      tags: [pantry]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: updated lot
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PantryLot' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /pantry/lots/{id}/open:
+    post:
+      summary: Record that a sealed pantry lot was opened
+      operationId: openPantryLot
+      tags: [pantry]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PantryOpenNew' }
+      responses:
+        '200':
+          description: updated lot
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PantryLot' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /pantry/lots/{id}/transfer:
+    post:
+      summary: Move part or all of a pantry lot to another location
+      operationId: transferPantryLot
+      tags: [pantry]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PantryTransferNew' }
+      responses:
+        '200':
+          description: updated lot
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PantryLot' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
 components:
   parameters:
     ShoppingListId:
@@ -1227,11 +1346,17 @@ components:
       schema: { type: integer }
 
   responses:
+    BadRequest:
+      description: invalid request
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     NotFound:
       description: resource not found
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     Conflict:
       description: state conflict (e.g. decisions on a non-approved plan)
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    InternalServerError:
+      description: internal server error
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
 
   schemas:
@@ -1479,6 +1604,38 @@ components:
         opened_at: { type: string, format: date-time, nullable: true }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+
+    PantryDiscardNew:
+      type: object
+      required: [quantity, source]
+      properties:
+        quantity: { type: number, minimum: 0, exclusiveMinimum: true }
+        estimated: { type: boolean, default: false }
+        reason: { type: string }
+        source: { type: string }
+
+    PantryAdjustNew:
+      type: object
+      required: [quantity, source]
+      properties:
+        quantity: { type: number, minimum: 0 }
+        estimated: { type: boolean, default: false }
+        reason: { type: string }
+        source: { type: string }
+
+    PantryOpenNew:
+      type: object
+      required: [source]
+      properties:
+        source: { type: string }
+
+    PantryTransferNew:
+      type: object
+      required: [location_id, quantity, source]
+      properties:
+        location_id: { type: string }
+        quantity: { type: number, minimum: 0, exclusiveMinimum: true }
+        source: { type: string }
 
     StoreOffer:
       type: object

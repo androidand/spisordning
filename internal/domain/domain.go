@@ -111,6 +111,31 @@ func CanonicalIngredientID(foodName string) string {
 	return strings.ToLower(strings.TrimSpace(foodName))
 }
 
+// NormalizeLabel is the match key for Apple Notes sync: the label lowercased,
+// trimmed, and with internal whitespace runs collapsed to single spaces. It
+// mirrors the notes-sync bridge's normalizeKey (core.ts) so an item ingested
+// from a checklist can be matched back to the same checklist line on write-back
+// by a plain equality, without fuzzy-matching the live note.
+func NormalizeLabel(label string) string {
+	trimmed := strings.TrimSpace(label)
+	lower := strings.ToLower(trimmed)
+	var result []byte
+	prevSpace := false
+	for i := 0; i < len(lower); i++ {
+		c := lower[i]
+		if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
+			if !prevSpace && len(result) > 0 {
+				result = append(result, ' ')
+				prevSpace = true
+			}
+		} else {
+			result = append(result, c)
+			prevSpace = false
+		}
+	}
+	return string(result)
+}
+
 // PlanContext is everything about a given day/slot that is not the candidate
 // itself: who is eating, what they prefer, how much energy the cook has, what
 // was eaten recently, what the kids already had at school, and what is on
