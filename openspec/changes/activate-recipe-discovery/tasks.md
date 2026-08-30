@@ -58,11 +58,10 @@
 
 ## 6. OpenAPI and codegen
 
-- [ ] 6.1 Add the discovery paths and schemas to `api/openapi.yaml`.
-- [ ] 6.2 Add schemas for `DiscoverRecipeRequest`, `ImportCandidate`, `ImportCandidateIngredient`,
-  `PromoteCandidateRequest`, and `PromoteCandidateResponse`.
-- [ ] 6.3 Run `make generate-openapi` and commit `internal/openapi/types.gen.go`.
-- [ ] 6.4 Run the web client codegen and commit `web/src/generated/spisordning.ts`.
+- [x] 6.1 Add the discovery paths and schemas to `api/openapi.yaml` — Added `POST /recipes/discover`, `GET /recipes/discovery/candidates`, `GET /recipes/discovery/candidates/{id}`, `POST .../reject`, `POST .../promote` (tag `discovery`), reusing `BadRequest`/`NotFound` responses.
+- [x] 6.2 Add schemas for `DiscoverRecipeRequest`, `ImportCandidate`, `ImportCandidateIngredient`, `PromoteCandidateRequest`, and `PromoteCandidateResponse` — All five added under `components/schemas`, field-for-field with the Go DTOs.
+- [x] 6.3 Run `make generate-openapi` and commit `internal/openapi/types.gen.go` — Regenerated; 5 new types, idempotent on re-run, build/vet/test green.
+- [x] 6.4 Run the web client codegen and commit `web/src/generated/spisordning.ts` — Web types are hand-maintained (not codegen'd, per web/README.md TS7 note); transcribed the 5 paths + 5 schemas into `spisordning.ts`. `tsc -b` and ESLint pass.
 
 ## 7. MCP tools
 

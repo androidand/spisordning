@@ -1021,6 +1021,74 @@ export type paths = {
       };
     };
   };
+  "/recipes/discover": {
+    post: {
+      parameters: { query?: never; header?: never; path?: never; cookie?: never };
+      requestBody: {
+        content: { "application/json": components["schemas"]["DiscoverRecipeRequest"] };
+      };
+      responses: {
+        201: {
+          content: { "application/json": components["schemas"]["ImportCandidate"] };
+        };
+        400: {
+          content: { "application/json": components["schemas"]["Error"] };
+        };
+      };
+    };
+  };
+  "/recipes/discovery/candidates": {
+    get: {
+      parameters: { query?: { status?: string }; header?: never; path?: never; cookie?: never };
+      responses: {
+        200: {
+          content: { "application/json": components["schemas"]["ImportCandidate"][] };
+        };
+      };
+    };
+  };
+  "/recipes/discovery/candidates/{id}": {
+    get: {
+      parameters: { query?: never; header?: never; path: { id: string }; cookie?: never };
+      responses: {
+        200: {
+          content: { "application/json": components["schemas"]["ImportCandidate"] };
+        };
+        404: {
+          content: { "application/json": components["schemas"]["Error"] };
+        };
+      };
+    };
+  };
+  "/recipes/discovery/candidates/{id}/reject": {
+    post: {
+      parameters: { query?: never; header?: never; path: { id: string }; cookie?: never };
+      responses: {
+        200: {
+          content: { "application/json": { status: string } };
+        };
+        404: {
+          content: { "application/json": components["schemas"]["Error"] };
+        };
+      };
+    };
+  };
+  "/recipes/discovery/candidates/{id}/promote": {
+    post: {
+      parameters: { query?: never; header?: never; path: { id: string }; cookie?: never };
+      requestBody: {
+        content: { "application/json": components["schemas"]["PromoteCandidateRequest"] };
+      };
+      responses: {
+        200: {
+          content: { "application/json": components["schemas"]["PromoteCandidateResponse"] };
+        };
+        404: {
+          content: { "application/json": components["schemas"]["Error"] };
+        };
+      };
+    };
+  };
   "/prices": {
     get: {
       parameters: { query?: never; header?: never; path?: never; cookie?: never };
@@ -1945,6 +2013,60 @@ export interface components {
       ingredients: components["schemas"]["RecipeIngredient"][];
       steps: string[];
       parent_revision_id?: number | null;
+    };
+
+    /** DiscoverRecipeRequest — fetch an external recipe URL and stage a candidate. */
+    DiscoverRecipeRequest: {
+      url: string;
+      source_id?: string;
+    };
+
+    /** ImportCandidateIngredient — one parsed ingredient line of a candidate. */
+    ImportCandidateIngredient: {
+      line_no: number;
+      raw_text: string;
+      quantity?: number | null;
+      unit: string;
+      ingredient_id?: string | null;
+      needs_review: boolean;
+    };
+
+    /** ImportCandidate — a staged external recipe awaiting review/promotion. */
+    ImportCandidate: {
+      id: string;
+      source_id: string;
+      source_url: string;
+      external_id?: string | null;
+      title: string;
+      description?: string | null;
+      image_url?: string | null;
+      servings?: number | null;
+      prep_time_sec?: number | null;
+      cook_time_sec?: number | null;
+      total_time_sec?: number | null;
+      category?: string | null;
+      cuisine?: string | null;
+      attribution?: string | null;
+      rating?: number | null;
+      rating_count?: number | null;
+      license_note?: string | null;
+      imported_at: string;
+      status: "candidate" | "promoted" | "rejected";
+      promoted_variant_id?: string | null;
+      ingredients: components["schemas"]["ImportCandidateIngredient"][];
+    };
+
+    /** PromoteCandidateRequest — optional family to reuse on promotion. */
+    PromoteCandidateRequest: {
+      family_id?: string;
+    };
+
+    /** PromoteCandidateResponse — the native recipe content created on promotion. */
+    PromoteCandidateResponse: {
+      family_id: string;
+      variant_id: string;
+      revision_id: string;
+      candidate_status: "promoted";
     };
 
     /** Favorite — an explicit favorite marker on a recipe. */

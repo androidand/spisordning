@@ -24,6 +24,27 @@ func (e HealthStatus) Valid() bool {
 	}
 }
 
+// Defines values for ImportCandidateStatus.
+const (
+	ImportCandidateStatusCandidate ImportCandidateStatus = "candidate"
+	ImportCandidateStatusPromoted  ImportCandidateStatus = "promoted"
+	ImportCandidateStatusRejected  ImportCandidateStatus = "rejected"
+)
+
+// Valid indicates whether the value is a known member of the ImportCandidateStatus enum.
+func (e ImportCandidateStatus) Valid() bool {
+	switch e {
+	case ImportCandidateStatusCandidate:
+		return true
+	case ImportCandidateStatusPromoted:
+		return true
+	case ImportCandidateStatusRejected:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MealPlanStatus.
 const (
 	MealPlanStatusApproved MealPlanStatus = "approved"
@@ -126,6 +147,21 @@ func (e PlanRunResultStatus) Valid() bool {
 	case Accepted:
 		return true
 	case Failed:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PromoteCandidateResponseCandidateStatus.
+const (
+	PromoteCandidateResponseCandidateStatusPromoted PromoteCandidateResponseCandidateStatus = "promoted"
+)
+
+// Valid indicates whether the value is a known member of the PromoteCandidateResponseCandidateStatus enum.
+func (e PromoteCandidateResponseCandidateStatus) Valid() bool {
+	switch e {
+	case PromoteCandidateResponseCandidateStatusPromoted:
 		return true
 	default:
 		return false
@@ -253,6 +289,15 @@ type DashboardTonight struct {
 	ServedOn string    `json:"served_on"`
 }
 
+// DiscoverRecipeRequest defines model for DiscoverRecipeRequest.
+type DiscoverRecipeRequest struct {
+	// SourceId defaults to web-jsonld when omitted
+	SourceId *string `json:"source_id,omitempty"`
+
+	// Url absolute http(s) URL of the recipe page
+	Url string `json:"url"`
+}
+
 // EffortProfile defines model for EffortProfile.
 type EffortProfile struct {
 	KitchenEnergy int `json:"kitchen_energy"`
@@ -334,6 +379,46 @@ type Health struct {
 
 // HealthStatus defines model for Health.Status.
 type HealthStatus string
+
+// ImportCandidate defines model for ImportCandidate.
+type ImportCandidate struct {
+	Attribution       *string                     `json:"attribution,omitempty"`
+	Category          *string                     `json:"category,omitempty"`
+	CookTimeSec       *int                        `json:"cook_time_sec,omitempty"`
+	Cuisine           *string                     `json:"cuisine,omitempty"`
+	Description       *string                     `json:"description,omitempty"`
+	ExternalId        *string                     `json:"external_id,omitempty"`
+	Id                string                      `json:"id"`
+	ImageUrl          *string                     `json:"image_url,omitempty"`
+	ImportedAt        time.Time                   `json:"imported_at"`
+	Ingredients       []ImportCandidateIngredient `json:"ingredients"`
+	LicenseNote       *string                     `json:"license_note,omitempty"`
+	PrepTimeSec       *int                        `json:"prep_time_sec,omitempty"`
+	PromotedVariantId *string                     `json:"promoted_variant_id,omitempty"`
+	Rating            *float32                    `json:"rating,omitempty"`
+	RatingCount       *int                        `json:"rating_count,omitempty"`
+	Servings          *int                        `json:"servings,omitempty"`
+	SourceId          string                      `json:"source_id"`
+	SourceUrl         string                      `json:"source_url"`
+	Status            ImportCandidateStatus       `json:"status"`
+	Title             string                      `json:"title"`
+	TotalTimeSec      *int                        `json:"total_time_sec,omitempty"`
+}
+
+// ImportCandidateStatus defines model for ImportCandidate.Status.
+type ImportCandidateStatus string
+
+// ImportCandidateIngredient defines model for ImportCandidateIngredient.
+type ImportCandidateIngredient struct {
+	IngredientId *string `json:"ingredient_id,omitempty"`
+	LineNo       int     `json:"line_no"`
+
+	// NeedsReview true when the line could not be fully resolved
+	NeedsReview bool     `json:"needs_review"`
+	Quantity    *float32 `json:"quantity,omitempty"`
+	RawText     string   `json:"raw_text"`
+	Unit        string   `json:"unit"`
+}
 
 // Ingredient defines model for Ingredient.
 type Ingredient struct {
@@ -700,6 +785,23 @@ type ProductPriceGroup struct {
 	RetailerProductId string       `json:"retailer_product_id"`
 }
 
+// PromoteCandidateRequest defines model for PromoteCandidateRequest.
+type PromoteCandidateRequest struct {
+	// FamilyId reuse an existing family; a new family is created when omitted
+	FamilyId *string `json:"family_id,omitempty"`
+}
+
+// PromoteCandidateResponse defines model for PromoteCandidateResponse.
+type PromoteCandidateResponse struct {
+	CandidateStatus PromoteCandidateResponseCandidateStatus `json:"candidate_status"`
+	FamilyId        string                                  `json:"family_id"`
+	RevisionId      string                                  `json:"revision_id"`
+	VariantId       string                                  `json:"variant_id"`
+}
+
+// PromoteCandidateResponseCandidateStatus defines model for PromoteCandidateResponse.CandidateStatus.
+type PromoteCandidateResponseCandidateStatus string
+
 // ReactionNew defines model for ReactionNew.
 type ReactionNew struct {
 	// Note optional free-text note
@@ -1031,6 +1133,11 @@ type SearchProductsParams struct {
 	Q string `form:"q" json:"q"`
 }
 
+// ListImportCandidatesParams defines parameters for ListImportCandidates.
+type ListImportCandidatesParams struct {
+	Status *string `form:"status,omitempty" json:"status,omitempty"`
+}
+
 // ToggleShoppingListItemJSONBody defines parameters for ToggleShoppingListItem.
 type ToggleShoppingListItemJSONBody struct {
 	Checked bool `json:"checked"`
@@ -1133,6 +1240,12 @@ type CreateRecipeVariantJSONRequestBody = RecipeVariantNew
 
 // CreateRecipeRevisionJSONRequestBody defines body for CreateRecipeRevision for application/json ContentType.
 type CreateRecipeRevisionJSONRequestBody = RecipeRevisionNew
+
+// DiscoverRecipeJSONRequestBody defines body for DiscoverRecipe for application/json ContentType.
+type DiscoverRecipeJSONRequestBody = DiscoverRecipeRequest
+
+// PromoteImportCandidateJSONRequestBody defines body for PromoteImportCandidate for application/json ContentType.
+type PromoteImportCandidateJSONRequestBody = PromoteCandidateRequest
 
 // UnsetRecipeFavoriteJSONRequestBody defines body for UnsetRecipeFavorite for application/json ContentType.
 type UnsetRecipeFavoriteJSONRequestBody = FavoriteNew
