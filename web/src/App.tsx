@@ -4,6 +4,7 @@ import ShoppingPage from "./pages/ShoppingPage";
 import ComparePage from "./pages/ComparePage";
 import RecipesPage from "./pages/RecipesPage";
 import RecipeFamilyPage from "./pages/RecipeFamilyPage";
+import RecipeDiscoveryPage from "./pages/RecipeDiscoveryPage";
 import PreferencesPage from "./pages/PreferencesPage";
 import PantryPage from "./pages/PantryPage";
 import PricesPage from "./pages/PricesPage";
@@ -24,6 +25,7 @@ const nav = [
   { to: "/compare", label: "Compare" },
   { to: "/recipes", label: "Recipes" },
   { to: "/recipe-families", label: "Recipe families" },
+  { to: "/recipes/discovery", label: "Discovery" },
   { to: "/prices", label: "Prices" },
   { to: "/stores", label: "Stores" },
   { to: "/barcode", label: "Barcode" },
@@ -66,6 +68,7 @@ export default function App() {
           <Route path="/compare" element={<ComparePage />} />
           <Route path="/recipes" element={<RecipesPage />} />
           <Route path="/recipe-families" element={<RecipeFamilyPage />} />
+          <Route path="/recipes/discovery" element={<RecipeDiscoveryPage />} />
           <Route path="/prices" element={<PricesPage />} />
           <Route path="/stores" element={<StoreLocatorPage />} />
           <Route path="/barcode" element={<BarcodePage />} />

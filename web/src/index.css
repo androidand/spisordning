@@ -877,3 +877,126 @@ code {
   font-variant-numeric: tabular-nums;
   color: var(--muted);
 }
+
+/* ── Recipe discovery ──────────────────────────────────────────────────── */
+
+.discovery-form-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+}
+
+.discovery-form-row .field {
+  flex: 1 1 220px;
+}
+
+.discovery-form-actions {
+  flex: 0 0 auto;
+}
+
+.discovery-toolbar {
+  margin-top: 1rem;
+  max-width: 220px;
+}
+
+.discovery-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.discovery-item {
+  cursor: pointer;
+}
+
+.discovery-item.selected {
+  outline: 2px solid var(--accent, #d9a441);
+}
+
+.discovery-item-btn {
+  all: unset;
+  display: block;
+  cursor: pointer;
+}
+
+.discovery-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.discovery-item-meta {
+  margin-top: 0.4rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.discovery-detail {
+  margin-top: 0.5rem;
+}
+
+.discovery-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.discovery-description {
+  margin: 0.5rem 0 0;
+  color: var(--muted);
+}
+
+.discovery-provenance {
+  margin: 0.75rem 0 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.4rem 1rem;
+}
+
+.discovery-prov-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  font-size: 0.82rem;
+}
+
+.discovery-prov-row dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.discovery-prov-row dd {
+  margin: 0;
+  word-break: break-word;
+}
+
+.discovery-ingredients {
+  margin: 0.5rem 0 0;
+  padding-left: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.discovery-ingredients li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.discovery-ingredients li.needs-review {
+  color: #92400e;
+}
+
+.discovery-ing-text {
+  flex: 1 1 auto;
+}

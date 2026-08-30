@@ -79,14 +79,16 @@
 
 ## 8. Frontend
 
-- [ ] 8.1 Add discovery API methods to `web/src/api/client.ts`.
-- [ ] 8.2 Create `web/src/pages/RecipeDiscoveryPage.tsx` with:
+- [x] 8.1 Add discovery API methods to `web/src/api/client.ts`.
+  Done: `discoverRecipe`, `listImportCandidates`, `getImportCandidate`, `rejectImportCandidate`,
+  `promoteImportCandidate` (typed via the generated `paths`/`components`).
+- [x] 8.2 Create `web/src/pages/RecipeDiscoveryPage.tsx` with:
   - a URL input and discover button,
   - a candidate list with status filter,
   - a candidate detail panel,
   - reject and promote actions.
-- [ ] 8.3 Add a `/recipes/discovery` route and navigation entry in `web/src/App.tsx`.
-- [ ] 8.4 Ensure the page displays provenance (source URL, external id, license note, attribution)
+- [x] 8.3 Add a `/recipes/discovery` route and navigation entry in `web/src/App.tsx`.
+- [x] 8.4 Ensure the page displays provenance (source URL, external id, license note, attribution)
   and ingredient `needs_review` flags.
 
 ## 9. Tests
