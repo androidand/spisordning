@@ -96,7 +96,7 @@ type Store interface {
 	// Discovery operations (activate-recipe-discovery).
 	GetExternalRecipeSource(ctx context.Context, id string) (persistence.ExternalRecipeSource, error)
 	UpsertExternalRecipeSource(ctx context.Context, src persistence.ExternalRecipeSource) error
-	SaveImportCandidate(ctx context.Context, c persistence.ImportCandidate) error
+	SaveImportCandidate(ctx context.Context, c persistence.ImportCandidate) (domain.RecipeImportCandidateID, error)
 	SaveCandidateIngredients(ctx context.Context, candidateID domain.RecipeImportCandidateID, lines []persistence.ImportCandidateIngredient) error
 	GetImportCandidate(ctx context.Context, id domain.RecipeImportCandidateID) (persistence.ImportCandidate, error)
 	ListImportCandidates(ctx context.Context, status *string) ([]persistence.ImportCandidate, error)

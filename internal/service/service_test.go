@@ -378,8 +378,11 @@ func (f *fakeStore) GetExternalRecipeSource(ctx context.Context, id string) (per
 func (f *fakeStore) UpsertExternalRecipeSource(ctx context.Context, src persistence.ExternalRecipeSource) error {
 	return nil
 }
-func (f *fakeStore) SaveImportCandidate(ctx context.Context, c persistence.ImportCandidate) error {
-	return nil
+func (f *fakeStore) SaveImportCandidate(ctx context.Context, c persistence.ImportCandidate) (domain.RecipeImportCandidateID, error) {
+	if c.ID == (domain.RecipeImportCandidateID{}) {
+		c.ID = domain.NewRecipeImportCandidateID()
+	}
+	return c.ID, nil
 }
 func (f *fakeStore) SaveCandidateIngredients(ctx context.Context, candidateID domain.RecipeImportCandidateID, lines []persistence.ImportCandidateIngredient) error {
 	return nil

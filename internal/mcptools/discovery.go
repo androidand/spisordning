@@ -140,7 +140,7 @@ func listImportCandidatesHandler(s DiscoveryService) mcp.ToolHandlerFor[ListImpo
 
 func getImportCandidateHandler(s DiscoveryService) mcp.ToolHandlerFor[GetImportCandidateInput, ImportCandidate] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in GetImportCandidateInput) (*mcp.CallToolResult, ImportCandidate, error) {
-		if in.ID == "" {
+		if strings.TrimSpace(in.ID) == "" {
 			return nil, ImportCandidate{}, fmt.Errorf("get_import_candidate: id is required")
 		}
 		res, err := s.GetCandidate(ctx, in.ID)
@@ -153,7 +153,7 @@ func getImportCandidateHandler(s DiscoveryService) mcp.ToolHandlerFor[GetImportC
 
 func rejectImportCandidateHandler(s DiscoveryService) mcp.ToolHandlerFor[RejectImportCandidateInput, RejectCandidateResult] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in RejectImportCandidateInput) (*mcp.CallToolResult, RejectCandidateResult, error) {
-		if in.ID == "" {
+		if strings.TrimSpace(in.ID) == "" {
 			return nil, RejectCandidateResult{}, fmt.Errorf("reject_import_candidate: id is required")
 		}
 		if err := s.RejectCandidate(ctx, in.ID); err != nil {
@@ -165,7 +165,7 @@ func rejectImportCandidateHandler(s DiscoveryService) mcp.ToolHandlerFor[RejectI
 
 func promoteImportCandidateHandler(s DiscoveryService) mcp.ToolHandlerFor[PromoteImportCandidateInput, PromoteCandidateResult] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in PromoteImportCandidateInput) (*mcp.CallToolResult, PromoteCandidateResult, error) {
-		if in.ID == "" {
+		if strings.TrimSpace(in.ID) == "" {
 			return nil, PromoteCandidateResult{}, fmt.Errorf("promote_import_candidate: id is required")
 		}
 		var familyID *string

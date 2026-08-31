@@ -90,59 +90,67 @@ type ImportCandidate struct {
 }
 
 // SaveImportCandidate upserts a candidate using the existing unique indexes:
-// (source_id, external_id) when external_id is set, else (source_url).
-func (s *Store) SaveImportCandidate(ctx context.Context, c ImportCandidate) error {
+// (source_id, external_id) when external_id is set, else (source_url). It
+// returns the stored candidate id — the existing row's id on conflict, the new
+// id on insert. first_served_at is left NULL on insert and untouched on update
+// (it is a nudge signal set later).
+func (s *Store) SaveImportCandidate(ctx context.Context, c ImportCandidate) (domain.RecipeImportCandidateID, error) {
 	if c.ID == (domain.RecipeImportCandidateID{}) {
 		c.ID = domain.NewRecipeImportCandidateID()
 	}
-	const baseQ = `INSERT INTO recipe_import_candidate
-		(id, source_id, source_url, external_id, title, description, image_url,
-		 servings, prep_time_sec, cook_time_sec, total_time_sec,
-		 category, cuisine, attribution, rating, rating_count,
-		 nutrition, raw_jsonld, license_note, imported_at, first_served_at,
-		 status, promoted_variant_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, now(), $19, $20, $21)
-		ON CONFLICT DO UPDATE SET
-			title = EXCLUDED.title,
-			description = EXCLUDED.description,
-			image_url = EXCLUDED.image_url,
-			servings = EXCLUDED.servings,
-			prep_time_sec = EXCLUDED.prep_time_sec,
-			cook_time_sec = EXCLUDED.cook_time_sec,
-			total_time_sec = EXCLUDED.total_time_sec,
-			category = EXCLUDED.category,
-			cuisine = EXCLUDED.cuisine,
-			attribution = EXCLUDED.attribution,
-			rating = EXCLUDED.rating,
-			rating_count = EXCLUDED.rating_count,
-			nutrition = EXCLUDED.nutrition,
-			raw_jsonld = EXCLUDED.raw_jsonld,
-			license_note = EXCLUDED.license_note`
+	const cols = `(id, source_id, source_url, external_id, title, description, image_url,
+		servings, prep_time_sec, cook_time_sec, total_time_sec,
+		category, cuisine, attribution, rating, rating_count,
+		nutrition, raw_jsonld, license_note, imported_at,
+		status, promoted_variant_id)`
+	const vals = `($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, now(), $20, $21)`
+	const setClause = `SET
+		title = EXCLUDED.title,
+		description = EXCLUDED.description,
+		image_url = EXCLUDED.image_url,
+		servings = EXCLUDED.servings,
+		prep_time_sec = EXCLUDED.prep_time_sec,
+		cook_time_sec = EXCLUDED.cook_time_sec,
+		total_time_sec = EXCLUDED.total_time_sec,
+		category = EXCLUDED.category,
+		cuisine = EXCLUDED.cuisine,
+		attribution = EXCLUDED.attribution,
+		rating = EXCLUDED.rating,
+		rating_count = EXCLUDED.rating_count,
+		nutrition = EXCLUDED.nutrition,
+		raw_jsonld = EXCLUDED.raw_jsonld,
+		license_note = EXCLUDED.license_note`
 
 	if c.ExternalID != nil && *c.ExternalID != "" {
-		const q = baseQ + ` WHERE (source_id, external_id) = ($2, $4)`
-		if _, err := s.db.Exec(ctx, q,
+		const q = `INSERT INTO recipe_import_candidate ` + cols + ` VALUES ` + vals +
+			` ON CONFLICT (source_id, external_id) WHERE external_id IS NOT NULL DO UPDATE ` + setClause +
+			` RETURNING id`
+		var id domain.RecipeImportCandidateID
+		if err := s.db.QueryRow(ctx, q,
 			c.ID, c.SourceID, c.SourceURL, *c.ExternalID, c.Title, c.Description,
 			nullableTextStr(c.ImageURL), c.Servings, c.PrepTimeSec, c.CookTimeSec,
 			c.TotalTimeSec, c.Category, c.Cuisine, c.Attribution, c.Rating,
 			c.RatingCount, c.Nutrition, c.RawJSONLD, c.LicenseNote,
 			c.Status, c.PromotedVariantID,
-		); err != nil {
-			return fmt.Errorf("persistence: save import candidate (by external_id): %w", err)
+		).Scan(&id); err != nil {
+			return domain.RecipeImportCandidateID{}, fmt.Errorf("persistence: save import candidate (by external_id): %w", err)
 		}
-		return nil
+		return id, nil
 	}
-	const q = baseQ + ` WHERE source_url = $3`
-	if _, err := s.db.Exec(ctx, q,
+	const q = `INSERT INTO recipe_import_candidate ` + cols + ` VALUES ` + vals +
+		` ON CONFLICT (source_url) WHERE external_id IS NULL DO UPDATE ` + setClause +
+		` RETURNING id`
+	var id domain.RecipeImportCandidateID
+	if err := s.db.QueryRow(ctx, q,
 		c.ID, c.SourceID, c.SourceURL, nil, c.Title, c.Description,
 		nullableTextStr(c.ImageURL), c.Servings, c.PrepTimeSec, c.CookTimeSec,
 		c.TotalTimeSec, c.Category, c.Cuisine, c.Attribution, c.Rating,
 		c.RatingCount, c.Nutrition, c.RawJSONLD, c.LicenseNote,
 		c.Status, c.PromotedVariantID,
-	); err != nil {
-		return fmt.Errorf("persistence: save import candidate (by url): %w", err)
+	).Scan(&id); err != nil {
+		return domain.RecipeImportCandidateID{}, fmt.Errorf("persistence: save import candidate (by url): %w", err)
 	}
-	return nil
+	return id, nil
 }
 
 // nullableTextStr returns a *string pointing at s, or nil if s is empty.

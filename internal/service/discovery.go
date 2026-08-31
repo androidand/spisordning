@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -65,20 +66,11 @@ func (s *Discovery) DiscoverFromURL(ctx context.Context, in dto.DiscoverRecipeIn
 	if resp.StatusCode != http.StatusOK {
 		return dto.ImportCandidateResponse{}, fmt.Errorf("service: discover: fetch %s: status %d", u, resp.StatusCode)
 	}
-	buf := make([]byte, 0, resp.ContentLength+4096)
-	if resp.ContentLength > 0 {
-		buf = make([]byte, resp.ContentLength)
-		if _, err := resp.Body.Read(buf); err != nil {
-			return dto.ImportCandidateResponse{}, fmt.Errorf("service: discover: read %s: %w", u, err)
-		}
-	} else {
-		// ContentLength is -1 for chunked responses; read all.
-		importBuf := make([]byte, 0, 1024*1024)
-		if n, err := resp.Body.Read(importBuf); err == nil {
-			importBuf = importBuf[:n]
-			buf = importBuf
-		}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return dto.ImportCandidateResponse{}, fmt.Errorf("service: discover: read %s: %w", u, err)
 	}
+	buf := body
 
 	// Extract and parse JSON-LD.
 	node, err := recipeimport.ExtractRecipeJSONLD(string(buf))
@@ -122,7 +114,8 @@ func (s *Discovery) DiscoverFromURL(ctx context.Context, in dto.DiscoverRecipeIn
 		LicenseNote:   ptrToStr(raw.LicenseNote),
 		Status:        string(recipeimport.StatusCandidate),
 	}
-	if err := s.db.SaveImportCandidate(ctx, c); err != nil {
+	cid, err := s.db.SaveImportCandidate(ctx, c)
+	if err != nil {
 		return dto.ImportCandidateResponse{}, fmt.Errorf("service: discover: save candidate: %w", err)
 	}
 
@@ -137,11 +130,11 @@ func (s *Discovery) DiscoverFromURL(ctx context.Context, in dto.DiscoverRecipeIn
 			NeedsReview: ing.NeedsReview,
 		})
 	}
-	if err := s.db.SaveCandidateIngredients(ctx, c.ID, lines); err != nil {
+	if err := s.db.SaveCandidateIngredients(ctx, cid, lines); err != nil {
 		return dto.ImportCandidateResponse{}, fmt.Errorf("service: discover: save ingredients: %w", err)
 	}
 
-	return s.get_candidate(ctx, c.ID)
+	return s.get_candidate(ctx, cid)
 }
 
 // ListCandidates returns staged candidates, optionally filtered by status.
@@ -259,6 +252,7 @@ func (s *Discovery) PromoteCandidate(ctx context.Context, id string, in dto.Prom
 		// Create a new family from the candidate's title.
 		slug := domain.CanonicalIngredientID(c.Title)
 		f := persistence.RecipeFamily{
+			ID:        domain.NewRecipeFamilyID(),
 			Slug:      slug,
 			Name:      c.Title,
 			Archived:  false,
@@ -273,6 +267,7 @@ func (s *Discovery) PromoteCandidate(ctx context.Context, id string, in dto.Prom
 
 	// Create the variant.
 	v := persistence.RecipeVariant{
+		ID:                domain.NewRecipeVariantID(),
 		Slug:              domain.CanonicalIngredientID(c.Title),
 		FamilyID:          famID,
 		Title:             c.Title,
