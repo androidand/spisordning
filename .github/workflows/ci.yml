@@ -40,7 +40,7 @@ jobs:
           POSTGRES_PASSWORD: change-me
         ports: ['5432:5432']
         options: >-
-          --health-cmd 'pg_isready -U spisordning'
+          --health-cmd pg_isready
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
@@ -79,7 +79,7 @@ jobs:
           POSTGRES_PASSWORD: change-me
         ports: ['5432:5432']
         options: >-
-          --health-cmd 'pg_isready -U spisordning'
+          --health-cmd pg_isready
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
