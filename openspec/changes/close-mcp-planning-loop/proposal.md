@@ -8,11 +8,12 @@ This change closes the loop: expose plan persistence + decision-recording over M
 
 ## What Changes
 
-- **`persist_plan`** — runs the full weekly planner (via the existing `service.Planning.PlanWeek`) and persists the result to `meal_plan`/`meal_plan_candidate`/`meal_plan_decision`/`shopping_requirement`. Returns the plan ID and week start.
+- **`persist_plan`** — runs the full weekly planner (via `service.Planning.RunPlan`, which wraps `PlanWeek`) and persists the result to `meal_plan`/`meal_plan_candidate`/`meal_plan_decision`/`shopping_requirement`. It supports `slots` for dinner, breakfast, and snack, and approves the persisted plan so subsequent decisions can be recorded.
 - **`get_plan`** — returns the current week plan with its candidates, decisions, and shopping requirements (via the existing `service.Planning.GetPlan` and `ListShoppingRequirements`).
 - **`set_plan_decision`** — records per-slot accept/swap decisions on a plan (via the existing `service.Planning.SetDecisions`).
 - **`record_meal_from_plan`** — records a meal event linked to a specific plan slot. It is a separate tool from `record_meal_reaction`; its input accepts optional `plan_id`/`plan_slot_date` fields and wires them through to `CreateMealEvent`/`CreateMealEventWithSlot`.
 - **`list_plans`** — lists all meal plans with their week start, status, and date range (via the existing `service.Planning.ListPlans`).
+- **Shopping-requirement names** — plan-derived and recipe-derived shopping requirements expose a canonical ingredient name, and `create_shopping_list` accepts either an ingredient UUID or a canonical ingredient name.
 
 All new MCP tools are thin adapters over existing service methods — no second planner, no second persistence path.
 
@@ -33,7 +34,11 @@ All new MCP tools are thin adapters over existing service methods — no second 
   - `cmd/mcp-server/adapters.go` — `mcpStoreAdapter` implements the new `PlanService` methods by delegating to `service.Planning`.
   - `internal/mcptools/mcptools.go` — new `RecordMealFromPlanInput` DTO and `RecordMealFromPlan` method on the reaction service interface; existing `RecordReactionInput` is unchanged.
   - `cmd/mcp-server/adapters.go` — new `RecordMealFromPlan` adapter threads `plan_id`/`plan_slot_date` through to `CreateMealEvent`/`CreateMealEventWithSlot`.
-- **No new migrations** — all persistence already exists (`meal_plan`, `meal_plan_candidate`, `meal_plan_decision`, `shopping_requirement`, `meal_event`).
+  - `internal/persistence/recipes.go` — `Ingredient` upserts store `slug`; recipe-ingredient reads join `ingredient` to expose the canonical/display name.
+  - `internal/persistence/meal_plan.go` — shopping-requirement reads join `ingredient` to expose the canonical/display name.
+  - `internal/service/service.go`, `internal/service/planning.go`, `internal/dto/planning.go`, `internal/httpapi/plans.go`, `api/openapi.yaml`, `internal/openapi/types.gen.go`, and `web/src/generated/spisordning.ts` — expose `ingredient_name` on shopping requirements.
+  - `cmd/mcp-server/adapters.go` — recipe-derived and plan-derived shopping requirements use canonical ingredient names; `create_shopping_list` resolves canonical names or ingredient UUIDs.
+- **No new migrations** — all persistence already exists (`meal_plan`, `meal_plan_candidate`, `meal_plan_decision`, `shopping_requirement`, `meal_event`, `ingredient`).
 - **Depends on:** `implement-mcp-server` (foundational MCP server), `complete-live-meal-planning` (breakfast/snack slot types consumed by planning).
 - **Orthogonal to:** `unify-recipe-source` (plans reference recipes by Mealie ID; this change does not assume which source provides the recipe).
-- **No changes to:** retailer adapter, pricing, shopping-list, Apple Notes, deployment, or the existing REST API.
+- **No changes to:** retailer adapters, pricing, Apple Notes, deployment, or the existing REST API surface.

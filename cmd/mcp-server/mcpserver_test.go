@@ -37,8 +37,10 @@ func (f *fakePlanner) PlanSlots(_ context.Context, _ time.Time, _ int, _ []strin
 }
 
 type fakeReactions struct {
-	calls int
-	last  mcptools.RecordReactionInput
+	calls         int
+	last          mcptools.RecordReactionInput
+	fromPlanCalls int
+	lastFromPlan  mcptools.RecordMealFromPlanInput
 }
 
 func (f *fakeReactions) RecordReaction(_ context.Context, in mcptools.RecordReactionInput) (mcptools.RecordReactionResult, error) {
@@ -47,6 +49,52 @@ func (f *fakeReactions) RecordReaction(_ context.Context, in mcptools.RecordReac
 	return mcptools.RecordReactionResult{
 		MealEventID: "meal-7", Recipe: in.Recipe, ServedOn: in.ServedOn, PersonID: in.PersonID, Sentiment: in.Sentiment,
 	}, nil
+}
+
+func (f *fakeReactions) RecordMealFromPlan(_ context.Context, in mcptools.RecordMealFromPlanInput) (mcptools.RecordReactionResult, error) {
+	f.fromPlanCalls++
+	f.lastFromPlan = in
+	return mcptools.RecordReactionResult{
+		MealEventID: "meal-8", Recipe: in.Recipe, ServedOn: in.ServedOn, PersonID: in.PersonID, Sentiment: in.Sentiment,
+	}, nil
+}
+
+type fakePlan struct {
+	plans           []mcptools.PlanSummary
+	plan            mcptools.GetPlanResult
+	persist         mcptools.PersistPlanResult
+	decisions       []mcptools.PlanDecisionResponse
+	lastPlanID      string
+	lastPersist     mcptools.PersistPlanInput
+	lastDecisions   []mcptools.PlanDecisionInput
+	listPlansCalls  int
+	getPlanCalls    int
+	persistCalls    int
+	setDecisionsCalls int
+}
+
+func (f *fakePlan) ListPlans(_ context.Context) ([]mcptools.PlanSummary, error) {
+	f.listPlansCalls++
+	return f.plans, nil
+}
+
+func (f *fakePlan) GetPlan(_ context.Context, planID string) (mcptools.GetPlanResult, error) {
+	f.getPlanCalls++
+	f.lastPlanID = planID
+	return f.plan, nil
+}
+
+func (f *fakePlan) SetDecisions(_ context.Context, planID string, decisions []mcptools.PlanDecisionInput) ([]mcptools.PlanDecisionResponse, error) {
+	f.setDecisionsCalls++
+	f.lastPlanID = planID
+	f.lastDecisions = decisions
+	return f.decisions, nil
+}
+
+func (f *fakePlan) PersistPlan(_ context.Context, in mcptools.PersistPlanInput) (mcptools.PersistPlanResult, error) {
+	f.persistCalls++
+	f.lastPersist = in
+	return f.persist, nil
 }
 
 type fakeRequirements struct {
@@ -164,8 +212,8 @@ func TestIntegration_StreamableHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list tools: %v", err)
 	}
-	if len(list.Tools) != 3 {
-		t.Fatalf("expected 3 tools, got %d: %v", len(list.Tools), toolNames(list.Tools))
+	if len(list.Tools) != 4 {
+		t.Fatalf("expected 4 tools, got %d: %v", len(list.Tools), toolNames(list.Tools))
 	}
 
 	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
@@ -395,6 +443,107 @@ func TestIntegration_DiscoveryTools(t *testing.T) {
 	}
 	if discovery.lastFamily != nil {
 		t.Fatalf("fake discovery lastFamily = %v, want nil (no family_id given)", discovery.lastFamily)
+	}
+}
+
+// TestIntegration_PlanTools drives the persisted-plan MCP tools end-to-end over
+// Streamable HTTP: list plans, read a plan, set decisions, and persist a plan.
+func TestIntegration_PlanTools(t *testing.T) {
+	plan := &fakePlan{
+		plans: []mcptools.PlanSummary{{ID: "plan-1", WeekStart: "2026-08-24", Status: "approved"}},
+		plan: mcptools.GetPlanResult{
+			Plan:         mcptools.PlanSummary{ID: "plan-1", WeekStart: "2026-08-24", Status: "approved"},
+			Candidates:   []mcptools.PlanCandidate{{ID: "c1", SlotDate: "2026-08-24", SlotKind: "dinner", MealieRecipeID: "r1", Title: "Pasta", Rank: 0, Feasible: true}},
+			Decisions:    []mcptools.PlanDecisionResponse{{PlanID: "plan-1", SlotDate: "2026-08-24", SlotKind: "dinner", MealieRecipeID: "r1"}},
+		},
+		decisions: []mcptools.PlanDecisionResponse{{PlanID: "plan-1", SlotDate: "2026-08-24", SlotKind: "dinner", MealieRecipeID: "r1"}},
+		persist:   mcptools.PersistPlanResult{PlanID: "plan-1", WeekStart: "2026-08-24", Days: 7, SlotCount: 7, Persisted: true},
+	}
+	cs := connectClient(t, startServer(t, mcptools.Dependencies{Plan: plan}))
+
+	list, err := cs.ListTools(context.Background(), &mcp.ListToolsParams{})
+	if err != nil {
+		t.Fatalf("list tools: %v", err)
+	}
+	names := toolNames(list.Tools)
+	for _, want := range []string{"persist_plan", "get_plan", "list_plans", "set_plan_decision"} {
+		if !contains(names, want) {
+			t.Fatalf("expected tool %q to be registered, got %v", want, names)
+		}
+	}
+
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "list_plans"})
+	if err != nil {
+		t.Fatalf("call list_plans: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected list_plans error: %+v", res)
+	}
+	gotPlans := structured[[]mcptools.PlanSummary](t, res)
+	if len(gotPlans) != 1 || gotPlans[0].ID != "plan-1" {
+		t.Fatalf("unexpected list_plans result: %+v", gotPlans)
+	}
+	if plan.listPlansCalls != 1 {
+		t.Fatalf("fake plan ListPlans called %d times, want 1", plan.listPlansCalls)
+	}
+
+	res, err = cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "get_plan",
+		Arguments: map[string]any{"plan_id": "plan-1"},
+	})
+	if err != nil {
+		t.Fatalf("call get_plan: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected get_plan error: %+v", res)
+	}
+	gotPlan := structured[mcptools.GetPlanResult](t, res)
+	if gotPlan.Plan.ID != "plan-1" || len(gotPlan.Candidates) != 1 || len(gotPlan.Decisions) != 1 {
+		t.Fatalf("unexpected get_plan result: %+v", gotPlan)
+	}
+	if plan.getPlanCalls != 1 || plan.lastPlanID != "plan-1" {
+		t.Fatalf("fake plan GetPlan got %q after %d calls", plan.lastPlanID, plan.getPlanCalls)
+	}
+
+	res, err = cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "set_plan_decision",
+		Arguments: map[string]any{
+			"plan_id": "plan-1",
+			"decisions": []any{
+				map[string]any{"slot_date": "2026-08-24", "mealie_recipe_id": "r1"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("call set_plan_decision: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected set_plan_decision error: %+v", res)
+	}
+	gotDecisions := structured[[]mcptools.PlanDecisionResponse](t, res)
+	if len(gotDecisions) != 1 || gotDecisions[0].SlotKind != "dinner" {
+		t.Fatalf("unexpected set_plan_decision result: %+v", gotDecisions)
+	}
+	if plan.setDecisionsCalls != 1 || plan.lastPlanID != "plan-1" {
+		t.Fatalf("fake plan SetDecisions got %q after %d calls", plan.lastPlanID, plan.setDecisionsCalls)
+	}
+	if len(plan.lastDecisions) != 1 || plan.lastDecisions[0].SlotKind != "dinner" {
+		t.Fatalf("expected default slot_kind dinner, got %+v", plan.lastDecisions)
+	}
+
+	res, err = cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "persist_plan"})
+	if err != nil {
+		t.Fatalf("call persist_plan: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected persist_plan error: %+v", res)
+	}
+	gotPersist := structured[mcptools.PersistPlanResult](t, res)
+	if gotPersist.PlanID != "plan-1" || !gotPersist.Persisted {
+		t.Fatalf("unexpected persist_plan result: %+v", gotPersist)
+	}
+	if plan.persistCalls != 1 || plan.lastPersist.WeekStart == "" || plan.lastPersist.Days != 7 {
+		t.Fatalf("fake plan PersistPlan got %+v after %d calls", plan.lastPersist, plan.persistCalls)
 	}
 }
 

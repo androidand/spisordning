@@ -37,9 +37,9 @@ The existing `record_meal_reaction` tool is unchanged. `record_meal_from_plan` i
 
 ### D2: `persist_plan` reuses `service.Planning.RunPlan`
 
-`internal/httpapi/plans.go` already defines `PlanService.RunPlan` and `RunPlanWithProgress`. The MCP adapter delegates to `RunPlan` (not `RunPlanWithProgress`, since MCP tool calls are synchronous and don't need SSE streaming). The adapter passes `PlanRunInput{Days: 7}` as the default, matching the CLI's behavior.
+The MCP adapter delegates to `service.Planning.RunPlan`, which wraps `service.Planning.PlanWeek`. `RunPlan` calls the planner, surfaces persistence errors, and — when persistence succeeds — fetches or creates the plan row and sets its status to `approved`. Approving the plan in the same call makes the MCP loop usable: an agent can call `persist_plan` and then immediately call `set_plan_decision` without a separate status-update tool.
 
-The existing `service.Planning.PlanWeek` (in `planweek.go`) already handles the full pipeline: candidate generation, scoring, persistence, and shopping requirements. The MCP tool does not need to call `PlanWeek` directly — `RunPlan` is the orchestration entry point.
+`persist_plan` accepts `week_start`, `days`, and `slots`. Empty `slots` preserves dinner-only behavior; non-empty `slots` may include `dinner`, `breakfast`, and `snack`. Dinner uses the full weekly planner, while breakfast and snack use the simple slot planner.
 
 ### D3: `get_plan` returns a flat view, not a nested plan view
 
@@ -67,6 +67,18 @@ The adapter threads these through to `CreateMealEvent`/`CreateMealEventWithSlot`
 The existing `mcptools` package defines a `PlannerService` interface (for `PlanDinners`/`PlanSlots`). This change adds a new `PlanService` interface that mirrors `httpapi.PlanService`'s surface but returns MCP-friendly DTOs. The `mcpStoreAdapter` implements both interfaces.
 
 The `Dependencies` struct in `mcptools.go` gains a `Plan` field of type `PlanService`, wired from the composition root.
+
+### D8: Shopping requirements expose canonical ingredient names
+
+MCP shopping tools operate on canonical ingredient names, not raw UUIDs. Therefore:
+
+- `persistence.Ingredient` stores `slug`, and `UpsertIngredient` defaults `slug` from `display` when absent, preserving an existing non-empty slug on conflict.
+- `ListRecipeIngredients` and `ListShoppingRequirements` join `ingredient` and expose `COALESCE(i.slug, i.display, '')` as the requirement's ingredient name.
+- `dto.ShoppingRequirement`, `httpapi.ShoppingRequirementResponse`, OpenAPI, generated Go types, and web types expose `ingredient_name`.
+- `cmd/mcp-server` maps `IngredientName` into `mcptools.ShoppingRequirement.Ingredient` for both recipe-derived requirements (`get_shopping_requirements`) and plan-derived requirements (`get_plan`).
+- `create_shopping_list` resolves each item to a `domain.IngredientID` by preferring an explicit `ingredient_id`, then a UUID-valued `ingredient`, then a deterministic ID derived from the canonical name.
+
+This keeps the MCP surface usable by LLM clients while preserving deterministic UUID links in `shopping_list_item.ingredient_id`.
 
 ## Risks / Trade-offs
 

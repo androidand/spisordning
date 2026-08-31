@@ -1799,11 +1799,12 @@ components:
 
     MealPlanCandidate:
       type: object
-      required: [id, recipe, slot_date, score, breakdown, feasible, rank]
+      required: [id, recipe, slot_date, slot_kind, score, breakdown, feasible, rank]
       properties:
         id: { type: integer }
         recipe: { $ref: '#/components/schemas/RecipeRef' }
         slot_date: { type: string, format: date }
+        slot_kind: { type: string, enum: [dinner, breakfast, snack] }
         score: { type: number, format: double }
         breakdown:
           type: object
@@ -1818,6 +1819,7 @@ components:
       properties:
         plan_id: { type: integer }
         slot_date: { type: string, format: date }
+        slot_kind: { type: string, enum: [dinner, breakfast, snack], default: dinner }
         mealie_recipe_id: { type: string }
         decided_at: { type: string, format: date-time, nullable: true }
 
@@ -1837,8 +1839,9 @@ components:
       type: object
       required: [id, ingredient_id, quantity, unit, acceptable_forms, preferred_form]
       properties:
-        id: { type: integer }
+        id: { type: string }
         ingredient_id: { type: string }
+        ingredient_name: { type: string }
         quantity: { type: number, format: double }
         unit: { type: string }
         acceptable_forms: { type: array, items: { type: string } }

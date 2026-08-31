@@ -100,3 +100,19 @@ The system SHALL expose a `list_plans` MCP tool that returns a summary of all me
 - **WHEN** no meal plans exist in the database
 - **THEN** `list_plans` returns an empty array
 - **AND** the tool call succeeds (does not error)
+
+### Requirement: Plan shopping requirements expose canonical ingredient names
+
+The system SHALL expose a canonical ingredient name on shopping requirements returned by `get_plan`, so MCP clients can pass the requirement to retailer-oriented tools without interpreting raw ingredient UUIDs.
+
+#### Scenario: Reading a plan returns named shopping requirements
+
+- **WHEN** an MCP client calls `get_plan` for a plan with shopping requirements
+- **THEN** each shopping requirement includes `ingredient_id` and a non-empty `ingredient` name
+- **AND** the `ingredient` name is the canonical ingredient name, not a UUID
+
+#### Scenario: Shopping-list creation accepts canonical ingredient names
+
+- **WHEN** an MCP client calls `create_shopping_list` with an item whose `ingredient` is a canonical ingredient name
+- **THEN** the system resolves the item to the deterministic ingredient UUID for that canonical name
+- **AND** the created shopping-list item stores that ingredient UUID

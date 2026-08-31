@@ -6,7 +6,9 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/androidand/spisordning/internal/domain"
 	"github.com/androidand/spisordning/internal/mealie"
+	"github.com/androidand/spisordning/internal/persistence"
 )
 
 // lowConfidenceThreshold: a line whose Mealie brute-parser confidence is at
@@ -45,24 +47,120 @@ type StructuredRecipe struct {
 
 // StructureFromText turns a household member's freeform pasted recipe (title,
 // loose ingredient list, "Gör så här"-style steps — see the worked example in
-// this change's proposal.md) into a real Mealie recipe: sections the text,
-// creates the recipe, and writes ingredients/instructions using the
-// corruption-safe shapes internal/mealie.Client's write path already
-// enforces. Best-effort on structuring quality — a line the parser can't
-// confidently handle is still written (with whatever the parser recovered,
-// or as a clean unstructured note) and reported via LowConfidence rather than
-// silently presented as a correct guess.
+// this change's proposal.md) into a native recipe_family: sections the text,
+// creates family + variant + revision, and registers a recipe_source_ref row.
+// Best-effort on structuring quality — a line that can't be confidently
+// parsed is still written (as raw text) and reported via LowConfidence.
+//
+// When the RECIPE_SOURCE flag is "mealie" (pre-migration default), this
+// falls back to the legacy Mealie write path for backward compatibility.
 func (s *Recipes) StructureFromText(ctx context.Context, rawText string) (StructuredRecipe, error) {
-	if s.mealie == nil {
-		return StructuredRecipe{}, fmt.Errorf("service: structure recipe: no Mealie client configured")
-	}
-
 	sec := sectionRecipeText(rawText)
 	if sec.Title == "" {
 		return StructuredRecipe{}, fmt.Errorf("service: structure recipe: no title found (expected a non-blank first line)")
 	}
 	if len(sec.IngredientLines) == 0 {
 		return StructuredRecipe{}, fmt.Errorf("service: structure recipe: no ingredient lines found between the title and the instructions marker")
+	}
+
+	mode := RecipeSourceModeFromEnv()
+	if mode == SourceMealie {
+		return s.structureFromTextMealie(ctx, sec)
+	}
+	return s.structureFromTextNative(ctx, sec)
+}
+
+// structureFromTextNative creates the recipe in recipe_family (P3 write cutover,
+// design.md D4). No Mealie write occurs.
+func (s *Recipes) structureFromTextNative(ctx context.Context, sec structuredText) (StructuredRecipe, error) {
+	slug := slugify(sec.Title)
+
+	// Conflict policy: link to existing family if slug already exists.
+	family, err := s.db.GetRecipeFamilyBySlug(ctx, slug)
+	if err != nil && !isNoRows(err) {
+		return StructuredRecipe{}, fmt.Errorf("service: structure recipe: lookup family: %w", err)
+	}
+	if isNoRows(err) {
+		family = persistence.RecipeFamily{
+			ID:   domain.NewRecipeFamilyID(),
+			Slug: slug,
+			Name: sec.Title,
+		}
+		if err := s.db.CreateRecipeFamily(ctx, family); err != nil {
+			return StructuredRecipe{}, fmt.Errorf("service: structure recipe: create family: %w", err)
+		}
+	}
+
+	variant := persistence.RecipeVariant{
+		ID:                domain.NewRecipeVariantID(),
+		Slug:              slug + "-default",
+		FamilyID:          family.ID,
+		Title:             sec.Title,
+		SourceAttribution: "structured",
+	}
+	if err := s.db.CreateRecipeVariant(ctx, variant); err != nil {
+		return StructuredRecipe{}, fmt.Errorf("service: structure recipe: create variant: %w", err)
+	}
+
+	ingredients := make([]domain.Ingredient, 0, len(sec.IngredientLines))
+	var lowConfidence []string
+	for _, note := range sec.IngredientLines {
+		name := domain.CanonicalIngredientID(note)
+		ingredients = append(ingredients, domain.Ingredient{
+			IngredientID: name,
+			RawText:      note,
+		})
+		// Simple heuristic: bare single-word lines with no quantity are low-confidence.
+		if len(strings.Fields(note)) <= 1 {
+			lowConfidence = append(lowConfidence, note)
+		}
+	}
+
+	revision := persistence.RecipeRevision{
+		ID:          domain.NewRecipeRevisionID(),
+		VariantID:   variant.ID,
+		Ingredients: ingredients,
+		Steps:       sec.InstructionSteps,
+	}
+	if _, err := s.db.CreateRecipeRevision(ctx, revision); err != nil {
+		return StructuredRecipe{}, fmt.Errorf("service: structure recipe: create revision: %w", err)
+	}
+
+	if err := s.db.SetRecipeFamilyDefaultVariant(ctx, family.ID, variant.ID); err != nil {
+		return StructuredRecipe{}, fmt.Errorf("service: structure recipe: set default variant: %w", err)
+	}
+
+	// Register source ref (source="structured").
+	ref := persistence.RecipeSourceRef{
+		RecipeFamilyID: family.ID,
+		Source:         "structured",
+		SourceRecipeID: slug,
+		ImportedBy:     "structure-from-text",
+	}
+	if err := s.db.UpsertRecipeSourceRef(ctx, ref); err != nil {
+		return StructuredRecipe{}, fmt.Errorf("service: structure recipe: upsert source ref: %w", err)
+	}
+
+	out := StructuredRecipe{
+		RecipeID:      slug,
+		Title:         sec.Title,
+		Instructions:  sec.InstructionSteps,
+		LowConfidence: lowConfidence,
+	}
+	for _, ing := range ingredients {
+		out.Ingredients = append(out.Ingredients, StructuredIngredient{
+			Note:     ing.RawText,
+			FoodName: ing.IngredientID,
+		})
+	}
+	return out, nil
+}
+
+// structureFromTextMealie is the legacy Mealie write path, retained for
+// backward compatibility when RECIPE_SOURCE=mealie.
+func (s *Recipes) structureFromTextMealie(ctx context.Context, sec structuredText) (StructuredRecipe, error) {
+	if s.mealie == nil {
+		return StructuredRecipe{}, fmt.Errorf("service: structure recipe: no Mealie client configured")
 	}
 
 	slug, err := s.mealie.CreateRecipe(ctx, sec.Title)
@@ -84,10 +182,6 @@ func (s *Recipes) StructureFromText(ctx context.Context, rawText string) (Struct
 		}
 	}
 
-	// Tag distinctly so these are identifiable later, same spirit as the
-	// lågeffekt/matlåda tagging already used elsewhere. Best-effort: tagging
-	// failure shouldn't fail the whole structuring call — the recipe already
-	// exists and is usable without the tag.
 	_ = s.mealie.SetTags(ctx, slug, []string{chatImportTag})
 
 	out := StructuredRecipe{
@@ -105,6 +199,8 @@ func (s *Recipes) StructureFromText(ctx context.Context, rawText string) (Struct
 	}
 	return out, nil
 }
+
+
 
 // sectionMarkers are the recognized "here come the steps" lines, matched
 // case-insensitively against a trimmed line (with or without a trailing

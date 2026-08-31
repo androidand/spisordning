@@ -232,6 +232,7 @@ type ShoppingRequirement struct {
 	Unit            string
 	AcceptableForms []string
 	PreferredForm   *string
+	IngredientName  string
 }
 
 // InsertShoppingRequirement inserts requirements derived from a plan's
@@ -258,8 +259,11 @@ func (s *Store) InsertShoppingRequirement(ctx context.Context, r ShoppingRequire
 
 // ListShoppingRequirements returns a plan's requirements, sorted.
 func (s *Store) ListShoppingRequirements(ctx context.Context, planID domain.MealPlanID) ([]ShoppingRequirement, error) {
-	const q = `SELECT id, plan_id, ingredient_id, quantity, unit, acceptable_forms, preferred_form
-		FROM shopping_requirement WHERE plan_id = $1 ORDER BY ingredient_id, unit`
+	const q = `SELECT sr.id, sr.plan_id, sr.ingredient_id, sr.quantity, sr.unit,
+		sr.acceptable_forms, sr.preferred_form, COALESCE(i.slug, i.display, '')
+		FROM shopping_requirement sr
+		LEFT JOIN ingredient i ON i.id = sr.ingredient_id
+		WHERE sr.plan_id = $1 ORDER BY sr.ingredient_id, sr.unit`
 	rows, err := s.db.Query(ctx, q, planID)
 	if err != nil {
 		return nil, fmt.Errorf("persistence: list shopping_requirements: %w", err)
@@ -268,7 +272,7 @@ func (s *Store) ListShoppingRequirements(ctx context.Context, planID domain.Meal
 	var out []ShoppingRequirement
 	for rows.Next() {
 		var r ShoppingRequirement
-		if err := rows.Scan(&r.ID, &r.PlanID, &r.IngredientID, &r.Quantity, &r.Unit, &r.AcceptableForms, &r.PreferredForm); err != nil {
+		if err := rows.Scan(&r.ID, &r.PlanID, &r.IngredientID, &r.Quantity, &r.Unit, &r.AcceptableForms, &r.PreferredForm, &r.IngredientName); err != nil {
 			return nil, err
 		}
 		out = append(out, r)

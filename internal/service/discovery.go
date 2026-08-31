@@ -30,6 +30,9 @@ func NewDiscovery(db Store, family dto.RecipeFamilyService, httpClient *http.Cli
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 15 * time.Second}
 	}
+	if family == nil {
+		family = NewRecipeFamily(db)
+	}
 	return &Discovery{db: db, family: family, httpClient: httpClient}
 }
 
@@ -240,77 +243,63 @@ func (s *Discovery) PromoteCandidate(ctx context.Context, id string, in dto.Prom
 		}, nil
 	}
 
-	// Create or reuse the target family.
-	var famID domain.RecipeFamilyID
+	// Create or reuse the target family through the recipe-family service.
+	var famResp dto.RecipeFamilyResponse
 	var newFamily bool
 	if in.FamilyID != nil && *in.FamilyID != "" {
-		famID, err = domain.ParseRecipeFamilyID(*in.FamilyID)
+		famResp, err = s.family.GetFamily(ctx, *in.FamilyID)
 		if err != nil {
-			return dto.PromoteCandidateResponse{}, fmt.Errorf("service: promote candidate: invalid family_id: %w", err)
+			return dto.PromoteCandidateResponse{}, fmt.Errorf("service: promote candidate: resolve family: %w", err)
 		}
 	} else {
-		// Create a new family from the candidate's title.
-		slug := domain.CanonicalIngredientID(c.Title)
-		f := persistence.RecipeFamily{
-			ID:        domain.NewRecipeFamilyID(),
-			Slug:      slug,
-			Name:      c.Title,
-			Archived:  false,
-			CreatedAt: time.Now(),
-		}
-		if err := s.db.CreateRecipeFamily(ctx, f); err != nil {
+		famResp, err = s.family.CreateFamily(ctx, dto.CreateRecipeFamilyInput{Name: c.Title})
+		if err != nil {
 			return dto.PromoteCandidateResponse{}, fmt.Errorf("service: promote candidate: create family: %w", err)
 		}
-		famID = f.ID
 		newFamily = true
 	}
 
 	// Create the variant.
-	v := persistence.RecipeVariant{
-		ID:                domain.NewRecipeVariantID(),
-		Slug:              domain.CanonicalIngredientID(c.Title),
-		FamilyID:          famID,
+	varResp, err := s.family.CreateVariant(ctx, famResp.ID, dto.CreateRecipeVariantInput{
 		Title:             c.Title,
 		SourceAttribution: c.SourceURL,
-		Archived:          false,
-		CreatedAt:         time.Now(),
-	}
-	if err := s.db.CreateRecipeVariant(ctx, v); err != nil {
+	})
+	if err != nil {
 		return dto.PromoteCandidateResponse{}, fmt.Errorf("service: promote candidate: create variant: %w", err)
 	}
-	varID := v.ID
+	varID, err := domain.ParseRecipeVariantID(varResp.ID)
+	if err != nil {
+		return dto.PromoteCandidateResponse{}, fmt.Errorf("service: promote candidate: invalid variant id: %w", err)
+	}
 
 	// Re-parse from raw_jsonld to get instructions and ingredients.
 	parsedForPromo, err := recipeimport.ParseRecipe(c.RawJSONLD)
 	if err != nil {
 		return dto.PromoteCandidateResponse{}, fmt.Errorf("service: promote candidate: re-parse raw jsonld: %w", err)
 	}
-	ingredients := make([]domain.Ingredient, 0, len(parsedForPromo.Ingredients))
+	ingredients := make([]dto.RecipeFamilyIngredient, 0, len(parsedForPromo.Ingredients))
 	for _, ing := range parsedForPromo.Ingredients {
 		ingID := domain.IngredientIDForName(domain.CanonicalIngredientID(ing.Food))
-		ingredients = append(ingredients, domain.Ingredient{
+		ingredients = append(ingredients, dto.RecipeFamilyIngredient{
 			IngredientID: ingID.String(),
 			Quantity:     ing.Quantity,
 			Unit:         ing.Unit,
 			RawText:      ing.RawText,
 		})
 	}
-	rev := persistence.RecipeRevision{
-		VariantID:   varID,
+	revResp, err := s.family.CreateRevision(ctx, varResp.ID, dto.CreateRecipeRevisionInput{
 		Servings:    ptrDerefOr(c.Servings, 0),
 		Description: c.Description,
 		Ingredients: ingredients,
 		Steps:       parsedForPromo.Instructions,
-		CreatedAt:   time.Now(),
-	}
-	revID, err := s.db.CreateRecipeRevision(ctx, rev)
+	})
 	if err != nil {
 		return dto.PromoteCandidateResponse{}, fmt.Errorf("service: promote candidate: create revision: %w", err)
 	}
 
 	// Set the new variant as default when a new family was created.
 	if newFamily {
-		if err := s.db.SetRecipeFamilyDefaultVariant(ctx, famID, varID); err != nil {
+		if err := s.family.SetDefaultVariant(ctx, famResp.ID, varResp.ID); err != nil {
 			return dto.PromoteCandidateResponse{}, fmt.Errorf("service: promote candidate: set default variant: %w", err)
 		}
 	}
@@ -321,9 +310,9 @@ func (s *Discovery) PromoteCandidate(ctx context.Context, id string, in dto.Prom
 	}
 
 	return dto.PromoteCandidateResponse{
-		FamilyID:        famID.String(),
-		VariantID:       varID.String(),
-		RevisionID:      revID.String(),
+		FamilyID:        famResp.ID,
+		VariantID:       varResp.ID,
+		RevisionID:      revResp.ID,
 		CandidateStatus: string(recipeimport.StatusPromoted),
 	}, nil
 }

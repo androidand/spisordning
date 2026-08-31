@@ -54,8 +54,8 @@ internal/
   scoring/scoring.go     deterministic candidate scorer
   service/              application-layer services (grocy.go, …) — depend on internal/dto
   skolmaten/client.go    school-lunch client
-migrations/0001-0014      Postgres schema (0001 first-slice … 0014 meal plan slots) —
-                            applied by docker-compose; Go persistence wired for all (see below)
+ migrations/0001-0020      Postgres schema (0001 first-slice … 0020 recipe_source_ref) —
+                             applied by docker-compose; Go persistence wired for all (see below)
 api/openapi.yaml          design-first OpenAPI 3.0.3 contract; server code generated from this
 web/                      Vite + React 19 + TypeScript 7.0.2 multi-page frontend (hand-written
                             typed client in web/src/generated/spisordning.ts); see below
@@ -138,6 +138,10 @@ See `docs/research/willys-capabilities.md` for the full capability map.
 - **Mealie**: real, tested client (`internal/mealie/client.go`), talks to an already-deployed
   instance (`MEALIE_BASE_URL` defaults to `http://hlab-mealie:9000`). Includes tag
   normalization, Swedish effort-time parsing, and a fallback to Mealie's own ingredient parser.
+  **Recipe source of truth** is controlled by the `RECIPE_SOURCE` env var (`native`/`dual`/`mealie`,
+  default `mealie`). The `recipe_source_ref` table (migration 000020) maps native `recipe_family`
+  rows to Mealie slugs. `food-brain sync import` runs the one-way Mealie → recipe_family import.
+  `StructureFromText` writes natively when `RECIPE_SOURCE=native` or `dual`.
 - **Grocy**: real, tested client (`internal/grocy/client.go`) + service (`internal/service/grocy.go`)
   + handler (`internal/httpapi/grocy.go`); reads `GROCY_BASE_URL` / `GROCY_USER` / `GROCY_PASSWORD`
   via `internal/config`. A nil client degrades to `ErrGrocyNotConfigured` → 503. Frontend

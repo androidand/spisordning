@@ -3,6 +3,7 @@ package persistence
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -99,14 +100,25 @@ func (s *Store) ListRecipeRefs(ctx context.Context) ([]RecipeRef, error) {
 // Ingredient mirrors migrations/0001_init.sql ingredient (canonical id).
 type Ingredient struct {
 	ID      domain.IngredientID
+	Slug    string
 	Display string
 }
 
-// UpsertIngredient inserts or updates a canonical ingredient.
+// UpsertIngredient inserts or updates a canonical ingredient. When Slug is
+// empty, the insert falls back to a lowercased Display value; an existing slug
+// is preserved on conflict unless the caller explicitly supplies one.
 func (s *Store) UpsertIngredient(ctx context.Context, i Ingredient) error {
-	const q = `INSERT INTO ingredient (id, display) VALUES ($1, $2)
-		ON CONFLICT (id) DO UPDATE SET display = EXCLUDED.display`
-	if _, err := s.db.Exec(ctx, q, i.ID, i.Display); err != nil {
+	slug := strings.ToLower(strings.TrimSpace(i.Slug))
+	if slug == "" {
+		slug = strings.ToLower(strings.TrimSpace(i.Display))
+	}
+	if slug == "" {
+		slug = i.ID.String()
+	}
+	const q = `INSERT INTO ingredient (id, slug, display) VALUES ($1, $2, $3)
+		ON CONFLICT (id) DO UPDATE SET display = EXCLUDED.display,
+			slug = COALESCE(NULLIF($4, ''), ingredient.slug)`
+	if _, err := s.db.Exec(ctx, q, i.ID, slug, i.Display, i.Slug); err != nil {
 		return fmt.Errorf("persistence: upsert ingredient: %w", err)
 	}
 	return nil
@@ -115,7 +127,7 @@ func (s *Store) UpsertIngredient(ctx context.Context, i Ingredient) error {
 // GetIngredient fetches one canonical ingredient by id.
 func (s *Store) GetIngredient(ctx context.Context, id domain.IngredientID) (Ingredient, error) {
 	var i Ingredient
-	err := s.db.QueryRow(ctx, `SELECT id, display FROM ingredient WHERE id = $1`, id).Scan(&i.ID, &i.Display)
+	err := s.db.QueryRow(ctx, `SELECT id, slug, display FROM ingredient WHERE id = $1`, id).Scan(&i.ID, &i.Slug, &i.Display)
 	if err != nil {
 		return Ingredient{}, fmt.Errorf("persistence: get ingredient: %w", err)
 	}
@@ -124,10 +136,11 @@ func (s *Store) GetIngredient(ctx context.Context, id domain.IngredientID) (Ingr
 
 // RecipeIngredient mirrors migrations/0001_init.sql recipe_ingredient.
 type RecipeIngredient struct {
-	RecipeRefID  domain.RecipeRefID
-	IngredientID domain.IngredientID
-	Quantity     float64
-	Unit         string
+	RecipeRefID    domain.RecipeRefID
+	IngredientID   domain.IngredientID
+	Quantity       float64
+	Unit           string
+	IngredientName string
 }
 
 // AddRecipeIngredient records one ingredient line of a recipe. Idempotent on
@@ -145,8 +158,11 @@ func (s *Store) AddRecipeIngredient(ctx context.Context, ri RecipeIngredient) er
 
 // ListRecipeIngredients returns a recipe's canonical ingredient lines.
 func (s *Store) ListRecipeIngredients(ctx context.Context, recipeRefID domain.RecipeRefID) ([]RecipeIngredient, error) {
-	rows, err := s.db.Query(ctx, `SELECT recipe_ref_id, ingredient_id, quantity, unit
-		FROM recipe_ingredient WHERE recipe_ref_id = $1 ORDER BY ingredient_id`, recipeRefID)
+	rows, err := s.db.Query(ctx, `SELECT ri.recipe_ref_id, ri.ingredient_id, ri.quantity, ri.unit,
+		COALESCE(i.slug, i.display, '')
+		FROM recipe_ingredient ri
+		LEFT JOIN ingredient i ON i.id = ri.ingredient_id
+		WHERE ri.recipe_ref_id = $1 ORDER BY ri.ingredient_id`, recipeRefID)
 	if err != nil {
 		return nil, fmt.Errorf("persistence: list recipe_ingredients: %w", err)
 	}
@@ -154,7 +170,7 @@ func (s *Store) ListRecipeIngredients(ctx context.Context, recipeRefID domain.Re
 	var out []RecipeIngredient
 	for rows.Next() {
 		var ri RecipeIngredient
-		if err := rows.Scan(&ri.RecipeRefID, &ri.IngredientID, &ri.Quantity, &ri.Unit); err != nil {
+		if err := rows.Scan(&ri.RecipeRefID, &ri.IngredientID, &ri.Quantity, &ri.Unit, &ri.IngredientName); err != nil {
 			return nil, err
 		}
 		out = append(out, ri)
@@ -167,8 +183,11 @@ func (s *Store) ListRecipeIngredients(ctx context.Context, recipeRefID domain.Re
 // inspiration use case: the service joins it with the pantry's ingredient ids
 // to score each recipe by how much of it is already on hand.
 func (s *Store) ListAllRecipeIngredients(ctx context.Context) ([]RecipeIngredient, error) {
-	rows, err := s.db.Query(ctx, `SELECT recipe_ref_id, ingredient_id, quantity, unit
-		FROM recipe_ingredient ORDER BY recipe_ref_id, ingredient_id`)
+	rows, err := s.db.Query(ctx, `SELECT ri.recipe_ref_id, ri.ingredient_id, ri.quantity, ri.unit,
+		COALESCE(i.slug, i.display, '')
+		FROM recipe_ingredient ri
+		LEFT JOIN ingredient i ON i.id = ri.ingredient_id
+		ORDER BY ri.recipe_ref_id, ri.ingredient_id`)
 	if err != nil {
 		return nil, fmt.Errorf("persistence: list all recipe_ingredients: %w", err)
 	}
@@ -176,7 +195,7 @@ func (s *Store) ListAllRecipeIngredients(ctx context.Context) ([]RecipeIngredien
 	var out []RecipeIngredient
 	for rows.Next() {
 		var ri RecipeIngredient
-		if err := rows.Scan(&ri.RecipeRefID, &ri.IngredientID, &ri.Quantity, &ri.Unit); err != nil {
+		if err := rows.Scan(&ri.RecipeRefID, &ri.IngredientID, &ri.Quantity, &ri.Unit, &ri.IngredientName); err != nil {
 			return nil, err
 		}
 		out = append(out, ri)

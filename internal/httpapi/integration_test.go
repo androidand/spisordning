@@ -822,7 +822,7 @@ func (a *testAdapter) ListShoppingRequirements(ctx context.Context, planID strin
 	}
 	out := make([]ShoppingRequirementResponse, 0, len(reqs))
 	for _, r := range reqs {
-		out = append(out, ShoppingRequirementResponse{ID: r.ID.String(), IngredientID: r.IngredientID.String(), Quantity: r.Quantity, Unit: r.Unit, AcceptableForms: r.AcceptableForms, PreferredForm: r.PreferredForm})
+		out = append(out, ShoppingRequirementResponse{ID: r.ID.String(), IngredientID: r.IngredientID.String(), IngredientName: r.IngredientName, Quantity: r.Quantity, Unit: r.Unit, AcceptableForms: r.AcceptableForms, PreferredForm: r.PreferredForm})
 	}
 	return out, nil
 }

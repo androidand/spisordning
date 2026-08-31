@@ -28,6 +28,7 @@ type MealPlanCandidate struct {
 	ID        string             `json:"id"`
 	Recipe    RecipeRefResponse  `json:"recipe"`
 	SlotDate  string             `json:"slot_date"` // date (YYYY-MM-DD)
+	SlotKind  string             `json:"slot_kind"`
 	Score     float64            `json:"score"`
 	Breakdown map[string]float64 `json:"breakdown"`
 	Feasible  bool               `json:"feasible"`
@@ -38,6 +39,7 @@ type MealPlanCandidate struct {
 type MealPlanDecision struct {
 	PlanID         string    `json:"plan_id"`
 	SlotDate       string    `json:"slot_date"`
+	SlotKind       string    `json:"slot_kind,omitempty"`
 	MealieRecipeID string    `json:"mealie_recipe_id"`
 	DecidedAt      time.Time `json:"decided_at,omitempty"`
 }
@@ -53,6 +55,7 @@ type MealPlanView struct {
 type ShoppingRequirement struct {
 	ID              string   `json:"id"`
 	IngredientID    string   `json:"ingredient_id"`
+	IngredientName  string   `json:"ingredient_name,omitempty"`
 	Quantity        float64  `json:"quantity"`
 	Unit            string   `json:"unit"`
 	AcceptableForms []string `json:"acceptable_forms"`

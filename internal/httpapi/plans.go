@@ -73,6 +73,7 @@ type PlanView struct {
 type PlanCandidateResponse struct {
 	ID        string            `json:"id"`
 	SlotDate  types.Date        `json:"slot_date"`
+	SlotKind  string            `json:"slot_kind"`
 	Rank      int               `json:"rank"`
 	Score     float64           `json:"score"`
 	Breakdown map[string]float64 `json:"breakdown"`
@@ -84,6 +85,7 @@ type PlanCandidateResponse struct {
 // (openapi: components/schemas/MealPlanDecision).
 type PlanDecisionInput struct {
 	SlotDate       types.Date `json:"slot_date"`
+	SlotKind       string     `json:"slot_kind,omitempty"`
 	MealieRecipeID string     `json:"mealie_recipe_id"`
 }
 
@@ -91,6 +93,7 @@ type PlanDecisionInput struct {
 type PlanDecisionResponse struct {
 	PlanID         string     `json:"plan_id"`
 	SlotDate       types.Date `json:"slot_date"`
+	SlotKind       string     `json:"slot_kind,omitempty"`
 	MealieRecipeID string     `json:"mealie_recipe_id"`
 	DecidedAt      *time.Time `json:"decided_at,omitempty"`
 }
@@ -99,6 +102,7 @@ type PlanDecisionResponse struct {
 type PlanCandidateInput struct {
 	PlanID         string
 	SlotDate       time.Time
+	SlotKind       string
 	MealieRecipeID string
 	Score          float64
 	Breakdown      map[string]float64
@@ -111,6 +115,7 @@ type PlanCandidateInput struct {
 type ShoppingRequirementResponse struct {
 	ID              string  `json:"id"`
 	IngredientID    string  `json:"ingredient_id"`
+	IngredientName  string  `json:"ingredient_name,omitempty"`
 	Quantity        float64 `json:"quantity"`
 	Unit            string  `json:"unit"`
 	AcceptableForms []string `json:"acceptable_forms"`

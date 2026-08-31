@@ -4,6 +4,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/androidand/spisordning/internal/domain"
@@ -16,14 +17,15 @@ import (
 // PlanWeek orchestration used by the `food-brain plan` CLI and the MCP
 // plan_week tool.
 type Planning struct {
-	db     Store
-	mealie *mealie.Client
+	db        Store
+	mealie    *mealie.Client
+	resolver  *ResolveRecipeResolver
 }
 
 // NewPlanning returns a Planning service backed by db. mc may be nil when no
 // Mealie instance is configured; PlanWeek then reports an error.
 func NewPlanning(db Store, mc *mealie.Client) *Planning {
-	return &Planning{db: db, mealie: mc}
+	return &Planning{db: db, mealie: mc, resolver: NewResolveRecipeResolver(db, RecipeSourceModeFromEnv())}
 }
 
 func (s *Planning) ListPlans(ctx context.Context) ([]dto.MealPlan, error) {
@@ -131,12 +133,21 @@ func (s *Planning) SetDecisions(ctx context.Context, planID string, in []dto.Mea
 		if err != nil {
 			return nil, fmt.Errorf("service: set decisions: invalid slot_date %q: %w", d.SlotDate, err)
 		}
-		ref, err := s.db.GetRecipeRefByMealieID(ctx, d.MealieRecipeID)
+		kind := strings.TrimSpace(d.SlotKind)
+		if kind == "" {
+			kind = string(domain.SlotDinner)
+		}
+		switch kind {
+		case string(domain.SlotDinner), string(domain.SlotBreakfast), string(domain.SlotSnack):
+		default:
+			return nil, fmt.Errorf("service: set decisions: invalid slot_kind %q", d.SlotKind)
+		}
+		ref, err := s.resolver.ResolveRecipeRef(ctx, d.MealieRecipeID)
 		if err != nil {
 			return nil, fmt.Errorf("service: set decisions: resolve recipe %q: %w", d.MealieRecipeID, err)
 		}
 		decision := persistence.MealPlanDecision{
-			PlanID: parsedPlanID, SlotDate: slotDate, RecipeRefID: ref.ID,
+			PlanID: parsedPlanID, SlotDate: slotDate, SlotKind: kind, RecipeRefID: ref.ID,
 		}
 		if err := s.db.SetDecision(ctx, decision); err != nil {
 			return nil, fmt.Errorf("service: set decisions: %w", err)
@@ -163,6 +174,7 @@ func (s *Planning) ListShoppingRequirements(ctx context.Context, planID string) 
 		out = append(out, dto.ShoppingRequirement{
 			ID:              r.ID.String(),
 			IngredientID:    r.IngredientID.String(),
+			IngredientName:  r.IngredientName,
 			Quantity:        r.Quantity,
 			Unit:            r.Unit,
 			AcceptableForms: r.AcceptableForms,
@@ -183,6 +195,7 @@ func (s *Planning) toPlanCandidates(ctx context.Context, cands []persistence.Mea
 			ID:        c.ID.String(),
 			Recipe:    dto.RecipeRefResponse{MealieRecipeID: ref.MealieRecipeID, Title: ref.Title, Tags: ref.Tags, Effort: ref.Effort},
 			SlotDate:  c.SlotDate.Format("2006-01-02"),
+			SlotKind:  c.SlotKind,
 			Score:     c.Score,
 			Breakdown: c.Breakdown,
 			Feasible:  c.Feasible,
@@ -202,9 +215,52 @@ func (s *Planning) toPlanDecisions(ctx context.Context, decisions []persistence.
 		out = append(out, dto.MealPlanDecision{
 			PlanID:         d.PlanID.String(),
 			SlotDate:       d.SlotDate.Format("2006-01-02"),
+			SlotKind:       d.SlotKind,
 			MealieRecipeID: ref.MealieRecipeID,
 			DecidedAt:      d.DecidedAt,
 		})
 	}
 	return out, nil
+}
+
+// PlanRunResult is the outcome of an explicit plan run.
+type PlanRunResult struct {
+	PlanID    string
+	WeekStart time.Time
+	Days      int
+	SlotCount int
+	Persisted bool
+}
+
+// RunPlan plans a week, persists it, and approves the resulting plan so the
+// persisted plan can immediately receive decisions.
+func (s *Planning) RunPlan(ctx context.Context, in PlanWeekInput) (PlanRunResult, error) {
+	res, err := s.PlanWeek(ctx, in)
+	if err != nil {
+		return PlanRunResult{}, err
+	}
+	if res.PersistError != nil {
+		return PlanRunResult{}, res.PersistError
+	}
+	if !res.Persisted {
+		return PlanRunResult{
+			WeekStart: res.WeekStart,
+			Days:      in.Days,
+			SlotCount: len(res.Planned),
+		}, nil
+	}
+	plan, err := s.db.GetOrCreateMealPlan(ctx, res.WeekStart)
+	if err != nil {
+		return PlanRunResult{}, fmt.Errorf("service: run plan: read plan after persist: %w", err)
+	}
+	if err := s.db.SetMealPlanStatus(ctx, plan.ID, "approved"); err != nil {
+		return PlanRunResult{}, fmt.Errorf("service: run plan: approve plan: %w", err)
+	}
+	return PlanRunResult{
+		PlanID:    plan.ID.String(),
+		WeekStart: res.WeekStart,
+		Days:      in.Days,
+		SlotCount: len(res.Planned),
+		Persisted: true,
+	}, nil
 }

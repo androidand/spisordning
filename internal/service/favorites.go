@@ -12,14 +12,17 @@ import (
 // household-scoped markers on a recipe — created only by an explicit action,
 // never derived from ratings or reactions.
 type Favorites struct {
-	db Store
+	db       Store
+	resolver *ResolveRecipeResolver
 }
 
 // NewFavorites returns a Favorites service backed by db.
-func NewFavorites(db Store) *Favorites { return &Favorites{db: db} }
+func NewFavorites(db Store) *Favorites {
+	return &Favorites{db: db, resolver: NewResolveRecipeResolver(db, RecipeSourceModeFromEnv())}
+}
 
 func (s *Favorites) ListFavoritesForRecipe(ctx context.Context, mealieRecipeID string) ([]dto.FavoriteResponse, error) {
-	ref, err := s.db.GetRecipeRefByMealieID(ctx, mealieRecipeID)
+	ref, err := s.resolver.ResolveRecipeRef(ctx, mealieRecipeID)
 	if err != nil {
 		return nil, fmt.Errorf("service: list favorites: %w", err)
 	}
@@ -35,7 +38,7 @@ func (s *Favorites) ListFavoritesForRecipe(ctx context.Context, mealieRecipeID s
 }
 
 func (s *Favorites) GetRecipeRating(ctx context.Context, mealieRecipeID string) (dto.RecipeRatingResponse, error) {
-	ref, err := s.db.GetRecipeRefByMealieID(ctx, mealieRecipeID)
+	ref, err := s.resolver.ResolveRecipeRef(ctx, mealieRecipeID)
 	if err != nil {
 		return dto.RecipeRatingResponse{}, fmt.Errorf("service: get recipe rating: %w", err)
 	}
@@ -55,7 +58,7 @@ func (s *Favorites) SetFavorite(ctx context.Context, mealieRecipeID string, in d
 	if err != nil {
 		return fmt.Errorf("service: set favorite: %w", err)
 	}
-	ref, err := s.db.GetRecipeRefByMealieID(ctx, mealieRecipeID)
+	ref, err := s.resolver.ResolveRecipeRef(ctx, mealieRecipeID)
 	if err != nil {
 		return fmt.Errorf("service: set favorite: %w", err)
 	}
@@ -70,7 +73,7 @@ func (s *Favorites) UnsetFavorite(ctx context.Context, mealieRecipeID string, in
 	if err != nil {
 		return fmt.Errorf("service: unset favorite: %w", err)
 	}
-	ref, err := s.db.GetRecipeRefByMealieID(ctx, mealieRecipeID)
+	ref, err := s.resolver.ResolveRecipeRef(ctx, mealieRecipeID)
 	if err != nil {
 		return fmt.Errorf("service: unset favorite: %w", err)
 	}

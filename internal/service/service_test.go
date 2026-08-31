@@ -481,6 +481,36 @@ func (f *fakeStore) ListCurrentPrices(ctx context.Context) ([]domain.CurrentStor
 		{OfferID: oid2, StoreID: testStoreID("s-2"), RetailerProductID: rpid, PriceKind: domain.PriceKindRegular, Price: 17.5, ObservedAt: time.Now(), Source: "willys_adapter"},
 	}, nil
 }
+func (f *fakeStore) ListStores(ctx context.Context, retailerID domain.RetailerID) ([]domain.Store, error) {
+	return []domain.Store{{ID: testStoreID("s-1"), RetailerID: retailerID, Name: "Willys Centrum"}}, nil
+}
+func (f *fakeStore) PriceObservationsForProduct(ctx context.Context, retailerProductID domain.RetailerProductID) ([]domain.PriceObservation, error) {
+	return []domain.PriceObservation{{
+		ID: domain.NewPriceObservationID(), StoreProductOfferID: domain.StoreProductOfferID(slugToUUID("offer-1")),
+		ObservedAt: time.Now(), Price: 19.9, PriceKind: domain.PriceKindRegular, Source: "willys_adapter", CreatedAt: time.Now(),
+	}}, nil
+}
+func (f *fakeStore) PriceObservationsForStore(ctx context.Context, storeID domain.StoreID) ([]domain.PriceObservation, error) {
+	return []domain.PriceObservation{{
+		ID: domain.NewPriceObservationID(), StoreProductOfferID: domain.StoreProductOfferID(slugToUUID("offer-1")),
+		ObservedAt: time.Now(), Price: 19.9, PriceKind: domain.PriceKindRegular, Source: "willys_adapter", CreatedAt: time.Now(),
+	}}, nil
+}
+func (f *fakeStore) GetRecipeSourceRefByFamily(ctx context.Context, familyID domain.RecipeFamilyID) (persistence.RecipeSourceRef, error) {
+	return persistence.RecipeSourceRef{}, persistence.ErrNoRows
+}
+func (f *fakeStore) GetRecipeSourceRefBySource(ctx context.Context, source, sourceRecipeID string) (persistence.RecipeSourceRef, error) {
+	return persistence.RecipeSourceRef{}, persistence.ErrNoRows
+}
+func (f *fakeStore) UpsertRecipeSourceRef(ctx context.Context, r persistence.RecipeSourceRef) error {
+	return nil
+}
+func (f *fakeStore) ListUnmappedMealieRecipes(ctx context.Context) ([]string, error) {
+	return nil, nil
+}
+func (f *fakeStore) GetRecipeFamilyBySlug(ctx context.Context, slug string) (persistence.RecipeFamily, error) {
+	return persistence.RecipeFamily{}, persistence.ErrNoRows
+}
 func (f *fakeStore) ListExpiringLots(ctx context.Context, within time.Duration) ([]persistence.InventoryLot, error) {
 	return []persistence.InventoryLot{
 		{ID: domain.NewInventoryLotID(), IngredientID: domain.IngredientIDForName("mjolk"), LocationID: domain.NewInventoryLocationID(), Quantity: 1, Unit: "L", Confidence: domain.ConfidenceExact, BestBefore: &[]time.Time{time.Now().Add(24 * time.Hour)}[0]},

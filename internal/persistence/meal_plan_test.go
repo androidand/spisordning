@@ -87,11 +87,8 @@ func TestMealPlan_GetOrCreateMealPlan(t *testing.T) {
 	if err := s.UpsertRecipeRef(ctx, RecipeRef{MealieRecipeID: "r-1", Title: "Test Recipe", Effort: 1}); err != nil {
 		t.Fatalf("UpsertRecipeRef (fixture): %v", err)
 	}
-	kottfarsID, err := domain.ParseIngredientID("köttfärs")
-	if err != nil {
-		t.Fatalf("ParseIngredientID: %v", err)
-	}
-	if err := s.UpsertIngredient(ctx, Ingredient{ID: kottfarsID, Display: "Köttfärs"}); err != nil {
+	kottfarsID := domain.IngredientIDForName("köttfärs")
+	if err := s.UpsertIngredient(ctx, Ingredient{ID: kottfarsID, Slug: "köttfärs", Display: "Köttfärs"}); err != nil {
 		t.Fatalf("UpsertIngredient (fixture): %v", err)
 	}
 	// First call creates the 'draft' plan row.
@@ -231,11 +228,8 @@ func TestShoppingRequirements_RoundTrip(t *testing.T) {
 	ctx := context.Background()
 	weekStart := date(t, "2043-02-01")
 	// Seed the ingredient the shopping requirement references.
-	kottfarsID, err := domain.ParseIngredientID("köttfärs")
-	if err != nil {
-		t.Fatalf("ParseIngredientID: %v", err)
-	}
-	if err := s.UpsertIngredient(ctx, Ingredient{ID: kottfarsID, Display: "Köttfärs"}); err != nil {
+	kottfarsID := domain.IngredientIDForName("köttfärs")
+	if err := s.UpsertIngredient(ctx, Ingredient{ID: kottfarsID, Slug: "köttfärs", Display: "Köttfärs"}); err != nil {
 		t.Fatalf("UpsertIngredient (fixture): %v", err)
 	}
 	pid, err := s.CreateMealPlan(ctx, weekStart)

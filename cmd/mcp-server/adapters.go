@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/androidand/spisordning/internal/config"
@@ -37,6 +38,10 @@ type mcpStoreAdapter struct {
 	recipes *service.Recipes
 	// discovery delegates the recipe-discovery tools to the application layer.
 	discovery *service.Discovery
+	// planning delegates the meal-plan tools to the application layer. It is
+	// constructed with a nil Mealie client when Mealie isn't configured;
+	// persist_plan then reports that as an error.
+	planning *service.Planning
 }
 
 // PlanDinners loads the household and recipe candidates, then delegates to the
@@ -208,6 +213,206 @@ func (a mcpStoreAdapter) RecordReaction(ctx context.Context, in mcptools.RecordR
 	}, nil
 }
 
+// RecordMealFromPlan creates a meal event for a served planned recipe and
+// records the household member's reaction. When plan fields are present, the
+// meal event is linked to the plan slot.
+func (a mcpStoreAdapter) RecordMealFromPlan(ctx context.Context, in mcptools.RecordMealFromPlanInput) (mcptools.RecordReactionResult, error) {
+	servedOn, err := time.Parse("2006-01-02", in.ServedOn)
+	if err != nil {
+		return mcptools.RecordReactionResult{}, fmt.Errorf("record meal from plan: invalid served_on %q: %w", in.ServedOn, err)
+	}
+	ref, err := a.db.GetRecipeRefByMealieID(ctx, in.Recipe)
+	if err != nil {
+		return mcptools.RecordReactionResult{}, fmt.Errorf("record meal from plan: resolve recipe: %w", err)
+	}
+	pid, err := domain.ParsePersonID(in.PersonID)
+	if err != nil {
+		return mcptools.RecordReactionResult{}, fmt.Errorf("record meal from plan: parse person id: %w", err)
+	}
+
+	var (
+		planID      *domain.MealPlanID
+		planSlot    *time.Time
+		planSlotKind *string
+	)
+	if in.PlanID != "" {
+		parsedPlanID, err := domain.ParseMealPlanID(in.PlanID)
+		if err != nil {
+			return mcptools.RecordReactionResult{}, fmt.Errorf("record meal from plan: parse plan id: %w", err)
+		}
+		planID = &parsedPlanID
+		slotDate, err := time.Parse("2006-01-02", in.PlanSlotDate)
+		if err != nil {
+			return mcptools.RecordReactionResult{}, fmt.Errorf("record meal from plan: invalid plan_slot_date %q: %w", in.PlanSlotDate, err)
+		}
+		planSlot = &slotDate
+		kind := in.PlanSlotKind
+		if kind == "" {
+			kind = in.Slot
+		}
+		if kind != "" {
+			planSlotKind = &kind
+		}
+	}
+
+	eventID, err := a.db.CreateMealEventWithSlot(ctx, ref.ID, servedOn, planID, planSlot, planSlotKind)
+	if err != nil {
+		return mcptools.RecordReactionResult{}, fmt.Errorf("record meal from plan: create meal event: %w", err)
+	}
+	if err := a.db.AddMealReaction(ctx, persistence.MealReaction{
+		MealEventID: eventID,
+		PersonID:    pid,
+		Sentiment:   in.Sentiment,
+	}); err != nil {
+		return mcptools.RecordReactionResult{}, fmt.Errorf("record meal from plan: add reaction: %w", err)
+	}
+	return mcptools.RecordReactionResult{
+		MealEventID: eventID.String(),
+		Recipe:      in.Recipe,
+		ServedOn:    in.ServedOn,
+		PersonID:    in.PersonID,
+		Sentiment:   in.Sentiment,
+	}, nil
+}
+
+// ListPlans lists all meal plans and maps them onto the mcptools view.
+func (a mcpStoreAdapter) ListPlans(ctx context.Context) ([]mcptools.PlanSummary, error) {
+	plans, err := a.planning.ListPlans(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]mcptools.PlanSummary, 0, len(plans))
+	for _, p := range plans {
+		out = append(out, mcptools.PlanSummary{
+			ID: p.ID, WeekStart: p.WeekStart, Status: p.Status, CreatedAt: p.CreatedAt.Format(time.RFC3339),
+		})
+	}
+	return out, nil
+}
+
+// GetPlan fetches one meal plan, its candidates, decisions, and shopping
+// requirements, and maps them onto the mcptools view.
+func (a mcpStoreAdapter) GetPlan(ctx context.Context, planID string) (mcptools.GetPlanResult, error) {
+	view, err := a.planning.GetPlan(ctx, planID)
+	if err != nil {
+		return mcptools.GetPlanResult{}, err
+	}
+	reqs, err := a.planning.ListShoppingRequirements(ctx, planID)
+	if err != nil {
+		return mcptools.GetPlanResult{}, err
+	}
+	out := mcptools.GetPlanResult{
+		Plan: mcptools.PlanSummary{
+			ID: view.Plan.ID, WeekStart: view.Plan.WeekStart, Status: view.Plan.Status, CreatedAt: view.Plan.CreatedAt.Format(time.RFC3339),
+		},
+		Candidates:         make([]mcptools.PlanCandidate, 0, len(view.Candidates)),
+		Decisions:          make([]mcptools.PlanDecisionResponse, 0, len(view.Decisions)),
+		ShoppingRequirements: make([]mcptools.ShoppingRequirement, 0, len(reqs)),
+	}
+	for _, c := range view.Candidates {
+		out.Candidates = append(out.Candidates, mcptools.PlanCandidate{
+			ID: c.ID, SlotDate: c.SlotDate, SlotKind: c.SlotKind,
+			MealieRecipeID: c.Recipe.MealieRecipeID, Title: c.Recipe.Title,
+			Score: c.Score, Breakdown: c.Breakdown, Feasible: c.Feasible, Rank: c.Rank,
+		})
+	}
+	for _, d := range view.Decisions {
+		out.Decisions = append(out.Decisions, toMCPPlanDecision(d))
+	}
+	for _, r := range reqs {
+		out.ShoppingRequirements = append(out.ShoppingRequirements, toMCPShoppingRequirement(r))
+	}
+	return out, nil
+}
+
+// SetDecisions sets the chosen recipe for one or more approved plan slots and
+// maps the persisted decisions onto the mcptools view.
+func (a mcpStoreAdapter) SetDecisions(ctx context.Context, planID string, decisions []mcptools.PlanDecisionInput) ([]mcptools.PlanDecisionResponse, error) {
+	in := make([]dto.MealPlanDecision, 0, len(decisions))
+	for _, d := range decisions {
+		in = append(in, dto.MealPlanDecision{
+			SlotDate: d.SlotDate, SlotKind: d.SlotKind, MealieRecipeID: d.MealieRecipeID,
+		})
+	}
+	out, err := a.planning.SetDecisions(ctx, planID, in)
+	if err != nil {
+		return nil, err
+	}
+	mapped := make([]mcptools.PlanDecisionResponse, 0, len(out))
+	for _, d := range out {
+		mapped = append(mapped, toMCPPlanDecision(d))
+	}
+	return mapped, nil
+}
+
+// PersistPlan plans the requested week and slots, persists the result, and
+// approves the plan so it can immediately receive decisions.
+func (a mcpStoreAdapter) PersistPlan(ctx context.Context, in mcptools.PersistPlanInput) (mcptools.PersistPlanResult, error) {
+	weekStart, err := time.Parse("2006-01-02", in.WeekStart)
+	if err != nil {
+		return mcptools.PersistPlanResult{}, fmt.Errorf("persist plan: invalid week_start %q: %w", in.WeekStart, err)
+	}
+	people, prefs, err := a.loadHousehold(ctx)
+	if err != nil {
+		return mcptools.PersistPlanResult{}, fmt.Errorf("persist plan: load household: %w", err)
+	}
+	energy, err := a.loadEnergyFor(ctx)
+	if err != nil {
+		return mcptools.PersistPlanResult{}, fmt.Errorf("persist plan: load effort profile: %w", err)
+	}
+	schoolTags, err := a.loadSchoolTagsFor(ctx, weekStart)
+	if err != nil {
+		return mcptools.PersistPlanResult{}, fmt.Errorf("persist plan: load school tags: %w", err)
+	}
+	res, err := a.planning.RunPlan(ctx, service.PlanWeekInput{
+		WeekStart:     weekStart,
+		Days:          in.Days,
+		People:        people,
+		Preferences:   prefs,
+		EnergyFor:     energy,
+		SchoolTagsFor: schoolTags,
+		Slots:         in.Slots,
+	})
+	if err != nil {
+		return mcptools.PersistPlanResult{}, err
+	}
+	return mcptools.PersistPlanResult{
+		PlanID:    res.PlanID,
+		WeekStart: res.WeekStart.Format("2006-01-02"),
+		Days:      res.Days,
+		SlotCount: res.SlotCount,
+		Persisted: res.Persisted,
+	}, nil
+}
+
+// toMCPPlanDecision maps a dto.MealPlanDecision onto the mcptools view.
+func toMCPPlanDecision(d dto.MealPlanDecision) mcptools.PlanDecisionResponse {
+	out := mcptools.PlanDecisionResponse{
+		PlanID: d.PlanID, SlotDate: d.SlotDate, SlotKind: d.SlotKind, MealieRecipeID: d.MealieRecipeID,
+	}
+	if !d.DecidedAt.IsZero() {
+		s := d.DecidedAt.Format(time.RFC3339)
+		out.DecidedAt = &s
+	}
+	return out
+}
+
+// toMCPShoppingRequirement maps a dto.ShoppingRequirement onto the mcptools view.
+func toMCPShoppingRequirement(r dto.ShoppingRequirement) mcptools.ShoppingRequirement {
+	ingredient := strings.TrimSpace(r.IngredientName)
+	if ingredient == "" {
+		ingredient = r.IngredientID
+	}
+	out := mcptools.ShoppingRequirement{
+		ID: r.ID, IngredientID: r.IngredientID, Ingredient: ingredient,
+		Quantity: r.Quantity, Unit: r.Unit, AcceptableForms: r.AcceptableForms,
+	}
+	if r.PreferredForm != nil {
+		out.PreferredForm = *r.PreferredForm
+	}
+	return out
+}
+
 // ShoppingRequirements loads each recipe's canonical ingredient lines and
 // aggregates them into shopping requirements via the application layer.
 func (a mcpStoreAdapter) ShoppingRequirements(ctx context.Context, recipeIDs []string) ([]mcptools.ShoppingRequirement, error) {
@@ -223,8 +428,12 @@ func (a mcpStoreAdapter) ShoppingRequirements(ctx context.Context, recipeIDs []s
 		}
 		ings := make([]domain.Ingredient, 0, len(lines))
 		for _, l := range lines {
+			name := strings.TrimSpace(l.IngredientName)
+			if name == "" {
+				name = l.IngredientID.String()
+			}
 			ings = append(ings, domain.Ingredient{
-				IngredientID: l.IngredientID.String(),
+				IngredientID: domain.CanonicalIngredientID(name),
 				Quantity:     l.Quantity,
 				Unit:         l.Unit,
 			})
@@ -236,6 +445,7 @@ func (a mcpStoreAdapter) ShoppingRequirements(ctx context.Context, recipeIDs []s
 	out := make([]mcptools.ShoppingRequirement, 0, len(reqs))
 	for _, r := range reqs {
 		out = append(out, mcptools.ShoppingRequirement{
+			IngredientID:    domain.IngredientIDForName(r.IngredientID).String(),
 			Ingredient:      r.IngredientID,
 			Quantity:        r.Quantity,
 			Unit:            r.Unit,
@@ -357,7 +567,11 @@ func (a mcpStoreAdapter) loadCandidates(ctx context.Context) ([]domain.Candidate
 		}
 		ids := make([]string, 0, len(lines))
 		for _, l := range lines {
-			ids = append(ids, l.IngredientID.String())
+			name := strings.TrimSpace(l.IngredientName)
+			if name == "" {
+				name = l.IngredientID.String()
+			}
+			ids = append(ids, domain.CanonicalIngredientID(name))
 		}
 		out = append(out, domain.Candidate{
 			MealieRecipeID: ref.MealieRecipeID,
@@ -467,7 +681,7 @@ func (a mcpStoreAdapter) loadSchoolTagsFor(ctx context.Context, date time.Time) 
 func (a mcpStoreAdapter) CreateShoppingList(ctx context.Context, in mcptools.CreateShoppingListInput) (mcptools.CreateShoppingListResult, error) {
 	items := make([]persistence.ShoppingListItem, 0, len(in.Items))
 	for _, item := range in.Items {
-		ingredientID, err := domain.ParseIngredientID(item.Ingredient)
+		ingredientID, err := resolveShoppingIngredientID(item)
 		if err != nil {
 			return mcptools.CreateShoppingListResult{}, fmt.Errorf("create shopping list: %w", err)
 		}
@@ -487,6 +701,24 @@ func (a mcpStoreAdapter) CreateShoppingList(ctx context.Context, in mcptools.Cre
 		Status: "active",
 		Items:  len(in.Items),
 	}, nil
+}
+
+// resolveShoppingIngredientID resolves a shopping requirement to a canonical
+// ingredient UUID. An explicit UUID in IngredientID wins; otherwise the
+// requirement's canonical Ingredient name is used, either as a UUID or by
+// deriving the deterministic ingredient id.
+func resolveShoppingIngredientID(item mcptools.ShoppingRequirement) (domain.IngredientID, error) {
+	if id, err := domain.ParseIngredientID(item.IngredientID); err == nil {
+		return id, nil
+	}
+	name := strings.TrimSpace(item.Ingredient)
+	if id, err := domain.ParseIngredientID(name); err == nil {
+		return id, nil
+	}
+	if name == "" {
+		return domain.IngredientID{}, fmt.Errorf("shopping requirement has no ingredient id or name")
+	}
+	return domain.IngredientIDForName(domain.CanonicalIngredientID(name)), nil
 }
 
 // ComparePrices compares prices across retailers for the given requirements.

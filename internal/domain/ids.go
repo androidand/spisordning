@@ -42,6 +42,7 @@ type RecipeRefID uuid.UUID
 type RecipeFamilyID uuid.UUID
 type RecipeVariantID uuid.UUID
 type RecipeRevisionID uuid.UUID
+type RecipeSourceRefID uuid.UUID
 
 // newUUIDv7 generates a UUIDv7 (time-ordered, per design D1). It panics on
 // error, which is effectively impossible: uuid.NewV7 only fails if the system
@@ -86,6 +87,7 @@ func NewRecipeRefID() RecipeRefID { return RecipeRefID(newUUIDv7()) }
 func NewRecipeFamilyID() RecipeFamilyID { return RecipeFamilyID(newUUIDv7()) }
 func NewRecipeVariantID() RecipeVariantID { return RecipeVariantID(newUUIDv7()) }
 func NewRecipeRevisionID() RecipeRevisionID { return RecipeRevisionID(newUUIDv7()) }
+func NewRecipeSourceRefID() RecipeSourceRefID { return RecipeSourceRefID(newUUIDv7()) }
 
 // ── UUID() accessors ─────────────────────────────────────────────────────────
 
@@ -119,6 +121,7 @@ func (id RecipeRefID) UUID() uuid.UUID { return uuid.UUID(id) }
 func (id RecipeFamilyID) UUID() uuid.UUID { return uuid.UUID(id) }
 func (id RecipeVariantID) UUID() uuid.UUID { return uuid.UUID(id) }
 func (id RecipeRevisionID) UUID() uuid.UUID { return uuid.UUID(id) }
+func (id RecipeSourceRefID) UUID() uuid.UUID { return uuid.UUID(id) }
 
 // ── String() ─────────────────────────────────────────────────────────────────
 
@@ -152,6 +155,7 @@ func (id RecipeRefID) String() string { return uuid.UUID(id).String() }
 func (id RecipeFamilyID) String() string { return uuid.UUID(id).String() }
 func (id RecipeVariantID) String() string { return uuid.UUID(id).String() }
 func (id RecipeRevisionID) String() string { return uuid.UUID(id).String() }
+func (id RecipeSourceRefID) String() string { return uuid.UUID(id).String() }
 
 // ── driver.Valuer / sql.Scanner ──────────────────────────────────────────────
 
@@ -215,6 +219,8 @@ func (id RecipeVariantID) Value() (driver.Value, error) { return id.UUID().Value
 func (id *RecipeVariantID) Scan(src any) error { var u uuid.UUID; if err := u.Scan(src); err != nil { return err }; *id = RecipeVariantID(u); return nil }
 func (id RecipeRevisionID) Value() (driver.Value, error) { return id.UUID().Value() }
 func (id *RecipeRevisionID) Scan(src any) error { var u uuid.UUID; if err := u.Scan(src); err != nil { return err }; *id = RecipeRevisionID(u); return nil }
+func (id RecipeSourceRefID) Value() (driver.Value, error) { return id.UUID().Value() }
+func (id *RecipeSourceRefID) Scan(src any) error { var u uuid.UUID; if err := u.Scan(src); err != nil { return err }; *id = RecipeSourceRefID(u); return nil }
 
 // ── Parse helpers ────────────────────────────────────────────────────────────
 
@@ -246,6 +252,7 @@ func ParseRecipeRefID(s string) (RecipeRefID, error) { u, err := uuid.Parse(s); 
 func ParseRecipeFamilyID(s string) (RecipeFamilyID, error) { u, err := uuid.Parse(s); if err != nil { return RecipeFamilyID{}, fmt.Errorf("domain: parse recipe family id %q: %w", s, err) }; return RecipeFamilyID(u), nil }
 func ParseRecipeVariantID(s string) (RecipeVariantID, error) { u, err := uuid.Parse(s); if err != nil { return RecipeVariantID{}, fmt.Errorf("domain: parse recipe variant id %q: %w", s, err) }; return RecipeVariantID(u), nil }
 func ParseRecipeRevisionID(s string) (RecipeRevisionID, error) { u, err := uuid.Parse(s); if err != nil { return RecipeRevisionID{}, fmt.Errorf("domain: parse recipe revision id %q: %w", s, err) }; return RecipeRevisionID(u), nil }
+func ParseRecipeSourceRefID(s string) (RecipeSourceRefID, error) { u, err := uuid.Parse(s); if err != nil { return RecipeSourceRefID{}, fmt.Errorf("domain: parse recipe source ref id %q: %w", s, err) }; return RecipeSourceRefID(u), nil }
 func ParseMealPlanCandidateID(s string) (MealPlanCandidateID, error) { u, err := uuid.Parse(s); if err != nil { return MealPlanCandidateID{}, fmt.Errorf("domain: parse meal plan candidate id %q: %w", s, err) }; return MealPlanCandidateID(u), nil }
 func ParseInventoryEventID(s string) (InventoryEventID, error) { u, err := uuid.Parse(s); if err != nil { return InventoryEventID{}, fmt.Errorf("domain: parse inventory event id %q: %w", s, err) }; return InventoryEventID(u), nil }
 
@@ -321,3 +328,5 @@ func (id RecipeVariantID) MarshalJSON() ([]byte, error)     { return json.Marsha
 func (id *RecipeVariantID) UnmarshalJSON(b []byte) error     { var u uuid.UUID; if err := json.Unmarshal(b, &u); err != nil { return err }; *id = RecipeVariantID(u); return nil }
 func (id RecipeRevisionID) MarshalJSON() ([]byte, error)    { return json.Marshal(uuid.UUID(id)) }
 func (id *RecipeRevisionID) UnmarshalJSON(b []byte) error    { var u uuid.UUID; if err := json.Unmarshal(b, &u); err != nil { return err }; *id = RecipeRevisionID(u); return nil }
+func (id RecipeSourceRefID) MarshalJSON() ([]byte, error)   { return json.Marshal(uuid.UUID(id)) }
+func (id *RecipeSourceRefID) UnmarshalJSON(b []byte) error   { var u uuid.UUID; if err := json.Unmarshal(b, &u); err != nil { return err }; *id = RecipeSourceRefID(u); return nil }

@@ -77,6 +77,24 @@ func (s *Store) GetRecipeFamily(ctx context.Context, id domain.RecipeFamilyID) (
 	return f, nil
 }
 
+// GetRecipeFamilyBySlug fetches one family by its unique slug.
+func (s *Store) GetRecipeFamilyBySlug(ctx context.Context, slug string) (RecipeFamily, error) {
+	const q = `SELECT id, slug, name, description,
+		COALESCE(default_variant_id, '00000000-0000-0000-000000000000')::uuid, archived, created_at
+		FROM recipe_family WHERE slug = $1`
+	var f RecipeFamily
+	err := s.db.QueryRow(ctx, q, slug).Scan(
+		&f.ID, &f.Slug, &f.Name, &f.Description, &f.DefaultVariantID, &f.Archived, &f.CreatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return RecipeFamily{}, fmt.Errorf("persistence: get recipe family by slug %q: %w", slug, pgx.ErrNoRows)
+		}
+		return RecipeFamily{}, fmt.Errorf("persistence: get recipe family by slug: %w", err)
+	}
+	return f, nil
+}
+
 // ListRecipeFamilies returns all non-archived families ordered by name.
 func (s *Store) ListRecipeFamilies(ctx context.Context) ([]RecipeFamily, error) {
 	const q = `SELECT id, slug, name, description,

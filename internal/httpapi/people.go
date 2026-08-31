@@ -230,6 +230,11 @@ func RegisterHandlers(mux *http.ServeMux, deps Dependencies) {
 	if deps.PriceIntelligence != nil {
 		h := pricesHandler{svc: deps.PriceIntelligence}
 		mux.HandleFunc("GET /prices", h.listProductPrices)
+		mux.HandleFunc("GET /prices/retailers", h.listRetailers)
+		mux.HandleFunc("GET /prices/retailers/{id}/stores", h.listRetailerStores)
+		mux.HandleFunc("GET /prices/retailers/{id}/products", h.listRetailerProducts)
+		mux.HandleFunc("GET /prices/products/{id}/history", h.priceHistoryForProduct)
+		mux.HandleFunc("GET /prices/stores/{id}/history", h.priceHistoryForStore)
 	}
 	if deps.Dashboard != nil {
 		h := dashboardHandler{svc: deps.Dashboard}

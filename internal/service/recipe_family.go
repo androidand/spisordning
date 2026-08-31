@@ -61,6 +61,7 @@ func (s *RecipeFamily) CreateFamily(ctx context.Context, in dto.CreateRecipeFami
 		return dto.RecipeFamilyResponse{}, fmt.Errorf("service: create recipe family: name is required")
 	}
 	f := persistence.RecipeFamily{
+		ID:          domain.NewRecipeFamilyID(),
 		Slug:        slug,
 		Name:        name,
 		Description: strings.TrimSpace(in.Description),
@@ -115,6 +116,7 @@ func (s *RecipeFamily) CreateVariant(ctx context.Context, familyID string, in dt
 		return dto.RecipeFamilyVariantResponse{}, fmt.Errorf("service: create recipe variant: title is required")
 	}
 	v := persistence.RecipeVariant{
+		ID:                domain.NewRecipeVariantID(),
 		Slug:              slug,
 		FamilyID:          famID,
 		Title:             title,

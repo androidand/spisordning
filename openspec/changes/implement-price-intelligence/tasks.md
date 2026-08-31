@@ -153,13 +153,18 @@ coverage, price history depth, update interval, and commercial-use terms. Record
       `ListCurrentPrices`/`PriceObservationsForProduct`/`PriceObservationsForStore`.
       Follows the same pattern as `pantry.go` and `catalog.go` (package `persistence`,
       `Store` receiver, `pgx` pool, `fmt.Errorf` wrapping).
-- [ ] 5.2 REST endpoints (OpenAPI-first) for retailer/store lookup, retailer-product lookup, and
-      price-history queries (current price, price-over-time for a given offer). **Deferred this
-      pass:** the persistence layer is complete and the schema is in place. HTTP API endpoints
-      for retailer/store/product lookup and price-history queries are a straightforward extension
-      that follows the existing `httpapi/` pattern (see `people.go` for the reference). They will
-      be added when a consumer of these endpoints is ready — the schema and persistence are the
-      foundation; the API surface is secondary to the data model for this slice.
+- [x] 5.2 REST endpoints (OpenAPI-first) for retailer/store lookup, retailer-product lookup, and
+      price-history queries (current price, price-over-time for a given offer). **Done 2026-08-31:**
+      `internal/httpapi/prices.go` now serves: `GET /prices` (product price groups, existing),
+      `GET /prices/retailers` (all retailers), `GET /prices/retailers/{id}/stores` (stores per
+      retailer), `GET /prices/retailers/{id}/products` (products per retailer),
+      `GET /prices/products/{id}/history` (price observations for a retailer product, most recent
+      first), `GET /prices/stores/{id}/history` (price observations for a store, most recent
+      first). `dto.PriceIntelligenceService` extended with `ListRetailers`, `ListRetailerStores`,
+      `ListRetailerProducts`, `PriceHistoryForProduct`, `PriceHistoryForStore`. `service.Store`
+      extended with `ListStores`, `PriceObservationsForProduct`, `PriceObservationsForStore`.
+      All routes wired in `httpapi/people.go` under the existing `deps.PriceIntelligence != nil`
+      guard. 630 tests passing, vet clean.
 - [x] 5.3 Integration tests against a real/containerized Postgres, including a test asserting
       `price_observation` rows are never UPDATEd, only INSERTed. **Done 2026-08-22 (initial):**
       `internal/persistence/price_test.go` with 8 tests covering: retailer+store CRUD,

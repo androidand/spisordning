@@ -36,16 +36,65 @@ func (f *fakePlanner) PlanSlots(_ context.Context, date time.Time, days int, _ [
 }
 
 type fakeReactions struct {
-	calls int
-	last  mcptools.RecordReactionInput
-	res   mcptools.RecordReactionResult
-	err   error
+	calls         int
+	last          mcptools.RecordReactionInput
+	fromPlanCalls int
+	lastFromPlan  mcptools.RecordMealFromPlanInput
+	res           mcptools.RecordReactionResult
+	fromPlanRes   mcptools.RecordReactionResult
+	err           error
+	fromPlanErr   error
 }
 
 func (f *fakeReactions) RecordReaction(_ context.Context, in mcptools.RecordReactionInput) (mcptools.RecordReactionResult, error) {
 	f.calls++
 	f.last = in
 	return f.res, f.err
+}
+
+func (f *fakeReactions) RecordMealFromPlan(_ context.Context, in mcptools.RecordMealFromPlanInput) (mcptools.RecordReactionResult, error) {
+	f.fromPlanCalls++
+	f.lastFromPlan = in
+	return f.fromPlanRes, f.fromPlanErr
+}
+
+type fakePlan struct {
+	plans           []mcptools.PlanSummary
+	plan            mcptools.GetPlanResult
+	persist         mcptools.PersistPlanResult
+	decisions       []mcptools.PlanDecisionResponse
+	lastPlanID      string
+	lastPersist     mcptools.PersistPlanInput
+	lastDecisions   []mcptools.PlanDecisionInput
+	listPlansCalls  int
+	getPlanCalls    int
+	persistCalls    int
+	setDecisionsCalls int
+	err             error
+}
+
+func (f *fakePlan) ListPlans(_ context.Context) ([]mcptools.PlanSummary, error) {
+	f.listPlansCalls++
+	return f.plans, f.err
+}
+
+func (f *fakePlan) GetPlan(_ context.Context, planID string) (mcptools.GetPlanResult, error) {
+	f.getPlanCalls++
+	f.lastPlanID = planID
+	return f.plan, f.err
+}
+
+func (f *fakePlan) SetDecisions(_ context.Context, planID string, decisions []mcptools.PlanDecisionInput) ([]mcptools.PlanDecisionResponse, error) {
+	f.setDecisionsCalls++
+	f.lastPlanID = planID
+	f.lastDecisions = decisions
+	return f.decisions, f.err
+}
+
+func (f *fakePlan) PersistPlan(_ context.Context, in mcptools.PersistPlanInput) (mcptools.PersistPlanResult, error) {
+	f.persistCalls++
+	f.lastPersist = in
+	return f.persist, f.err
 }
 
 type fakeRequirements struct {
@@ -330,8 +379,277 @@ func TestRegisterTools_NilServiceOmitsTool(t *testing.T) {
 		t.Fatalf("list tools: %v", err)
 	}
 	for _, tool := range res.Tools {
-		if tool.Name == "record_meal_reaction" || tool.Name == "get_shopping_requirements" {
+		if tool.Name == "record_meal_reaction" || tool.Name == "get_shopping_requirements" ||
+			tool.Name == "record_meal_from_plan" || tool.Name == "persist_plan" ||
+			tool.Name == "get_plan" || tool.Name == "list_plans" || tool.Name == "set_plan_decision" {
 			t.Fatalf("unexpected tool %q registered for a nil service", tool.Name)
 		}
+	}
+}
+
+func TestListPlans(t *testing.T) {
+	plan := &fakePlan{plans: []mcptools.PlanSummary{
+		{ID: "plan-1", WeekStart: "2026-08-24", Status: "approved", CreatedAt: "2026-08-20T12:00:00Z"},
+	}}
+	cs := connectServer(t, mcptools.Dependencies{Plan: plan})
+
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "list_plans"})
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected tool error: %+v", res)
+	}
+	got := structured[[]mcptools.PlanSummary](t, res)
+	if len(got) != 1 || got[0].ID != "plan-1" || got[0].Status != "approved" {
+		t.Fatalf("unexpected plans: %+v", got)
+	}
+	if plan.listPlansCalls != 1 {
+		t.Fatalf("service called %d times, want 1", plan.listPlansCalls)
+	}
+}
+
+func TestGetPlan(t *testing.T) {
+	plan := &fakePlan{plan: mcptools.GetPlanResult{
+		Plan: mcptools.PlanSummary{ID: "plan-1", WeekStart: "2026-08-24", Status: "approved"},
+		Candidates: []mcptools.PlanCandidate{
+			{ID: "c1", SlotDate: "2026-08-24", SlotKind: "dinner", MealieRecipeID: "r1", Title: "Pasta", Score: 0.9, Feasible: true, Rank: 0},
+		},
+		Decisions: []mcptools.PlanDecisionResponse{
+			{PlanID: "plan-1", SlotDate: "2026-08-24", SlotKind: "dinner", MealieRecipeID: "r1"},
+		},
+		ShoppingRequirements: []mcptools.ShoppingRequirement{
+			{ID: "req-1", IngredientID: "tomato", Ingredient: "tomato", Quantity: 4, Unit: "pcs"},
+		},
+	}}
+	cs := connectServer(t, mcptools.Dependencies{Plan: plan})
+
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "get_plan",
+		Arguments: map[string]any{"plan_id": "plan-1"},
+	})
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected tool error: %+v", res)
+	}
+	got := structured[mcptools.GetPlanResult](t, res)
+	if got.Plan.ID != "plan-1" || len(got.Candidates) != 1 || len(got.Decisions) != 1 || len(got.ShoppingRequirements) != 1 {
+		t.Fatalf("unexpected plan: %+v", got)
+	}
+	if plan.getPlanCalls != 1 || plan.lastPlanID != "plan-1" {
+		t.Fatalf("service got planID %q after %d calls", plan.lastPlanID, plan.getPlanCalls)
+	}
+}
+
+func TestGetPlan_RequiresPlanID(t *testing.T) {
+	plan := &fakePlan{}
+	cs := connectServer(t, mcptools.Dependencies{Plan: plan})
+
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "get_plan"})
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected tool error for missing plan_id, got %+v", res)
+	}
+	if plan.getPlanCalls != 0 {
+		t.Fatalf("service called %d times, want 0", plan.getPlanCalls)
+	}
+}
+
+func TestPersistPlan_Defaults(t *testing.T) {
+	plan := &fakePlan{persist: mcptools.PersistPlanResult{
+		PlanID: "plan-1", WeekStart: "2026-08-24", Days: 7, SlotCount: 7, Persisted: true,
+	}}
+	cs := connectServer(t, mcptools.Dependencies{Plan: plan})
+
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "persist_plan"})
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected tool error: %+v", res)
+	}
+	got := structured[mcptools.PersistPlanResult](t, res)
+	if got.PlanID != "plan-1" || !got.Persisted {
+		t.Fatalf("unexpected result: %+v", got)
+	}
+	if plan.persistCalls != 1 {
+		t.Fatalf("service called %d times, want 1", plan.persistCalls)
+	}
+	if plan.lastPersist.WeekStart == "" {
+		t.Fatal("expected default week_start to be filled")
+	}
+	if plan.lastPersist.Days != 7 {
+		t.Fatalf("expected default days 7, got %d", plan.lastPersist.Days)
+	}
+}
+
+func TestPersistPlan_InvalidSlot(t *testing.T) {
+	plan := &fakePlan{}
+	cs := connectServer(t, mcptools.Dependencies{Plan: plan})
+
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "persist_plan",
+		Arguments: map[string]any{"slots": []any{"brunch"}},
+	})
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected tool error for invalid slot, got %+v", res)
+	}
+	if plan.persistCalls != 0 {
+		t.Fatalf("service called %d times, want 0", plan.persistCalls)
+	}
+}
+
+func TestSetPlanDecision(t *testing.T) {
+	plan := &fakePlan{decisions: []mcptools.PlanDecisionResponse{
+		{PlanID: "plan-1", SlotDate: "2026-08-24", SlotKind: "dinner", MealieRecipeID: "r1"},
+	}}
+	cs := connectServer(t, mcptools.Dependencies{Plan: plan})
+
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "set_plan_decision",
+		Arguments: map[string]any{
+			"plan_id": "plan-1",
+			"decisions": []any{
+				map[string]any{"slot_date": "2026-08-24", "mealie_recipe_id": "r1"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected tool error: %+v", res)
+	}
+	got := structured[[]mcptools.PlanDecisionResponse](t, res)
+	if len(got) != 1 || got[0].SlotKind != "dinner" {
+		t.Fatalf("unexpected decisions: %+v", got)
+	}
+	if plan.setDecisionsCalls != 1 || plan.lastPlanID != "plan-1" {
+		t.Fatalf("service got planID %q after %d calls", plan.lastPlanID, plan.setDecisionsCalls)
+	}
+	if len(plan.lastDecisions) != 1 || plan.lastDecisions[0].SlotKind != "dinner" {
+		t.Fatalf("expected default slot_kind dinner, got %+v", plan.lastDecisions)
+	}
+}
+
+func TestSetPlanDecision_Validation(t *testing.T) {
+	cases := []struct {
+		name string
+		args map[string]any
+	}{
+		{"missing plan", map[string]any{"decisions": []any{map[string]any{"slot_date": "2026-08-24", "mealie_recipe_id": "r1"}}}},
+		{"empty decisions", map[string]any{"plan_id": "plan-1", "decisions": []any{}}},
+		{"missing recipe", map[string]any{"plan_id": "plan-1", "decisions": []any{map[string]any{"slot_date": "2026-08-24"}}}},
+		{"bad slot date", map[string]any{"plan_id": "plan-1", "decisions": []any{map[string]any{"slot_date": "nope", "mealie_recipe_id": "r1"}}}},
+		{"bad slot kind", map[string]any{"plan_id": "plan-1", "decisions": []any{map[string]any{"slot_date": "2026-08-24", "mealie_recipe_id": "r1", "slot_kind": "brunch"}}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			plan := &fakePlan{}
+			cs := connectServer(t, mcptools.Dependencies{Plan: plan})
+
+			res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+				Name: "set_plan_decision", Arguments: tc.args,
+			})
+			if err == nil && !res.IsError {
+				t.Fatalf("expected rejection, got success: %+v", res)
+			}
+			if plan.setDecisionsCalls != 0 {
+				t.Fatalf("service called %d times, want 0", plan.setDecisionsCalls)
+			}
+		})
+	}
+}
+
+func TestRecordMealFromPlan(t *testing.T) {
+	reactions := &fakeReactions{fromPlanRes: mcptools.RecordReactionResult{
+		MealEventID: "meal-42", Recipe: "r1", ServedOn: "2026-08-20", PersonID: "p1", Sentiment: 2,
+	}}
+	cs := connectServer(t, mcptools.Dependencies{Reactions: reactions})
+
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "record_meal_from_plan",
+		Arguments: map[string]any{
+			"recipe": "r1", "served_on": "2026-08-20", "person_id": "p1", "sentiment": 2,
+			"plan_id": "plan-1", "plan_slot_date": "2026-08-20", "plan_slot_kind": "dinner",
+		},
+	})
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected tool error: %+v", res)
+	}
+	got := structured[mcptools.RecordReactionResult](t, res)
+	if got.MealEventID != "meal-42" || got.Sentiment != 2 {
+		t.Fatalf("unexpected result: %+v", got)
+	}
+	if reactions.fromPlanCalls != 1 {
+		t.Fatalf("service called %d times, want 1", reactions.fromPlanCalls)
+	}
+	if reactions.lastFromPlan.PlanID != "plan-1" || reactions.lastFromPlan.PlanSlotDate != "2026-08-20" || reactions.lastFromPlan.PlanSlotKind != "dinner" {
+		t.Fatalf("unexpected plan fields: %+v", reactions.lastFromPlan)
+	}
+}
+
+func TestRecordMealFromPlan_UnlinkedDefaultsSlot(t *testing.T) {
+	reactions := &fakeReactions{fromPlanRes: mcptools.RecordReactionResult{MealEventID: "meal-43"}}
+	cs := connectServer(t, mcptools.Dependencies{Reactions: reactions})
+
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "record_meal_from_plan",
+		Arguments: map[string]any{
+			"recipe": "r1", "served_on": "2026-08-20", "person_id": "p1", "sentiment": 1,
+		},
+	})
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected tool error: %+v", res)
+	}
+	if reactions.fromPlanCalls != 1 {
+		t.Fatalf("service called %d times, want 1", reactions.fromPlanCalls)
+	}
+	if reactions.lastFromPlan.Slot != "dinner" {
+		t.Fatalf("expected default slot dinner, got %q", reactions.lastFromPlan.Slot)
+	}
+}
+
+func TestRecordMealFromPlan_Validation(t *testing.T) {
+	cases := []struct {
+		name string
+		args map[string]any
+	}{
+		{"missing recipe", map[string]any{"served_on": "2026-08-20", "person_id": "p1", "sentiment": 1}},
+		{"missing person", map[string]any{"recipe": "r1", "served_on": "2026-08-20", "sentiment": 1}},
+		{"bad date", map[string]any{"recipe": "r1", "served_on": "nope", "person_id": "p1", "sentiment": 1}},
+		{"sentiment too high", map[string]any{"recipe": "r1", "served_on": "2026-08-20", "person_id": "p1", "sentiment": 9}},
+		{"bad slot", map[string]any{"recipe": "r1", "served_on": "2026-08-20", "person_id": "p1", "sentiment": 1, "slot": "brunch"}},
+		{"plan without slot date", map[string]any{"recipe": "r1", "served_on": "2026-08-20", "person_id": "p1", "sentiment": 1, "plan_id": "plan-1"}},
+		{"bad plan slot kind", map[string]any{"recipe": "r1", "served_on": "2026-08-20", "person_id": "p1", "sentiment": 1, "plan_id": "plan-1", "plan_slot_date": "2026-08-20", "plan_slot_kind": "brunch"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reactions := &fakeReactions{}
+			cs := connectServer(t, mcptools.Dependencies{Reactions: reactions})
+
+			res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+				Name: "record_meal_from_plan", Arguments: tc.args,
+			})
+			if err == nil && !res.IsError {
+				t.Fatalf("expected rejection, got success: %+v", res)
+			}
+			if reactions.fromPlanCalls != 0 {
+				t.Fatalf("service called %d times, want 0", reactions.fromPlanCalls)
+			}
+		})
 	}
 }

@@ -165,6 +165,14 @@ func (d *discoveryStore) CreateRecipeRevision(ctx context.Context, r persistence
 	return r.ID, nil
 }
 
+func (d *discoveryStore) GetRecipeRevision(ctx context.Context, id domain.RecipeRevisionID) (persistence.RecipeRevision, error) {
+	r, ok := d.revisions[id]
+	if !ok {
+		return persistence.RecipeRevision{}, persistence.ErrNoRows
+	}
+	return r, nil
+}
+
 func (d *discoveryStore) ListRecipeRevisions(ctx context.Context, variantID domain.RecipeVariantID) ([]persistence.RecipeRevision, error) {
 	var out []persistence.RecipeRevision
 	for _, r := range d.revisions {

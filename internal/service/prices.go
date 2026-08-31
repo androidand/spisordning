@@ -106,3 +106,94 @@ func (s *PriceIntelligence) ListProductPrices(ctx context.Context) ([]dto.Produc
 	}
 	return out, nil
 }
+
+func (s *PriceIntelligence) ListRetailers(ctx context.Context) ([]dto.RetailerOut, error) {
+	retailers, err := s.db.ListRetailers(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("service: list retailers: %w", err)
+	}
+	out := make([]dto.RetailerOut, 0, len(retailers))
+	for _, r := range retailers {
+		out = append(out, dto.RetailerOut{ID: r.ID.String(), Name: r.Name, CreatedAt: r.CreatedAt})
+	}
+	return out, nil
+}
+
+func (s *PriceIntelligence) ListRetailerStores(ctx context.Context, retailerID string) ([]dto.StoreOut, error) {
+	rid, err := domain.ParseRetailerID(retailerID)
+	if err != nil {
+		return nil, fmt.Errorf("service: list retailer stores: %w", err)
+	}
+	stores, err := s.db.ListStores(ctx, rid)
+	if err != nil {
+		return nil, fmt.Errorf("service: list retailer stores: %w", err)
+	}
+	out := make([]dto.StoreOut, 0, len(stores))
+	for _, st := range stores {
+		out = append(out, dto.StoreOut{
+			ID: st.ID.String(), RetailerID: st.RetailerID.String(), Name: st.Name,
+			Latitude: st.Latitude, Longitude: st.Longitude, CreatedAt: st.CreatedAt,
+		})
+	}
+	return out, nil
+}
+
+func (s *PriceIntelligence) ListRetailerProducts(ctx context.Context, retailerID string) ([]dto.RetailerProductOut, error) {
+	rid, err := domain.ParseRetailerID(retailerID)
+	if err != nil {
+		return nil, fmt.Errorf("service: list retailer products: %w", err)
+	}
+	rps, err := s.db.ListRetailerProducts(ctx, rid)
+	if err != nil {
+		return nil, fmt.Errorf("service: list retailer products: %w", err)
+	}
+	out := make([]dto.RetailerProductOut, 0, len(rps))
+	for _, rp := range rps {
+		var productID *string
+		if rp.ProductID != nil {
+			p := rp.ProductID.String()
+			productID = &p
+		}
+		out = append(out, dto.RetailerProductOut{
+			ID: rp.ID.String(), RetailerID: rp.RetailerID.String(), ProductID: productID,
+			RetailerSKU: rp.RetailerSKU, DisplayName: rp.DisplayName, CreatedAt: rp.CreatedAt,
+		})
+	}
+	return out, nil
+}
+
+func (s *PriceIntelligence) PriceHistoryForProduct(ctx context.Context, retailerProductID string) ([]dto.PriceObservationOut, error) {
+	rpid, err := domain.ParseRetailerProductID(retailerProductID)
+	if err != nil {
+		return nil, fmt.Errorf("service: price history for product: %w", err)
+	}
+	obs, err := s.db.PriceObservationsForProduct(ctx, rpid)
+	if err != nil {
+		return nil, fmt.Errorf("service: price history for product: %w", err)
+	}
+	return toPriceObservationOuts(obs), nil
+}
+
+func (s *PriceIntelligence) PriceHistoryForStore(ctx context.Context, storeID string) ([]dto.PriceObservationOut, error) {
+	sid, err := domain.ParseStoreID(storeID)
+	if err != nil {
+		return nil, fmt.Errorf("service: price history for store: %w", err)
+	}
+	obs, err := s.db.PriceObservationsForStore(ctx, sid)
+	if err != nil {
+		return nil, fmt.Errorf("service: price history for store: %w", err)
+	}
+	return toPriceObservationOuts(obs), nil
+}
+
+func toPriceObservationOuts(obs []domain.PriceObservation) []dto.PriceObservationOut {
+	out := make([]dto.PriceObservationOut, 0, len(obs))
+	for _, o := range obs {
+		out = append(out, dto.PriceObservationOut{
+			ID: o.ID.String(), StoreProductOfferID: o.StoreProductOfferID.String(),
+			ObservedAt: o.ObservedAt, Price: o.Price, PriceKind: string(o.PriceKind),
+			Source: o.Source, CreatedAt: o.CreatedAt,
+		})
+	}
+	return out
+}

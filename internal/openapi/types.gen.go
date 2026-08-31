@@ -66,6 +66,48 @@ func (e MealPlanStatus) Valid() bool {
 	}
 }
 
+// Defines values for MealPlanCandidateSlotKind.
+const (
+	MealPlanCandidateSlotKindBreakfast MealPlanCandidateSlotKind = "breakfast"
+	MealPlanCandidateSlotKindDinner    MealPlanCandidateSlotKind = "dinner"
+	MealPlanCandidateSlotKindSnack     MealPlanCandidateSlotKind = "snack"
+)
+
+// Valid indicates whether the value is a known member of the MealPlanCandidateSlotKind enum.
+func (e MealPlanCandidateSlotKind) Valid() bool {
+	switch e {
+	case MealPlanCandidateSlotKindBreakfast:
+		return true
+	case MealPlanCandidateSlotKindDinner:
+		return true
+	case MealPlanCandidateSlotKindSnack:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MealPlanDecisionSlotKind.
+const (
+	MealPlanDecisionSlotKindBreakfast MealPlanDecisionSlotKind = "breakfast"
+	MealPlanDecisionSlotKindDinner    MealPlanDecisionSlotKind = "dinner"
+	MealPlanDecisionSlotKindSnack     MealPlanDecisionSlotKind = "snack"
+)
+
+// Valid indicates whether the value is a known member of the MealPlanDecisionSlotKind enum.
+func (e MealPlanDecisionSlotKind) Valid() bool {
+	switch e {
+	case MealPlanDecisionSlotKindBreakfast:
+		return true
+	case MealPlanDecisionSlotKindDinner:
+		return true
+	case MealPlanDecisionSlotKindSnack:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MealPlanUpdateStatus.
 const (
 	MealPlanUpdateStatusApproved MealPlanUpdateStatus = "approved"
@@ -551,22 +593,30 @@ type MealPlanStatus string
 // MealPlanCandidate defines model for MealPlanCandidate.
 type MealPlanCandidate struct {
 	// Breakdown per-signal score breakdown (pref, effort, repeat, school, campaign, familiarity, novelty)
-	Breakdown map[string]float64 `json:"breakdown"`
-	Feasible  bool               `json:"feasible"`
-	Id        int                `json:"id"`
-	Rank      int                `json:"rank"`
-	Recipe    RecipeRef          `json:"recipe"`
-	Score     float64            `json:"score"`
-	SlotDate  openapi_types.Date `json:"slot_date"`
+	Breakdown map[string]float64        `json:"breakdown"`
+	Feasible  bool                      `json:"feasible"`
+	Id        int                       `json:"id"`
+	Rank      int                       `json:"rank"`
+	Recipe    RecipeRef                 `json:"recipe"`
+	Score     float64                   `json:"score"`
+	SlotDate  openapi_types.Date        `json:"slot_date"`
+	SlotKind  MealPlanCandidateSlotKind `json:"slot_kind"`
 }
+
+// MealPlanCandidateSlotKind defines model for MealPlanCandidate.SlotKind.
+type MealPlanCandidateSlotKind string
 
 // MealPlanDecision defines model for MealPlanDecision.
 type MealPlanDecision struct {
-	DecidedAt      *time.Time         `json:"decided_at,omitempty"`
-	MealieRecipeId string             `json:"mealie_recipe_id"`
-	PlanId         int                `json:"plan_id"`
-	SlotDate       openapi_types.Date `json:"slot_date"`
+	DecidedAt      *time.Time                `json:"decided_at,omitempty"`
+	MealieRecipeId string                    `json:"mealie_recipe_id"`
+	PlanId         int                       `json:"plan_id"`
+	SlotDate       openapi_types.Date        `json:"slot_date"`
+	SlotKind       *MealPlanDecisionSlotKind `json:"slot_kind,omitempty"`
 }
+
+// MealPlanDecisionSlotKind defines model for MealPlanDecision.SlotKind.
+type MealPlanDecisionSlotKind string
 
 // MealPlanNew defines model for MealPlanNew.
 type MealPlanNew struct {
@@ -974,8 +1024,9 @@ type ShoppingListNew struct {
 // ShoppingRequirement defines model for ShoppingRequirement.
 type ShoppingRequirement struct {
 	AcceptableForms []string `json:"acceptable_forms"`
-	Id              int      `json:"id"`
+	Id              string   `json:"id"`
 	IngredientId    string   `json:"ingredient_id"`
+	IngredientName  *string  `json:"ingredient_name,omitempty"`
 	PreferredForm   *string  `json:"preferred_form"`
 	Quantity        float64  `json:"quantity"`
 	Unit            string   `json:"unit"`

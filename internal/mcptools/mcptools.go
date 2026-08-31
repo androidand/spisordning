@@ -45,6 +45,8 @@ type RecordReactionResult struct {
 
 // ShoppingRequirement is one canonical, retailer-independent shopping line.
 type ShoppingRequirement struct {
+	ID              string   `json:"id,omitempty"`
+	IngredientID    string   `json:"ingredient_id,omitempty"`
 	Ingredient      string   `json:"ingredient"`
 	Quantity        float64  `json:"quantity"`
 	Unit            string   `json:"unit"`
@@ -100,6 +102,7 @@ type PlannerService interface {
 // MealReactionService records a household member's reaction to a served meal.
 type MealReactionService interface {
 	RecordReaction(ctx context.Context, in RecordReactionInput) (RecordReactionResult, error)
+	RecordMealFromPlan(ctx context.Context, in RecordMealFromPlanInput) (RecordReactionResult, error)
 }
 
 // RequirementsService aggregates a set of recipes into shopping requirements.
@@ -120,6 +123,8 @@ type Dependencies struct {
 	// Discovery is optional: when nil, the five recipe-discovery tools are
 	// not registered.
 	Discovery DiscoveryService
+	// Plan is optional: when nil, the meal-plan tools are not registered.
+	Plan PlanService
 }
 
 // RegisterTools adds the initial tool set to s. Each tool calls exactly one
@@ -136,6 +141,33 @@ func RegisterTools(s *mcp.Server, deps Dependencies) {
 			Name:        "record_meal_reaction",
 			Description: "Record a household member's reaction (sentiment -2..2) to a meal that was served on a given date. Optionally specify the slot kind (dinner, breakfast, snack); defaults to dinner.",
 		}, recordReactionHandler(deps.Reactions))
+		mcp.AddTool(s, &mcp.Tool{
+			Name: "record_meal_from_plan",
+			Description: "Record that a planned meal was served and attach a household member's reaction to it. " +
+				"Pass plan_id, plan_slot_date, and optionally plan_slot_kind to link the meal event to the plan slot. " +
+				"Omit plan fields to record an unlinked meal.",
+		}, recordMealFromPlanHandler(deps.Reactions))
+	}
+	if deps.Plan != nil {
+		mcp.AddTool(s, &mcp.Tool{
+			Name: "persist_plan",
+			Description: "Plan a week (or the requested slot kinds), persist it to the meal-plan tables, and approve the resulting plan. " +
+				"week_start is a Monday (YYYY-MM-DD) and defaults to next Monday; days defaults to 7; " +
+				"slots may include dinner, breakfast, and snack (default dinner only).",
+		}, persistPlanHandler(deps.Plan))
+		mcp.AddTool(s, &mcp.Tool{
+			Name:        "get_plan",
+			Description: "Fetch one meal plan by id, including its candidates, decisions, and aggregated shopping requirements.",
+		}, getPlanHandler(deps.Plan))
+		mcp.AddTool(s, &mcp.Tool{
+			Name:        "list_plans",
+			Description: "List all meal plans with their week start, status, and creation time.",
+		}, listPlansHandler(deps.Plan))
+		mcp.AddTool(s, &mcp.Tool{
+			Name: "set_plan_decision",
+			Description: "Set the chosen recipe for one or more approved plan slots. Each decision needs slot_date, mealie_recipe_id, " +
+				"and optionally slot_kind (dinner, breakfast, snack; default dinner).",
+		}, setPlanDecisionHandler(deps.Plan))
 	}
 	if deps.Requirements != nil {
 		mcp.AddTool(s, &mcp.Tool{

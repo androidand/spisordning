@@ -71,8 +71,13 @@ type Store interface {
 	ResolveIngredientAlias(ctx context.Context, householdID, alias string) (string, error)
 	ListAllStores(ctx context.Context) ([]domain.Store, error)
 	ListStoreProductOffers(ctx context.Context, storeID domain.StoreID) ([]domain.StoreProductOffer, error)
+	GetRecipeSourceRefByFamily(ctx context.Context, familyID domain.RecipeFamilyID) (persistence.RecipeSourceRef, error)
+	GetRecipeSourceRefBySource(ctx context.Context, source, sourceRecipeID string) (persistence.RecipeSourceRef, error)
+	UpsertRecipeSourceRef(ctx context.Context, r persistence.RecipeSourceRef) error
+	ListUnmappedMealieRecipes(ctx context.Context) ([]string, error)
 	CreateRecipeFamily(ctx context.Context, f persistence.RecipeFamily) error
 	GetRecipeFamily(ctx context.Context, id domain.RecipeFamilyID) (persistence.RecipeFamily, error)
+	GetRecipeFamilyBySlug(ctx context.Context, slug string) (persistence.RecipeFamily, error)
 	ListRecipeFamilies(ctx context.Context) ([]persistence.RecipeFamily, error)
 	SetRecipeFamilyDefaultVariant(ctx context.Context, familyID domain.RecipeFamilyID, variantID domain.RecipeVariantID) error
 	CreateRecipeVariant(ctx context.Context, v persistence.RecipeVariant) error
@@ -88,8 +93,11 @@ type Store interface {
 	ListFavoritesForRecipe(ctx context.Context, recipeRefID domain.RecipeRefID) ([]persistence.Favorite, error)
 	GetRecipeRating(ctx context.Context, recipeRefID domain.RecipeRefID) (persistence.RecipeRating, error)
 	ListRetailers(ctx context.Context) ([]domain.Retailer, error)
+	ListStores(ctx context.Context, retailerID domain.RetailerID) ([]domain.Store, error)
 	ListRetailerProducts(ctx context.Context, retailerID domain.RetailerID) ([]domain.RetailerProduct, error)
 	ListCurrentPrices(ctx context.Context) ([]domain.CurrentStoreProductPrice, error)
+	PriceObservationsForProduct(ctx context.Context, retailerProductID domain.RetailerProductID) ([]domain.PriceObservation, error)
+	PriceObservationsForStore(ctx context.Context, storeID domain.StoreID) ([]domain.PriceObservation, error)
 	ListExpiringLots(ctx context.Context, within time.Duration) ([]persistence.InventoryLot, error)
 	ListPantryIngredientIDs(ctx context.Context) ([]domain.IngredientID, error)
 	ListAllRecipeIngredients(ctx context.Context) ([]persistence.RecipeIngredient, error)
@@ -326,7 +334,9 @@ func (s *Recipes) syncIngredients(ctx context.Context, ref mealie.RecipeRef) err
 			continue
 		}
 		ingID := domain.IngredientIDForName(domain.CanonicalIngredientID(line.FoodName))
-		if err := s.db.UpsertIngredient(ctx, persistence.Ingredient{ID: ingID, Display: line.FoodName}); err != nil {
+		if err := s.db.UpsertIngredient(ctx, persistence.Ingredient{
+			ID: ingID, Slug: domain.CanonicalIngredientID(line.FoodName), Display: line.FoodName,
+		}); err != nil {
 			return fmt.Errorf("upsert ingredient %q: %w", ingID, err)
 		}
 		ri := persistence.RecipeIngredient{
@@ -344,14 +354,15 @@ func (s *Recipes) syncIngredients(ctx context.Context, ref mealie.RecipeRef) err
 
 // Meals implements the MealsService interface defined in dto.
 type Meals struct {
-	db    Store
-	prefs dto.PreferencesService
+	db       Store
+	prefs    dto.PreferencesService
+	resolver *ResolveRecipeResolver
 }
 
 // NewMeals returns a Meals service backed by db. prefs is used for reaction
 // learning (recording preference observations); pass nil to skip.
 func NewMeals(db Store, prefs dto.PreferencesService) *Meals {
-	return &Meals{db: db, prefs: prefs}
+	return &Meals{db: db, prefs: prefs, resolver: NewResolveRecipeResolver(db, RecipeSourceModeFromEnv())}
 }
 
 func (s *Meals) CreateMealEvent(ctx context.Context, in dto.MealEventNew) (dto.MealEventResponse, error) {
@@ -465,7 +476,7 @@ func (s *Meals) GetMeal(ctx context.Context, id string) (dto.MealEventResponse, 
 func (s *Meals) ListMeals(ctx context.Context, mealieRecipeID, servedOn string) ([]dto.MealEventResponse, error) {
 	var recipeRefID domain.RecipeRefID
 	if mealieRecipeID != "" {
-		ref, err := s.db.GetRecipeRefByMealieID(ctx, mealieRecipeID)
+		ref, err := s.resolver.ResolveRecipeRef(ctx, mealieRecipeID)
 		if err != nil {
 			if errors.Is(err, persistence.ErrNoRows) {
 				return nil, fmt.Errorf("service: list meals: %w: recipe %q not found", dto.ErrNotFound, mealieRecipeID)

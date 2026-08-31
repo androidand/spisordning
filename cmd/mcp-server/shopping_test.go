@@ -8,6 +8,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/androidand/spisordning/internal/domain"
+	"github.com/androidand/spisordning/internal/dto"
 	"github.com/androidand/spisordning/internal/mcptools"
 )
 
@@ -224,5 +226,85 @@ func TestIntegration_PushWishlistRejectsUnknownRetailer(t *testing.T) {
 	}
 	if wishlist.calls != 0 {
 		t.Fatalf("fake wishlist called %d times, want 0 (unknown retailer must not reach the application layer)", wishlist.calls)
+	}
+}
+
+func TestResolveShoppingIngredientID(t *testing.T) {
+	explicitID := domain.IngredientIDForName("mjolk")
+	canonicalID := domain.IngredientIDForName("ost")
+
+	tests := []struct {
+		name    string
+		item    mcptools.ShoppingRequirement
+		want    domain.IngredientID
+		wantErr bool
+	}{
+		{
+			name: "explicit ingredient id wins",
+			item: mcptools.ShoppingRequirement{
+				IngredientID: explicitID.String(),
+				Ingredient:   "ost",
+			},
+			want: explicitID,
+		},
+		{
+			name: "uuid ingredient name",
+			item: mcptools.ShoppingRequirement{
+				Ingredient: canonicalID.String(),
+			},
+			want: canonicalID,
+		},
+		{
+			name: "canonical ingredient name",
+			item: mcptools.ShoppingRequirement{
+				Ingredient: "  Öst ",
+			},
+			want: domain.IngredientIDForName("öst"),
+		},
+		{
+			name:    "missing ingredient",
+			item:    mcptools.ShoppingRequirement{},
+			want:    domain.IngredientID{},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveShoppingIngredientID(tt.item)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got %v", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestToMCPShoppingRequirement_UsesIngredientName(t *testing.T) {
+	ingredientID := domain.IngredientIDForName("mjolk")
+	got := toMCPShoppingRequirement(dto.ShoppingRequirement{
+		ID:             "req-1",
+		IngredientID:   ingredientID.String(),
+		IngredientName: "Mjölk",
+		Quantity:       1,
+		Unit:           "L",
+	})
+
+	if got.ID != "req-1" {
+		t.Fatalf("unexpected id: %q", got.ID)
+	}
+	if got.IngredientID != ingredientID.String() {
+		t.Fatalf("unexpected ingredient id: %q", got.IngredientID)
+	}
+	if got.Ingredient != "Mjölk" {
+		t.Fatalf("unexpected ingredient name: %q", got.Ingredient)
 	}
 }

@@ -30,6 +30,10 @@ type PlanWeekInput struct {
 	SchoolTagsFor func(date time.Time) []string
 	Reorder       func(ctx context.Context, ranked []scoring.ScoredCandidate) []scoring.ScoredCandidate
 
+	// Slots optionally restricts which slot kinds to plan. Empty means dinner
+	// only (backward compatible). Valid values: "dinner", "breakfast", "snack".
+	Slots []string
+
 	// Olla is optional; when non-nil each planned meal gets a one-line
 	// explanation.
 	Olla llm.Provider
@@ -62,14 +66,11 @@ type PlanWeekResult struct {
 	PersistError error
 }
 
-// PlanWeek orchestrates mealie (candidates), scoring, availability, and
-// persistence for a meal plan. It is the shared core of the `food-brain plan`
-// CLI and the MCP plan_week tool. When no database is configured (db is nil)
-// the plan stays in-memory.
+// PlanWeek orchestrates recipe candidates (native or Mealie), scoring,
+// availability, and persistence for a meal plan. It is the shared core of the
+// `food-brain plan` CLI and the MCP plan_week tool. When no database is
+// configured (db is nil) the plan stays in-memory.
 func (s *Planning) PlanWeek(ctx context.Context, in PlanWeekInput) (PlanWeekResult, error) {
-	if s.mealie == nil {
-		return PlanWeekResult{}, fmt.Errorf("service: plan week: no Mealie client configured")
-	}
 	if in.WeekStart.IsZero() {
 		return PlanWeekResult{}, fmt.Errorf("service: plan week: week start is required")
 	}
@@ -77,23 +78,44 @@ func (s *Planning) PlanWeek(ctx context.Context, in PlanWeekInput) (PlanWeekResu
 		in.Days = 7
 	}
 
-	refs, err := s.mealie.SyncRecipes(ctx)
-	if err != nil {
-		return PlanWeekResult{}, fmt.Errorf("service: plan week: mealie sync: %w", err)
-	}
-	if len(refs) == 0 {
-		return PlanWeekResult{}, fmt.Errorf("service: plan week: no recipes in Mealie — add some first")
-	}
-	candidates, lines := candidatesFromRefs(refs)
+	var candidates []domain.Candidate
+	var lines map[string]planning.ChosenMeal
 
-	planned := planning.PlanWeek(ctx, planning.WeekConfig{
-		Candidates:    candidates,
-		People:        in.People,
-		Preferences:   in.Preferences,
-		EnergyFor:     in.EnergyFor,
-		SchoolTagsFor: in.SchoolTagsFor,
-		Reorder:       in.Reorder,
-	}, in.WeekStart, in.Days)
+	if s.resolver != nil && s.resolver.mode != SourceMealie {
+		refs, err := s.db.ListRecipeRefs(ctx)
+		if err != nil {
+			return PlanWeekResult{}, fmt.Errorf("service: plan week: list recipe refs: %w", err)
+		}
+		if len(refs) == 0 {
+			return PlanWeekResult{}, fmt.Errorf("service: plan week: no recipes in database — import some first")
+		}
+		ids := make([]string, len(refs))
+		for i, r := range refs {
+			ids[i] = r.MealieRecipeID
+		}
+		resolved, err := s.resolver.ResolveBatch(ctx, ids)
+		if err != nil {
+			return PlanWeekResult{}, fmt.Errorf("service: plan week: resolve recipes: %w", err)
+		}
+		candidates, lines, err = candidatesFromResolved(ctx, s.db, refs, resolved)
+		if err != nil {
+			return PlanWeekResult{}, err
+		}
+	} else {
+		if s.mealie == nil {
+			return PlanWeekResult{}, fmt.Errorf("service: plan week: no Mealie client configured")
+		}
+		refs, err := s.mealie.SyncRecipes(ctx)
+		if err != nil {
+			return PlanWeekResult{}, fmt.Errorf("service: plan week: mealie sync: %w", err)
+		}
+		if len(refs) == 0 {
+			return PlanWeekResult{}, fmt.Errorf("service: plan week: no recipes in Mealie — add some first")
+		}
+		candidates, lines = candidatesFromRefs(refs)
+	}
+
+	planned := s.planRequestedSlots(ctx, candidates, in)
 
 	explanations := map[string]string{}
 	if in.Olla != nil {
@@ -130,6 +152,97 @@ func (s *Planning) PlanWeek(ctx context.Context, in PlanWeekInput) (PlanWeekResu
 	}
 
 	return result, nil
+}
+
+// planRequestedSlots plans the requested slot kinds for the week. With no slots
+// requested it preserves the original dinner-only behavior.
+func (s *Planning) planRequestedSlots(ctx context.Context, candidates []domain.Candidate, in PlanWeekInput) []planning.PlannedSlot {
+	cfg := planning.WeekConfig{
+		Candidates:    candidates,
+		People:        in.People,
+		Preferences:   in.Preferences,
+		EnergyFor:     in.EnergyFor,
+		SchoolTagsFor: in.SchoolTagsFor,
+		Reorder:       in.Reorder,
+	}
+	if len(in.Slots) == 0 {
+		return planning.PlanWeek(ctx, cfg, in.WeekStart, in.Days)
+	}
+
+	want := make(map[domain.Slot]bool, len(in.Slots))
+	for _, slot := range in.Slots {
+		want[domain.Slot(slot)] = true
+	}
+
+	dinners := make(map[time.Time]planning.PlannedSlot)
+	if want[domain.SlotDinner] {
+		for _, slot := range planning.PlanWeek(ctx, cfg, in.WeekStart, in.Days) {
+			dinners[slot.Date] = slot
+		}
+	}
+
+	var snackCands []domain.Candidate
+	if want[domain.SlotSnack] {
+		snackCands = planning.SnackCandidates(candidates)
+	}
+
+	var out []planning.PlannedSlot
+	for i := 0; i < in.Days; i++ {
+		date := in.WeekStart.AddDate(0, 0, i)
+		if slot, ok := dinners[date]; ok {
+			out = append(out, slot)
+		}
+		if want[domain.SlotBreakfast] {
+			if bs := planning.PlanSimpleSlot(ctx, cfg, planning.BreakfastCandidates(candidates, date), date, domain.SlotBreakfast); bs != nil {
+				out = append(out, *bs)
+			}
+		}
+		if want[domain.SlotSnack] {
+			if ss := planning.PlanSimpleSlot(ctx, cfg, snackCands, date, domain.SlotSnack); ss != nil {
+				out = append(out, *ss)
+			}
+		}
+	}
+	return out
+}
+
+// candidatesFromResolved converts persisted recipe refs (resolved through the
+// source-of-truth flag) into scorer candidates and a lookup of each recipe's
+// canonical ingredient lines for requirements. Ingredients are pulled from the
+// native recipe_family revision when available.
+func candidatesFromResolved(ctx context.Context, db Store, refs []persistence.RecipeRef, resolved map[string]ResolvedRecipe) ([]domain.Candidate, map[string]planning.ChosenMeal, error) {
+	var candidates []domain.Candidate
+	lines := map[string]planning.ChosenMeal{}
+
+	for _, ref := range refs {
+		res, ok := resolved[ref.MealieRecipeID]
+		if !ok {
+			continue
+		}
+		if res.Source == "unmapped" {
+			return nil, nil, fmt.Errorf("plan week: recipe %q is unmapped (no recipe_source_ref entry) — import it first or set RECIPE_SOURCE=dual", ref.MealieRecipeID)
+		}
+		c := domain.Candidate{
+			MealieRecipeID: ref.MealieRecipeID,
+			Title:          ref.Title,
+			Tags:           ref.Tags,
+			Effort:         domain.Effort(ref.Effort),
+		}
+		meal := planning.ChosenMeal{MealieRecipeID: ref.MealieRecipeID}
+		if res.FamilyID != nil && res.FamilyID.DefaultVariantID != (domain.RecipeVariantID{}) {
+			revs, err := db.ListRecipeRevisions(ctx, res.FamilyID.DefaultVariantID)
+			if err == nil && len(revs) > 0 {
+				rev := revs[0] // newest first
+				for _, ing := range rev.Ingredients {
+					c.Ingredients = append(c.Ingredients, ing.IngredientID)
+					meal.Ingredients = append(meal.Ingredients, ing)
+				}
+			}
+		}
+		candidates = append(candidates, c)
+		lines[ref.MealieRecipeID] = meal
+	}
+	return candidates, lines, nil
 }
 
 // candidatesFromRefs converts Mealie references into scorer candidates and a
@@ -182,14 +295,16 @@ func persistWeek(ctx context.Context, db Store, weekStart time.Time,
 		return fmt.Errorf("persist plan: meal_plan: %w", err)
 	}
 
+	resolver := NewResolveRecipeResolver(db, RecipeSourceModeFromEnv())
 	for _, slot := range planned {
-		ref, err := db.GetRecipeRefByMealieID(ctx, slot.Winner.Candidate.MealieRecipeID)
+		ref, err := resolver.ResolveRecipeRef(ctx, slot.Winner.Candidate.MealieRecipeID)
 		if err != nil {
 			return fmt.Errorf("persist plan: resolve recipe %q: %w", slot.Winner.Candidate.MealieRecipeID, err)
 		}
 		c := persistence.MealPlanCandidate{
 			PlanID:      plan.ID,
 			SlotDate:    slot.Date,
+			SlotKind:    string(slot.Slot),
 			RecipeRefID: ref.ID,
 			Score:       slot.Winner.Score,
 			Breakdown:   breakdownToMap(slot.Winner.Breakdown),
@@ -202,6 +317,7 @@ func persistWeek(ctx context.Context, db Store, weekStart time.Time,
 		d := persistence.MealPlanDecision{
 			PlanID:      plan.ID,
 			SlotDate:    slot.Date,
+			SlotKind:    string(slot.Slot),
 			RecipeRefID: ref.ID,
 		}
 		if err := db.SetDecision(ctx, d); err != nil {

@@ -96,12 +96,15 @@ func buildMCPDeps(logger *slog.Logger) mcptools.Dependencies {
 		hemkopURL: appCfg.HemkopAdapterURL,
 		cfg:       appCfg,
 	}
+	var mealieClient *mealie.Client
 	if appCfg.HasMealie() {
-		adapter.recipes = service.NewRecipes(store, mealie.New(appCfg.MealieBaseURL, appCfg.MealieAPIToken))
+		mealieClient = mealie.New(appCfg.MealieBaseURL, appCfg.MealieAPIToken)
+		adapter.recipes = service.NewRecipes(store, mealieClient)
 	} else {
 		logger.Warn("no Mealie instance configured (MEALIE_BASE_URL/MEALIE_API_TOKEN unset); structure_recipe not registered")
 	}
 	adapter.discovery = service.NewDiscovery(store, service.NewRecipeFamily(store), nil)
+	adapter.planning = service.NewPlanning(store, mealieClient)
 	deps.Planner = adapter
 	deps.Reactions = adapter
 	deps.Requirements = adapter
@@ -109,6 +112,7 @@ func buildMCPDeps(logger *slog.Logger) mcptools.Dependencies {
 	deps.Compare = adapter
 	deps.Wishlist = adapter
 	deps.Discovery = adapter
+	deps.Plan = adapter
 	if adapter.recipes != nil {
 		deps.RecipeStructuring = adapter
 	}

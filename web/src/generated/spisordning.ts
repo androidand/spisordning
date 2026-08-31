@@ -1593,6 +1593,7 @@ export interface components {
       id: number;
       recipe: components["schemas"]["RecipeRef"];
       slot_date: string;
+      slot_kind: "dinner" | "breakfast" | "snack";
       score: number;
       /** per-signal score breakdown (pref, effort, repeat, school, campaign, familiarity, novelty) */
       breakdown: Record<string, number>;
@@ -1604,6 +1605,7 @@ export interface components {
     MealPlanDecision: {
       plan_id: number;
       slot_date: string;
+      slot_kind?: "dinner" | "breakfast" | "snack";
       mealie_recipe_id: string;
       decided_at?: string | null;
     };
@@ -1611,6 +1613,7 @@ export interface components {
     /** MealPlanDecisionInput — request body for POST /plans/{planId}/decisions. */
     MealPlanDecisionInput: {
       slot_date: string;
+      slot_kind?: "dinner" | "breakfast" | "snack";
       mealie_recipe_id: string;
     };
 
@@ -1623,8 +1626,9 @@ export interface components {
 
     /** ShoppingRequirement — a canonical shopping requirement. */
     ShoppingRequirement: {
-      id: number;
+      id: string;
       ingredient_id: string;
+      ingredient_name?: string;
       quantity: number;
       unit: string;
       acceptable_forms: string[];

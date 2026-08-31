@@ -392,8 +392,8 @@ func (a storeAdapter) GetPlan(ctx context.Context, planID string) (httpapi.PlanV
 			}
 		}
 		view.Candidates = append(view.Candidates, httpapi.PlanCandidateResponse{
-			ID: c.ID.String(), SlotDate: types.Date{Time: c.SlotDate}, Rank: c.Rank, Score: c.Score,
-			Breakdown: c.Breakdown, Feasible: c.Feasible, Recipe: recipe,
+			ID: c.ID.String(), SlotDate: types.Date{Time: c.SlotDate}, SlotKind: c.SlotKind,
+			Rank: c.Rank, Score: c.Score, Breakdown: c.Breakdown, Feasible: c.Feasible, Recipe: recipe,
 		})
 	}
 	if len(decisions) > 0 {
@@ -404,7 +404,7 @@ func (a storeAdapter) GetPlan(ctx context.Context, planID string) (httpapi.PlanV
 				mealieRecipeID = r.MealieRecipeID
 			}
 			ds = append(ds, httpapi.PlanDecisionResponse{
-				PlanID: d.PlanID.String(), SlotDate: types.Date{Time: d.SlotDate},
+				PlanID: d.PlanID.String(), SlotDate: types.Date{Time: d.SlotDate}, SlotKind: d.SlotKind,
 				MealieRecipeID: mealieRecipeID, DecidedAt: &d.DecidedAt,
 			})
 		}
@@ -444,7 +444,7 @@ func (a storeAdapter) SetDecisions(ctx context.Context, planID string, decisions
 			return fmt.Errorf("plan set decisions: resolve recipe %q: %w", d.MealieRecipeID, err)
 		}
 		if err := a.db.SetDecision(ctx, persistence.MealPlanDecision{
-			PlanID: parsedPlanID, SlotDate: d.SlotDate.Time, RecipeRefID: ref.ID,
+			PlanID: parsedPlanID, SlotDate: d.SlotDate.Time, SlotKind: d.SlotKind, RecipeRefID: ref.ID,
 		}); err != nil {
 			return fmt.Errorf("decision set: %w", err)
 		}
@@ -464,8 +464,8 @@ func (a storeAdapter) ListCandidates(ctx context.Context, planID string) ([]http
 	out := make([]httpapi.PlanCandidateResponse, 0, len(candidates))
 	for _, c := range candidates {
 		out = append(out, httpapi.PlanCandidateResponse{
-			ID: c.ID.String(), SlotDate: types.Date{Time: c.SlotDate}, Rank: c.Rank, Score: c.Score,
-			Breakdown: c.Breakdown, Feasible: c.Feasible,
+			ID: c.ID.String(), SlotDate: types.Date{Time: c.SlotDate}, SlotKind: c.SlotKind,
+			Rank: c.Rank, Score: c.Score, Breakdown: c.Breakdown, Feasible: c.Feasible,
 		})
 	}
 	return out, nil
@@ -482,7 +482,7 @@ func (a storeAdapter) InsertCandidates(ctx context.Context, candidates []httpapi
 			return fmt.Errorf("candidate insert: resolve recipe %q: %w", c.MealieRecipeID, err)
 		}
 		if err := a.db.InsertCandidate(ctx, persistence.MealPlanCandidate{
-			PlanID: parsedPlanID, SlotDate: c.SlotDate, RecipeRefID: ref.ID,
+			PlanID: parsedPlanID, SlotDate: c.SlotDate, SlotKind: c.SlotKind, RecipeRefID: ref.ID,
 			Score: c.Score, Breakdown: c.Breakdown, Feasible: c.Feasible, Rank: c.Rank,
 		}); err != nil {
 			return fmt.Errorf("candidate insert: %w", err)
@@ -503,8 +503,8 @@ func (a storeAdapter) ListShoppingRequirements(ctx context.Context, planID strin
 	out := make([]httpapi.ShoppingRequirementResponse, 0, len(reqs))
 	for _, r := range reqs {
 		out = append(out, httpapi.ShoppingRequirementResponse{
-			ID: r.ID.String(), IngredientID: r.IngredientID.String(), Quantity: r.Quantity,
-			Unit: r.Unit, AcceptableForms: r.AcceptableForms, PreferredForm: r.PreferredForm,
+			ID: r.ID.String(), IngredientID: r.IngredientID.String(), IngredientName: r.IngredientName,
+			Quantity: r.Quantity, Unit: r.Unit, AcceptableForms: r.AcceptableForms, PreferredForm: r.PreferredForm,
 		})
 	}
 	return out, nil
