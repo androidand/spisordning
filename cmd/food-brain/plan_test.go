@@ -107,6 +107,9 @@ func newTestEnv(t *testing.T, ollaHandler http.HandlerFunc) (familyPath string, 
 		t.Fatal(err)
 	}
 
+	// This test drives the Mealie pipeline end-to-end (no database), so pin
+	// the recipe source to mealie regardless of the ambient RECIPE_SOURCE.
+	t.Setenv("RECIPE_SOURCE", "mealie")
 	t.Setenv("MEALIE_BASE_URL", fakeMealie.URL)
 	t.Setenv("MEALIE_API_TOKEN", "tok")
 	t.Setenv("SKOLMATEN_BASE_URL", fakeSkolmaten.URL)

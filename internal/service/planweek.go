@@ -82,6 +82,9 @@ func (s *Planning) PlanWeek(ctx context.Context, in PlanWeekInput) (PlanWeekResu
 	var lines map[string]planning.ChosenMeal
 
 	if s.resolver != nil && s.resolver.mode != SourceMealie {
+		if s.db == nil {
+			return PlanWeekResult{}, fmt.Errorf("service: plan week: recipe source %q requires a database (set DATABASE_URL)", s.resolver.mode)
+		}
 		refs, err := s.db.ListRecipeRefs(ctx)
 		if err != nil {
 			return PlanWeekResult{}, fmt.Errorf("service: plan week: list recipe refs: %w", err)

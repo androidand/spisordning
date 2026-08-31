@@ -20,8 +20,8 @@ type persistErrSentinel string
 func (e persistErrSentinel) Error() string { return string(e) }
 
 // fakePersistStore records every call persistWeek makes against a Store. It
-// embeds Store (nil) so only the four plan-persistence methods are implemented;
-// persistWeek never calls anything else.
+// embeds Store (nil) so only the methods persistWeek actually calls are
+// implemented; anything else panics by design.
 type fakePersistStore struct {
 	Store
 	planID         domain.MealPlanID
@@ -43,6 +43,10 @@ func (f *fakePersistStore) GetOrCreateMealPlan(ctx context.Context, weekStart ti
 }
 func (f *fakePersistStore) GetRecipeRefByMealieID(ctx context.Context, mealieRecipeID string) (persistence.RecipeRef, error) {
 	return persistence.RecipeRef{ID: domain.NewRecipeRefID(), MealieRecipeID: mealieRecipeID}, nil
+}
+func (f *fakePersistStore) GetRecipeSourceRefBySource(ctx context.Context, source, sourceRecipeID string) (persistence.RecipeSourceRef, error) {
+	// No native mapping: the resolver falls through to the recipe_ref cache.
+	return persistence.RecipeSourceRef{}, persistence.ErrNoRows
 }
 func (f *fakePersistStore) InsertCandidate(ctx context.Context, c persistence.MealPlanCandidate) error {
 	if f.insCandErr != nil {
@@ -185,6 +189,10 @@ func TestPlanWeek_Orchestrates(t *testing.T) {
 	}))
 	t.Cleanup(fakeMealie.Close)
 
+	// This test drives the Mealie pipeline (fake Mealie server, no native
+	// data), so pin the recipe source to mealie regardless of the ambient
+	// RECIPE_SOURCE.
+	t.Setenv("RECIPE_SOURCE", "mealie")
 	store := &fakePersistStore{planID: domain.NewMealPlanID()}
 	svc := NewPlanning(store, mealie.New(fakeMealie.URL, "tok"))
 
@@ -617,6 +625,9 @@ func TestPlanWeek_MealieMode_FallsBackToMealie(t *testing.T) {
 	}))
 	t.Cleanup(fakeMealie.Close)
 
+	// Mealie-mode test: pin the source so the ambient RECIPE_SOURCE cannot
+	// divert PlanWeek into the native resolver branch.
+	t.Setenv("RECIPE_SOURCE", "mealie")
 	planID := domain.NewMealPlanID()
 	store := &resolverFakeStore{planID: planID}
 	svc := NewPlanning(store, mealie.New(fakeMealie.URL, "tok"))

@@ -401,13 +401,11 @@ func TestPlanWeek_NativeMode_NoMealie(t *testing.T) {
 		},
 	}
 
-	// Construct Planning with native mode (no Mealie client).
-	p := service.NewPlanning(store, nil)
-	// Override the resolver to use native mode.
-	// NewPlanning uses RecipeSourceModeFromEnv() which defaults to mealie,
-	// so we need to set RECIPE_SOURCE=native for this test.
+	// Construct Planning with native mode (no Mealie client). NewPlanning
+	// reads RECIPE_SOURCE via RecipeSourceModeFromEnv(), so pin it before
+	// constructing.
 	t.Setenv("RECIPE_SOURCE", "native")
-	p = service.NewPlanning(store, nil)
+	p := service.NewPlanning(store, nil)
 
 	weekStart := time.Date(2026, 9, 7, 0, 0, 0, 0, time.UTC) // Monday
 	res, err := p.PlanWeek(context.Background(), service.PlanWeekInput{

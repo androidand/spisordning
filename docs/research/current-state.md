@@ -139,7 +139,7 @@ See `docs/research/willys-capabilities.md` for the full capability map.
   instance (`MEALIE_BASE_URL` defaults to `http://hlab-mealie:9000`). Includes tag
   normalization, Swedish effort-time parsing, and a fallback to Mealie's own ingredient parser.
   **Recipe source of truth** is controlled by the `RECIPE_SOURCE` env var (`native`/`dual`/`mealie`,
-  default `mealie`). The `recipe_source_ref` table (migration 000020) maps native `recipe_family`
+  default `native`). The `recipe_source_ref` table (migration 000020) maps native `recipe_family`
   rows to Mealie slugs. `food-brain sync import` runs the one-way Mealie → recipe_family import.
   `StructureFromText` writes natively when `RECIPE_SOURCE=native` or `dual`.
 - **Grocy**: real, tested client (`internal/grocy/client.go`) + service (`internal/service/grocy.go`)

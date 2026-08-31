@@ -171,6 +171,9 @@ func TestStructureFromText_WorkedExample(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	// This test exercises the legacy Mealie write path (no database), so pin
+	// the recipe source to mealie regardless of the ambient RECIPE_SOURCE.
+	t.Setenv("RECIPE_SOURCE", "mealie")
 	svc := NewRecipes(nil, mealie.New(srv.URL, "tok"))
 	got, err := svc.StructureFromText(context.Background(), workedExampleRecipe)
 	if err != nil {
