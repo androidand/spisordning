@@ -63,7 +63,7 @@ jobs:
           sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client
           actual=$(PGPASSWORD=change-me psql -h localhost -U spisordning -d spisordning \
             -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' AND table_name <> 'goose_db_version'")
-          expected=52
+           expected=54
           echo "schema tables: $actual (expected $expected)"
           [ "$actual" = "$expected" ]
 
@@ -103,6 +103,12 @@ jobs:
   docker:
     name: docker image build + publish
     runs-on: ubuntu-latest
+    # The repo's default workflow permissions don't grant packages:write, so the
+    # GITHUB_TOKEN can't push to GHCR (denied: permission_denied: read_package).
+    # Grant it explicitly for this job only.
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
       - name: set up Docker Buildx
