@@ -147,6 +147,11 @@ func TestRecipeSourceRef_UniquePerSource(t *testing.T) {
 func TestRecipeSourceRef_ListUnmappedMealieRecipes(t *testing.T) {
 	s := skipWithoutDB(t)
 	ctx := context.Background()
+	// ListUnmappedMealieRecipes scans the whole table, so this test (unlike
+	// its siblings, which scope by source_recipe_id) needs recipe_ref/
+	// recipe_source_ref empty first — otherwise it's order-dependent on
+	// whatever other tests left behind.
+	truncateTables(t, ctx, s, "recipe_source_ref", "recipe_ref")
 
 	// Create two recipe_refs.
 	if err := s.UpsertRecipeRef(ctx, RecipeRef{MealieRecipeID: "mapped-1", Title: "Mapped", Effort: 1}); err != nil {
