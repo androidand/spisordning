@@ -149,10 +149,10 @@ func TestRecipeSourceRef_ListUnmappedMealieRecipes(t *testing.T) {
 	ctx := context.Background()
 
 	// Create two recipe_refs.
-	if err := s.UpsertRecipeRef(ctx, RecipeRef{MealieRecipeID: "mapped-1", Title: "Mapped"}); err != nil {
+	if err := s.UpsertRecipeRef(ctx, RecipeRef{MealieRecipeID: "mapped-1", Title: "Mapped", Effort: 1}); err != nil {
 		t.Fatalf("upsert ref 1: %v", err)
 	}
-	if err := s.UpsertRecipeRef(ctx, RecipeRef{MealieRecipeID: "unmapped-1", Title: "Unmapped"}); err != nil {
+	if err := s.UpsertRecipeRef(ctx, RecipeRef{MealieRecipeID: "unmapped-1", Title: "Unmapped", Effort: 1}); err != nil {
 		t.Fatalf("upsert ref 2: %v", err)
 	}
 	t.Cleanup(func() {

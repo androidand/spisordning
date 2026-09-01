@@ -41,7 +41,7 @@ func TestShoppingList_CreateAndGet(t *testing.T) {
 func TestShoppingList_ListAndStatusUpdate(t *testing.T) {
 	s := skipWithoutDB(t)
 	ctx := context.Background()
-	truncateTables(t, ctx, s, "shopping_list_item", "shopping_list")
+	truncateTables(t, ctx, s, "shopping_list_item", "shopping_list", "ingredient")
 
 	_, err := s.CreateShoppingList(ctx, ShoppingList{Name: "List A", Status: "active"})
 	if err != nil {
@@ -79,7 +79,7 @@ func TestShoppingList_ListAndStatusUpdate(t *testing.T) {
 func TestShoppingListItem_RoundTrip(t *testing.T) {
 	s := skipWithoutDB(t)
 	ctx := context.Background()
-	truncateTables(t, ctx, s, "shopping_list_item", "shopping_list")
+	truncateTables(t, ctx, s, "shopping_list_item", "shopping_list", "ingredient")
 
 	listID, err := s.CreateShoppingList(ctx, ShoppingList{Name: "Test list"})
 	if err != nil {
@@ -140,7 +140,7 @@ func TestShoppingListItem_RoundTrip(t *testing.T) {
 func TestShoppingListItem_LabelOnly(t *testing.T) {
 	s := skipWithoutDB(t)
 	ctx := context.Background()
-	truncateTables(t, ctx, s, "shopping_list_item", "shopping_list")
+	truncateTables(t, ctx, s, "shopping_list_item", "shopping_list", "ingredient")
 
 	listID, err := s.CreateShoppingList(ctx, ShoppingList{Name: "Pantry"})
 	if err != nil {
@@ -170,7 +170,7 @@ func TestShoppingListItem_LabelOnly(t *testing.T) {
 func TestShoppingListWithItems_Atomic(t *testing.T) {
 	s := skipWithoutDB(t)
 	ctx := context.Background()
-	truncateTables(t, ctx, s, "shopping_list_item", "shopping_list")
+	truncateTables(t, ctx, s, "shopping_list_item", "shopping_list", "ingredient")
 
 	milk := "Mjölk"
 	bread := "Bröd"
@@ -198,7 +198,7 @@ func TestShoppingListWithItems_Atomic(t *testing.T) {
 func TestShoppingListWithItems_RollsBackOnBadItem(t *testing.T) {
 	s := skipWithoutDB(t)
 	ctx := context.Background()
-	truncateTables(t, ctx, s, "shopping_list_item", "shopping_list")
+	truncateTables(t, ctx, s, "shopping_list_item", "shopping_list", "ingredient")
 
 	milk := "Mjölk"
 	// The second item has no requirement, ingredient, or label → violates the
@@ -330,7 +330,7 @@ func TestRetailerListBinding_Upsert(t *testing.T) {
 func TestShoppingRequirement_Get(t *testing.T) {
 	s := skipWithoutDB(t)
 	ctx := context.Background()
-	truncateTables(t, ctx, s, "shopping_requirement", "meal_plan")
+	truncateTables(t, ctx, s, "shopping_requirement", "meal_plan", "ingredient")
 
 	weekStart := date(t, "2043-01-18")
 	planID, err := s.CreateMealPlan(ctx, weekStart)
@@ -339,6 +339,9 @@ func TestShoppingRequirement_Get(t *testing.T) {
 	}
 
 	ingID := domain.NewIngredientID()
+	if err := s.UpsertIngredient(ctx, Ingredient{ID: ingID, Display: "Köttfärs"}); err != nil {
+		t.Fatalf("UpsertIngredient: %v", err)
+	}
 	pref := "fresh"
 	req := ShoppingRequirement{
 		PlanID:          planID,

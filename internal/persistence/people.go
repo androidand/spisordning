@@ -3,6 +3,7 @@ package persistence
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/androidand/spisordning/internal/domain"
@@ -20,8 +21,12 @@ type Person struct {
 // CreatePerson inserts a person. A zero weight falls back to the column default (1.0),
 // since weight must be > 0 and 0 means "unspecified".
 func (s *Store) CreatePerson(ctx context.Context, p Person) error {
-	const q = `INSERT INTO person (id, name, weight) VALUES ($1, $2, COALESCE(NULLIF($3, 0), 1.0))`
-	if _, err := s.db.Exec(ctx, q, p.ID, p.Name, p.Weight); err != nil {
+	slug := strings.ToLower(strings.TrimSpace(p.Name))
+	if slug == "" {
+		slug = p.ID
+	}
+	const q = `INSERT INTO person (id, slug, name, weight) VALUES ($1, $2, $3, COALESCE(NULLIF($4, 0), 1.0))`
+	if _, err := s.db.Exec(ctx, q, p.ID, slug, p.Name, p.Weight); err != nil {
 		return fmt.Errorf("persistence: create person: %w", err)
 	}
 	return nil

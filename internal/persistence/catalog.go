@@ -3,6 +3,7 @@ package persistence
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/androidand/spisordning/internal/domain"
@@ -53,10 +54,17 @@ type Product struct {
 
 // CreateProduct inserts a product.
 func (s *Store) CreateProduct(ctx context.Context, p Product) error {
+	slug := strings.ToLower(strings.TrimSpace(p.Slug))
+	if slug == "" {
+		slug = strings.ToLower(strings.TrimSpace(p.Name))
+	}
+	if slug == "" {
+		slug = p.ID.String()
+	}
 	const q = `INSERT INTO product (id, slug, name, brand, package_size) VALUES ($1, $2, $3, $4, $5)`
 	brand := nullableText(p.Brand)
 	pkg := nullableText(p.PackageSize)
-	if _, err := s.db.Exec(ctx, q, p.ID, p.Slug, p.Name, brand, pkg); err != nil {
+	if _, err := s.db.Exec(ctx, q, p.ID, slug, p.Name, brand, pkg); err != nil {
 		return fmt.Errorf("persistence: create product: %w", err)
 	}
 	return nil

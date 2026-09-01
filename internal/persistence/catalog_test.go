@@ -29,7 +29,7 @@ func TestCatalog_HouseholdProductIdentifierMapping(t *testing.T) {
 		t.Fatalf("UpsertIngredient: %v", err)
 	}
 
-	p := Product{ID: domain.NewProductID(), Name: "Arla Standardmjölk", Brand: "Arla", PackageSize: "1L"}
+	p := Product{ID: domain.NewProductID(), Slug: "arla-standardmjolk", Name: "Arla Standardmjölk", Brand: "Arla", PackageSize: "1L"}
 	if err := s.CreateProduct(ctx, p); err != nil {
 		t.Fatalf("CreateProduct: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestCatalog_HouseholdProductIdentifierMapping(t *testing.T) {
 
 	// Re-linking the same GTIN to a different product overwrites the link (D6: latest confirmed
 	// match wins).
-	p2 := Product{ID: domain.NewProductID(), Name: "Arla Standardmjölk (relabel)"}
+	p2 := Product{ID: domain.NewProductID(), Slug: "arla-standardmjolk-relabel", Name: "Arla Standardmjölk (relabel)"}
 	if err := s.CreateProduct(ctx, p2); err != nil {
 		t.Fatalf("CreateProduct (p2): %v", err)
 	}

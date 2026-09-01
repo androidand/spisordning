@@ -3,6 +3,7 @@ package persistence
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/androidand/spisordning/internal/domain"
 	"github.com/google/uuid"
@@ -11,8 +12,12 @@ import (
 
 // CreateRetailer inserts a retailer.
 func (s *Store) CreateRetailer(ctx context.Context, r domain.Retailer) error {
-	const q = `INSERT INTO retailer (id, name) VALUES ($1, $2)`
-	if _, err := s.db.Exec(ctx, q, r.ID, r.Name); err != nil {
+	slug := strings.ToLower(strings.TrimSpace(r.Name))
+	if slug == "" {
+		slug = r.ID.String()
+	}
+	const q = `INSERT INTO retailer (id, slug, name) VALUES ($1, $2, $3)`
+	if _, err := s.db.Exec(ctx, q, r.ID, slug, r.Name); err != nil {
 		return fmt.Errorf("persistence: create retailer: %w", err)
 	}
 	return nil
@@ -21,9 +26,13 @@ func (s *Store) CreateRetailer(ctx context.Context, r domain.Retailer) error {
 // UpsertRetailer inserts a retailer or, if one with the same id already exists,
 // refreshes its name. Idempotent, so sync commands can call it unconditionally.
 func (s *Store) UpsertRetailer(ctx context.Context, r domain.Retailer) error {
-	const q = `INSERT INTO retailer (id, name) VALUES ($1, $2)
+	slug := strings.ToLower(strings.TrimSpace(r.Name))
+	if slug == "" {
+		slug = r.ID.String()
+	}
+	const q = `INSERT INTO retailer (id, slug, name) VALUES ($1, $2, $3)
 		ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name`
-	if _, err := s.db.Exec(ctx, q, r.ID, r.Name); err != nil {
+	if _, err := s.db.Exec(ctx, q, r.ID, slug, r.Name); err != nil {
 		return fmt.Errorf("persistence: upsert retailer: %w", err)
 	}
 	return nil
@@ -60,9 +69,13 @@ func (s *Store) ListRetailers(ctx context.Context) ([]domain.Retailer, error) {
 
 // CreateStore inserts a store.
 func (s *Store) CreateStore(ctx context.Context, st domain.Store) error {
-	const q = `INSERT INTO store (id, retailer_id, name, latitude, longitude)
-		VALUES ($1, $2, $3, $4, $5)`
-	if _, err := s.db.Exec(ctx, q, st.ID, st.RetailerID, st.Name, st.Latitude, st.Longitude); err != nil {
+	slug := strings.ToLower(strings.TrimSpace(st.Name))
+	if slug == "" {
+		slug = st.ID.String()
+	}
+	const q = `INSERT INTO store (id, retailer_id, slug, name, latitude, longitude)
+		VALUES ($1, $2, $3, $4, $5, $6)`
+	if _, err := s.db.Exec(ctx, q, st.ID, st.RetailerID, slug, st.Name, st.Latitude, st.Longitude); err != nil {
 		return fmt.Errorf("persistence: create store: %w", err)
 	}
 	return nil
@@ -141,8 +154,12 @@ func (s *Store) ListAllStores(ctx context.Context) ([]domain.Store, error) {
 // same (retailer_id, retailer_sku) already exists, the product_id and display_name
 // are updated (a SKU may be unmapped at first and mapped later).
 func (s *Store) UpsertRetailerProduct(ctx context.Context, rp domain.RetailerProduct) error {
-	const q = `INSERT INTO retailer_product (id, retailer_id, product_id, retailer_sku, display_name)
-		VALUES ($1, $2, $3, $4, $5)
+	slug := strings.ToLower(strings.TrimSpace(rp.DisplayName))
+	if slug == "" {
+		slug = rp.ID.String()
+	}
+	const q = `INSERT INTO retailer_product (id, retailer_id, product_id, retailer_sku, display_name, slug)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (retailer_id, retailer_sku) DO UPDATE SET
 			product_id = EXCLUDED.product_id,
 			display_name = EXCLUDED.display_name`
@@ -150,7 +167,7 @@ func (s *Store) UpsertRetailerProduct(ctx context.Context, rp domain.RetailerPro
 	if productID == nil {
 		productID = nil
 	}
-	if _, err := s.db.Exec(ctx, q, rp.ID, rp.RetailerID, productID, rp.RetailerSKU, nullableText(rp.DisplayName)); err != nil {
+	if _, err := s.db.Exec(ctx, q, rp.ID, rp.RetailerID, productID, rp.RetailerSKU, nullableText(rp.DisplayName), slug); err != nil {
 		return fmt.Errorf("persistence: upsert retailer_product: %w", err)
 	}
 	return nil

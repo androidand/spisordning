@@ -32,11 +32,11 @@ func TestPeople_PreferencesAndObservations(t *testing.T) {
 	ctx := context.Background()
 	truncateTables(t, ctx, s, "preference_observation", "person_preference", "person")
 
-	p := Person{ID: "p-test-people", Name: "Test Person", Weight: 2}
+	p := Person{ID: domain.NewPersonID().String(), Name: "Test Person", Weight: 2}
 	if err := s.CreatePerson(ctx, p); err != nil {
 		t.Fatalf("CreatePerson: %v", err)
 	}
-	got, err := s.GetPerson(ctx, "p-test-people")
+	got, err := s.GetPerson(ctx, p.ID)
 	if err != nil {
 		t.Fatalf("GetPerson: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestPeople_PreferencesAndObservations(t *testing.T) {
 func TestRecipes_IngredientsAndMappings(t *testing.T) {
 	s := skipWithoutDB(t)
 	ctx := context.Background()
-	truncateTables(t, ctx, s, "recipe_ingredient", "ingredient_mapping", "ingredient", "recipe_ref")
+	truncateTables(t, ctx, s, "recipe_ingredient", "ingredient_external_ref", "ingredient", "recipe_ref")
 
 	// Seed an ingredient + mapping, then a recipe referencing it.
 	ingID := domain.NewIngredientID()
@@ -147,7 +147,7 @@ func TestMeals_ReactionsAndConstraints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRecipeRefByMealieID: %v", err)
 	}
-	if err := s.CreatePerson(ctx, Person{ID: "p-kid", Name: "Kid", Weight: 1}); err != nil {
+	if err := s.CreatePerson(ctx, Person{ID: domain.NewPersonID().String(), Name: "Kid", Weight: 1}); err != nil {
 		t.Fatalf("CreatePerson: %v", err)
 	}
 	served := time.Now().AddDate(0, 0, -3)

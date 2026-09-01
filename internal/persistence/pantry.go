@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/androidand/spisordning/internal/domain"
@@ -37,14 +38,18 @@ func (s *Store) CreateInventoryLocation(ctx context.Context, l InventoryLocation
 			return fmt.Errorf("persistence: creating inventory_location %q under %q would create a cycle", l.ID, *l.ParentLocationID)
 		}
 	}
-	const q = `INSERT INTO inventory_location (id, household_id, name, location_type, parent_location_id)
-		VALUES ($1, $2, $3, $4, $5)`
+	slug := strings.ToLower(strings.TrimSpace(l.Name))
+	if slug == "" {
+		slug = l.ID.String()
+	}
+	const q = `INSERT INTO inventory_location (id, household_id, slug, name, location_type, parent_location_id)
+		VALUES ($1, $2, $3, $4, $5, $6)`
 	locType := nullableText(l.LocationType)
 	var parent any
 	if l.ParentLocationID != nil {
 		parent = *l.ParentLocationID
 	}
-	if _, err := s.db.Exec(ctx, q, l.ID, l.HouseholdID, l.Name, locType, parent); err != nil {
+	if _, err := s.db.Exec(ctx, q, l.ID, l.HouseholdID, slug, l.Name, locType, parent); err != nil {
 		return fmt.Errorf("persistence: create inventory_location: %w", err)
 	}
 	return nil

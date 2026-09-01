@@ -30,7 +30,7 @@ func pantryFixture(t *testing.T, ctx context.Context, s *Store, suffix string) (
 func TestPantry_GraduatedSpecificity(t *testing.T) {
 	s := skipWithoutDB(t)
 	ctx := context.Background()
-	truncateTables(t, ctx, s, "inventory_event", "inventory_lot", "inventory_location", "product", "household")
+	truncateTables(t, ctx, s, "inventory_event", "inventory_lot", "inventory_location", "product", "ingredient", "household")
 	householdID, ingredientID, productID := pantryFixture(t, ctx, s, "specificity")
 
 	loc := InventoryLocation{ID: domain.NewInventoryLocationID(), HouseholdID: householdID, Name: "Fridge"}
@@ -105,7 +105,7 @@ func TestPantry_GraduatedSpecificity(t *testing.T) {
 func TestPantry_ListCandidateProductsForIngredient(t *testing.T) {
 	s := skipWithoutDB(t)
 	ctx := context.Background()
-	truncateTables(t, ctx, s, "product_ingredient_mapping", "product", "household")
+	truncateTables(t, ctx, s, "product_ingredient_mapping", "product", "ingredient", "household")
 	_, ingredientID, productID := pantryFixture(t, ctx, s, "candidates")
 
 	// No mapping yet, but the name matches — falls back to name-match search.
@@ -146,7 +146,7 @@ func TestPantry_ListCandidateProductsForIngredient(t *testing.T) {
 func TestPantry_EventLifecycle(t *testing.T) {
 	s := skipWithoutDB(t)
 	ctx := context.Background()
-	truncateTables(t, ctx, s, "inventory_event", "inventory_lot", "inventory_location", "product", "household")
+	truncateTables(t, ctx, s, "inventory_event", "inventory_lot", "inventory_location", "product", "ingredient", "household")
 	householdID, ingredientID, _ := pantryFixture(t, ctx, s, "events")
 
 	loc := InventoryLocation{ID: domain.NewInventoryLocationID(), HouseholdID: householdID, Name: "Fridge"}
@@ -235,7 +235,7 @@ func TestPantry_EventLifecycle(t *testing.T) {
 func TestPantry_Transfer(t *testing.T) {
 	s := skipWithoutDB(t)
 	ctx := context.Background()
-	truncateTables(t, ctx, s, "inventory_event", "inventory_lot", "inventory_location", "product", "household")
+	truncateTables(t, ctx, s, "inventory_event", "inventory_lot", "inventory_location", "product", "ingredient", "household")
 	householdID, ingredientID, _ := pantryFixture(t, ctx, s, "transfer")
 
 	fridge := InventoryLocation{ID: domain.NewInventoryLocationID(), HouseholdID: householdID, Name: "Fridge"}
@@ -295,7 +295,7 @@ func TestPantry_Transfer(t *testing.T) {
 func TestPantry_LocationHierarchy(t *testing.T) {
 	s := skipWithoutDB(t)
 	ctx := context.Background()
-	truncateTables(t, ctx, s, "inventory_event", "inventory_lot", "inventory_location", "product", "household")
+	truncateTables(t, ctx, s, "inventory_event", "inventory_lot", "inventory_location", "product", "ingredient", "household")
 	householdID, ingredientID, _ := pantryFixture(t, ctx, s, "hierarchy")
 
 	basement := InventoryLocation{ID: domain.NewInventoryLocationID(), HouseholdID: householdID, Name: "Basement", LocationType: "BASEMENT"}

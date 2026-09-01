@@ -71,11 +71,7 @@ func (s *Store) UpsertRecipeSourceRef(ctx context.Context, r RecipeSourceRef) er
 		return fmt.Errorf("persistence: delete existing recipe source ref: %w", err)
 	}
 	const q = `INSERT INTO recipe_source_ref (id, recipe_family_id, source, source_recipe_id, imported_by)
-		VALUES ($1, $2, $3, $4, $5)
-		ON CONFLICT (source, source_recipe_id) DO UPDATE SET
-			recipe_family_id = EXCLUDED.recipe_family_id,
-			imported_by = EXCLUDED.imported_by,
-			imported_at = now()`
+		VALUES ($1, $2, $3, $4, $5)`
 	importedBy := pgtype.Text{String: r.ImportedBy, Valid: r.ImportedBy != ""}
 	if _, err := s.db.Exec(ctx, q, r.ID, r.RecipeFamilyID, r.Source, r.SourceRecipeID, importedBy); err != nil {
 		return fmt.Errorf("persistence: upsert recipe source ref: %w", err)

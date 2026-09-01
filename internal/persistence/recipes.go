@@ -29,7 +29,7 @@ func (s *Store) UpsertRecipeRef(ctx context.Context, r RecipeRef) error {
 		r.ID = domain.NewRecipeRefID()
 	}
 	const q = `INSERT INTO recipe_ref (id, mealie_recipe_id, title, tags, effort, last_synced_at, raw_snapshot)
-		VALUES ($1, $2, $3, $4, now(), $5)
+		VALUES ($1, $2, $3, $4, $5, now(), $6)
 		ON CONFLICT (mealie_recipe_id) DO UPDATE SET title = EXCLUDED.title,
 			tags = EXCLUDED.tags, effort = EXCLUDED.effort, last_synced_at = now(),
 			raw_snapshot = EXCLUDED.raw_snapshot`
@@ -217,9 +217,9 @@ type IngredientMapping struct {
 // ingredient mapping. This is the review surface: a high `NeedsReview` mapping
 // is what 2.6 exposes to be resolved.
 func (s *Store) UpsertIngredientMapping(ctx context.Context, m IngredientMapping) error {
-	const q = `INSERT INTO ingredient_mapping (mealie_food_id, ingredient_id, grams_per_unit, default_form, needs_review)
-		VALUES ($1, $2, $3, $4, $5)
-		ON CONFLICT (mealie_food_id) DO UPDATE SET ingredient_id = EXCLUDED.ingredient_id,
+	const q = `INSERT INTO ingredient_external_ref (provider, external_id, ingredient_id, grams_per_unit, default_form, needs_review)
+		VALUES ('mealie', $1, $2, $3, $4, $5)
+		ON CONFLICT (provider, external_id) DO UPDATE SET ingredient_id = EXCLUDED.ingredient_id,
 			grams_per_unit = EXCLUDED.grams_per_unit, default_form = EXCLUDED.default_form,
 			needs_review = EXCLUDED.needs_review, updated_at = now()`
 	if _, err := s.db.Exec(ctx, q, m.MealieFoodID, m.IngredientID, m.GramsPerUnit, m.DefaultForm, m.NeedsReview); err != nil {
@@ -230,8 +230,8 @@ func (s *Store) UpsertIngredientMapping(ctx context.Context, m IngredientMapping
 
 // GetIngredientMapping fetches a mapping by mealie_food_id.
 func (s *Store) GetIngredientMapping(ctx context.Context, mealieFoodID string) (IngredientMapping, error) {
-	const q = `SELECT mealie_food_id, ingredient_id, grams_per_unit, default_form, needs_review, updated_at
-		FROM ingredient_mapping WHERE mealie_food_id = $1`
+	const q = `SELECT external_id, ingredient_id, grams_per_unit, default_form, needs_review, updated_at
+		FROM ingredient_external_ref WHERE provider = 'mealie' AND external_id = $1`
 	var m IngredientMapping
 	if err := s.db.QueryRow(ctx, q, mealieFoodID).Scan(&m.MealieFoodID, &m.IngredientID, &m.GramsPerUnit, &m.DefaultForm, &m.NeedsReview, &m.UpdatedAt); err != nil {
 		return IngredientMapping{}, fmt.Errorf("persistence: get ingredient_mapping: %w", err)
@@ -242,8 +242,8 @@ func (s *Store) GetIngredientMapping(ctx context.Context, mealieFoodID string) (
 // ListNeedsReviewMappings returns mappings awaiting review — the input to the
 // ingredient-mapping review surface (task 2.6).
 func (s *Store) ListNeedsReviewMappings(ctx context.Context) ([]IngredientMapping, error) {
-	rows, err := s.db.Query(ctx, `SELECT mealie_food_id, ingredient_id, grams_per_unit,
-		default_form, needs_review, updated_at FROM ingredient_mapping WHERE needs_review = true ORDER BY mealie_food_id`)
+	rows, err := s.db.Query(ctx, `SELECT external_id, ingredient_id, grams_per_unit,
+		default_form, needs_review, updated_at FROM ingredient_external_ref WHERE provider = 'mealie' AND needs_review = true ORDER BY external_id`)
 	if err != nil {
 		return nil, fmt.Errorf("persistence: list needs-review mappings: %w", err)
 	}

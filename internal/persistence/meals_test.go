@@ -13,7 +13,7 @@ func TestMealsAndPreferences_ParticipantAndReviewRoundTrip(t *testing.T) {
 	truncateTables(t, ctx, s, "meal_review", "meal_participant", "meal_reaction", "meal_event", "recipe_ref", "person")
 
 	// Seed a person + recipe so FKs resolve.
-	if err := s.CreatePerson(ctx, Person{ID: "p-andreas", Name: "Andreas", Weight: 1.0}); err != nil {
+	if err := s.CreatePerson(ctx, Person{ID: domain.NewPersonID().String(), Name: "Andreas", Weight: 1.0}); err != nil {
 		t.Fatalf("CreatePerson: %v", err)
 	}
 	if err := s.UpsertRecipeRef(ctx, RecipeRef{MealieRecipeID: "r-pasta", Title: "Pasta", Effort: 2}); err != nil {
@@ -80,10 +80,10 @@ func TestMealsAndPreferences_RecipeRatingAggregation(t *testing.T) {
 	// Two people with different weights.
 	mumID := domain.NewPersonID()
 	kidID := domain.NewPersonID()
-	if err := s.CreatePerson(ctx, Person{ID: "p-mum", Name: "Mum", Weight: 1.0}); err != nil {
+	if err := s.CreatePerson(ctx, Person{ID: domain.NewPersonID().String(), Name: "Mum", Weight: 1.0}); err != nil {
 		t.Fatalf("CreatePerson: %v", err)
 	}
-	if err := s.CreatePerson(ctx, Person{ID: "p-kid", Name: "Kid", Weight: 2.0}); err != nil {
+	if err := s.CreatePerson(ctx, Person{ID: domain.NewPersonID().String(), Name: "Kid", Weight: 2.0}); err != nil {
 		t.Fatalf("CreatePerson: %v", err)
 	}
 	if err := s.UpsertRecipeRef(ctx, RecipeRef{MealieRecipeID: "r-pasta", Title: "Pasta", Effort: 2}); err != nil {
@@ -132,7 +132,7 @@ func TestMealsAndPreferences_FavoriteSurvivesLowReviews(t *testing.T) {
 	truncateTables(t, ctx, s, "favorite", "meal_review", "meal_event", "recipe_ref", "person")
 
 	kidID := domain.NewPersonID()
-	if err := s.CreatePerson(ctx, Person{ID: "p-kid", Name: "Kid", Weight: 1.0}); err != nil {
+	if err := s.CreatePerson(ctx, Person{ID: kidID.String(), Name: "Kid", Weight: 1.0}); err != nil {
 		t.Fatalf("CreatePerson: %v", err)
 	}
 	if err := s.UpsertRecipeRef(ctx, RecipeRef{MealieRecipeID: "r-comfort", Title: "Mac & Cheese", Effort: 1}); err != nil {
@@ -144,7 +144,7 @@ func TestMealsAndPreferences_FavoriteSurvivesLowReviews(t *testing.T) {
 	}
 
 	// Kid favorited the recipe (deliberate comfort choice).
-	if err := s.UpsertFavorite(ctx, "p-kid", "", ref.ID); err != nil {
+	if err := s.UpsertFavorite(ctx, "person", kidID.String(), ref.ID); err != nil {
 		t.Fatalf("UpsertFavorite: %v", err)
 	}
 
@@ -162,7 +162,7 @@ func TestMealsAndPreferences_FavoriteSurvivesLowReviews(t *testing.T) {
 	if len(favs) != 1 {
 		t.Fatalf("expected 1 favorite, got %d", len(favs))
 	}
-	if favs[0].ScopeType != "person" || favs[0].ScopeID != "p-kid" || favs[0].RecipeRefID != ref.ID {
+	if favs[0].ScopeType != "person" || favs[0].ScopeID != kidID.String() || favs[0].RecipeRefID != ref.ID {
 		t.Errorf("unexpected favorite: %+v", favs[0])
 	}
 
@@ -226,7 +226,7 @@ func TestMealsAndPreferences_ParticipantUniqueness(t *testing.T) {
 	ctx := context.Background()
 	truncateTables(t, ctx, s, "meal_participant", "meal_event", "recipe_ref", "person")
 
-	if err := s.CreatePerson(ctx, Person{ID: "p-a", Name: "A", Weight: 1.0}); err != nil {
+	if err := s.CreatePerson(ctx, Person{ID: domain.NewPersonID().String(), Name: "A", Weight: 1.0}); err != nil {
 		t.Fatalf("CreatePerson: %v", err)
 	}
 	if err := s.UpsertRecipeRef(ctx, RecipeRef{MealieRecipeID: "r-pasta", Title: "Pasta", Effort: 2}); err != nil {
@@ -258,10 +258,12 @@ func TestMealsAndPreferences_FavoriteScopeInvariant(t *testing.T) {
 	ctx := context.Background()
 	truncateTables(t, ctx, s, "favorite", "person", "household", "recipe_ref")
 
-	if err := s.CreatePerson(ctx, Person{ID: "p-a", Name: "A", Weight: 1.0}); err != nil {
+	paID := domain.NewPersonID()
+	if err := s.CreatePerson(ctx, Person{ID: paID.String(), Name: "A", Weight: 1.0}); err != nil {
 		t.Fatalf("CreatePerson: %v", err)
 	}
-	if err := s.CreateHousehold(ctx, Household{ID: domain.NewHouseholdID(), Name: "Home"}); err != nil {
+	hhID := domain.NewHouseholdID()
+	if err := s.CreateHousehold(ctx, Household{ID: hhID, Name: "Home"}); err != nil {
 		t.Fatalf("CreateHousehold: %v", err)
 	}
 	if err := s.UpsertRecipeRef(ctx, RecipeRef{MealieRecipeID: "r-pizza", Title: "Pizza", Effort: 2}); err != nil {
@@ -273,11 +275,11 @@ func TestMealsAndPreferences_FavoriteScopeInvariant(t *testing.T) {
 	}
 
 	// Person-scoped favorite.
-	if err := s.UpsertFavorite(ctx, "person", "p-a", ref.ID); err != nil {
+	if err := s.UpsertFavorite(ctx, "person", paID.String(), ref.ID); err != nil {
 		t.Fatalf("UpsertFavorite person-scoped: %v", err)
 	}
 	// Household-scoped favorite for the same recipe.
-	if err := s.UpsertFavorite(ctx, "household", "h-home", ref.ID); err != nil {
+	if err := s.UpsertFavorite(ctx, "household", hhID.String(), ref.ID); err != nil {
 		t.Fatalf("UpsertFavorite household-scoped: %v", err)
 	}
 
@@ -290,14 +292,14 @@ func TestMealsAndPreferences_FavoriteScopeInvariant(t *testing.T) {
 	}
 
 	// Delete the person-scoped one; household favorite remains.
-	if err := s.DeleteFavorite(ctx, "person", "p-a", ref.ID); err != nil {
+	if err := s.DeleteFavorite(ctx, "person", paID.String(), ref.ID); err != nil {
 		t.Fatalf("DeleteFavorite: %v", err)
 	}
 	favs, err = s.ListFavoritesForRecipe(ctx, ref.ID)
 	if err != nil {
 		t.Fatalf("ListFavoritesForRecipe after delete: %v", err)
 	}
-	if len(favs) != 1 || favs[0].ScopeType != "household" || favs[0].ScopeID != "h-home" {
+	if len(favs) != 1 || favs[0].ScopeType != "household" || favs[0].ScopeID != hhID.String() {
 		t.Errorf("expected household favorite to remain, got %+v", favs)
 	}
 }
