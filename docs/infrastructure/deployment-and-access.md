@@ -63,6 +63,54 @@ default).
   `~/dev/tengil/packages/` (`mealie-oci.yml` exists; `grocy-oci.yml`/`directus-oci.yml` are
   added as part of Epic H).
 
+## spisordning's real database — main-postgres (VMID 2327)
+
+**This is the one and only spisordning database on Proxmox. Before doing anything with
+spisordning's data — deploying, migrating, testing against a "real" instance — check here
+first. Do not create a new postgres LXC/container for spisordning; a prior deploy attempt
+already did, more than once (see "million instances" in the git history / session notes around
+2026-09-01), and it causes real confusion and risk of touching the wrong one.**
+
+- **VMID 2327, hostname `main-postgres`, node `proxmox`, reachable at `192.168.1.93:5432`.**
+  Deployed via Tengil (tagged `appid-main-postgres;tengil` in its LXC config) at some earlier
+  point, from what looks like an early attempt at spisordning's own compose stack — the
+  container's `POSTGRES_DB`/`POSTGRES_USER` are `spisordning`, matching this repo exactly.
+- Confirmed 2026-09-01 to hold **real household data**, not test data: 2 households, 3 people,
+  79 recipes, 2 meal plans, 96 ingredients. Schema has all 54 tables (matches the count CI's
+  `assert expected schema table count` step checks). **Do not destroy or reset this instance.**
+- Runs **Postgres 16** (`PG_MAJOR=16` in its LXC config), not the 19beta3 this repo's
+  `docker-compose.yml`/CI target since `establish-migration-and-postgres-19`. Nothing so far has
+  needed a PG16→19 upgrade to work; if that changes, a proper `pg_dump`/restore upgrade is
+  needed — don't casually recreate the container to "fix" the version, that loses the data
+  above.
+- Migrations were **behind** as of 2026-09-01: `food-brain migrate status` against it showed
+  `000001`–`000015` applied, `000016`–`000021` pending. Do not run `migrate up` against it
+  without first confirming the migration chain is sound — CI's persistence integration tests
+  were failing against this same chain as of 2026-09-01 (schema/query mismatches: missing
+  `slug` columns, column-count errors, a missing `ingredient_mapping` relation), so applying
+  those pending migrations to this real data blind is a real risk. Re-check CI status before
+  running `migrate up` here.
+- Its `POSTGRES_PASSWORD` as stored in Tengil's own LXC config is a stale, unresolved
+  `${POSTGRES_PASSWORD:?...}` template string — the same class of Tengil compose-interpolation
+  bug documented in `docker-compose.yml`'s header (fixed in `katla` via `-env-file`, see the
+  `tengil` repo's `cmd/katla/stack.go`). That stored value is irrelevant to the running
+  container though: Postgres only applies `POSTGRES_PASSWORD` at first bootstrap, never on
+  restart, so it has no effect once the data directory exists. The role's actual password was
+  reset 2026-09-01 to a real value now kept only in `spisordning/.env.proxmox` (gitignored) —
+  not written down here.
+- Access from a food-brain instance: `POSTGRES_HOST=192.168.1.93`, `POSTGRES_PORT=5432`,
+  `POSTGRES_DB=spisordning`, `POSTGRES_USER=spisordning`, `POSTGRES_PASSWORD` from
+  `spisordning/.env.proxmox`. See `docker-compose.proxmox.yml` in this repo, which is the real
+  Proxmox deploy target (as opposed to `docker-compose.yml`, which is local-dev-only and spins
+  up its own throwaway postgres).
+- Read-only inspection (row counts, `\dt`, migration status) can be done via
+  `pct exec 2327 -- psql -U spisordning -d spisordning -c '...'` — local Unix-socket
+  connections from inside the container use trust auth, no password needed. Never `printenv`
+  or otherwise print `POSTGRES_PASSWORD` from inside the container into a shared/logged
+  context.
+- The only other postgres-entrypoint LXC on this host is `test-react-rust-postgres-build-db`
+  (VMID 2323, stopped) — an unrelated project's build DB, not spisordning's.
+
 ## GitHub / specsync
 
 - `gh` CLI is already authenticated on this machine (`gh auth status` → account `androidand`,

@@ -32,10 +32,34 @@ those files rather than assuming a VMID.
 
 ## Spisordning's own deployment target
 
-`~/dev/tengil/openspec/changes/full-stack-compose-deploys/specs/spisordning/compose.yaml` is
-the reference stack (Postgres + food-brain + willys-adapter). It is **aspirational** until
-`establish-enforced-go-architecture` ships food-brain's HTTP server, Dockerfile, and a
-published image — do not attempt to deploy it before then; check that change's status first.
+Deploy via `katla stack deploy` (Tengil's CLI, `~/go/bin/katla`, source in
+`~/dev/tengil/cmd/katla`) using **`docker-compose.proxmox.yml`** in this repo — not
+`docker-compose.yml`, which is local-dev-only:
+
+```
+katla stack deploy -node proxmox -compose docker-compose.proxmox.yml -env-file .env.proxmox
+```
+
+**spisordning already has a real, deployed database — do not create a new one.**
+`main-postgres` (VMID 2327, `192.168.1.93:5432`) holds real household data; a prior deploy
+attempt already created it (and apparently others like it before) without documenting it,
+which is exactly the confusion this note exists to stop. Full details — password handling,
+migration status, why it's on Postgres 16, how it was confirmed — are in
+`docs/infrastructure/deployment-and-access.md`'s "spisordning's real database" section. Read
+that before touching spisordning's data or deploying anything that creates a postgres
+container.
+
+`willys-adapter` is likewise already running standalone (`stack:willys-adapter`, VMID 2335) —
+don't redeploy it either; see `docker-compose.yml`'s header comment and the
+`embed-retailer-clients-in-food-brain` OpenSpec change for the longer-term plan to fold it into
+food-brain directly.
+
+Tengil's compose parser resolves `${VAR}` with no `.env`/process-env context of its own — an
+unset var with no `:-` default silently becomes empty. `katla stack deploy`'s `-env-file` flag
+supplies real values (like `POSTGRES_PASSWORD`) as a top-level override, but only for
+standalone env keys a service leaves unset — never for a `${VAR}` embedded inside a larger
+string like a `DATABASE_URL`. Keep such compose-file variables standalone if they need to come
+from `-env-file`; see `katla stack deploy -h` for the mechanics.
 
 ## Epic ↔ Milestone convention
 

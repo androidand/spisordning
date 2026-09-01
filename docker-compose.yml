@@ -1,14 +1,21 @@
-# spisordning deployment: docker-compose (local) + Tengil compose package.
+# spisordning: LOCAL DEV ONLY. Spins up its own ephemeral postgres + applies migrations
+# to it — safe to blow away and recreate, never points at real household data.
 #
-# Local usage:
 #   cp .env.example .env   # fill in Willys credentials
 #   docker compose up -d
 #
-# Tengil usage:
-#   Deploy via POST /api/apps with type=compose (see
-#   openspec/changes/deploy-food-brain-to-proxmox/). Tengil does not support `build:`,
-#   so the Tengil compose file uses pre-pulled GHCR images for every service (mcp-server
-#   included, via an entrypoint override) rather than the local `build:` below.
+# For the REAL Proxmox deployment, use docker-compose.proxmox.yml instead — spisordning
+# already has a real database (main-postgres, VMID 2327, 192.168.1.93:5432, real household
+# data; see docs/infrastructure/deployment-and-access.md) and this file must never be
+# pointed at it. Deploy via:
+#   katla stack deploy -node proxmox -compose docker-compose.proxmox.yml -env-file .env.proxmox
+#
+# willys-adapter is intentionally NOT a service here either: a standalone instance already
+# runs on Proxmox (stack:willys-adapter, VMID 2335) logged into the real Willys account.
+# Local food-brain points ADAPTER_URL at it directly (below) rather than running a second,
+# separately-logged-in adapter locally. (Longer-term, folding store-clients' generated Go
+# client into food-brain directly and retiring the adapter service entirely is its own
+# OpenSpec change: embed-retailer-clients-in-food-brain.)
 
 services:
   postgres:
@@ -32,30 +39,26 @@ services:
   # before the app starts. The image must include the `migrate` command (see
   # establish-migration-and-postgres-19). food-brain depends on this completing.
   migrate:
-    image: ghcr.io/androidand/spisordning/food-brain:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
     restart: "no"
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgres://spisordning:${POSTGRES_PASSWORD}@postgres:5432/spisordning?sslmode=disable
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: '5432'
+      POSTGRES_DB: spisordning
+      POSTGRES_USER: spisordning
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     entrypoint: ["food-brain"]
     command: ["migrate", "up", "--seed"]
 
-  willys-adapter:
-    # Built + published by the store-clients repo's CI (willys-adapter-image.yml);
-    # the image lives under that repo's own GHCR namespace.
-    image: ghcr.io/androidand/store-clients/willys-adapter:latest
-    restart: unless-stopped
-    environment:
-      ADAPTER_PORT: '8402'
-      WILLYS_USERNAME: ${WILLYS_USERNAME}
-      WILLYS_PASSWORD: ${WILLYS_PASSWORD}
-    ports:
-      - '8402:8402'
-
   food-brain:
-    image: ghcr.io/androidand/spisordning/food-brain:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
     restart: unless-stopped
     depends_on:
       postgres:
@@ -64,13 +67,19 @@ services:
         condition: service_completed_successfully
     environment:
       # food-brain reads postgres + homelab services from .env; see .env.example.
-      DATABASE_URL: postgres://spisordning:${POSTGRES_PASSWORD}@postgres:5432/spisordning?sslmode=disable
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: '5432'
+      POSTGRES_DB: spisordning
+      POSTGRES_USER: spisordning
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       TZ: Europe/Stockholm
       MEALIE_BASE_URL: ${MEALIE_BASE_URL:-http://hlab-mealie:9000}
       MEALIE_API_TOKEN: ${MEALIE_API_TOKEN:-}
       OLLA_OPENAI_BASE_URL: ${OLLA_OPENAI_BASE_URL:-}
       SKOLMATEN_BASE_URL: ${SKOLMATEN_BASE_URL:-}
-      ADAPTER_URL: ${ADAPTER_URL:-http://willys-adapter:8402}
+      # The standalone willys-adapter instance already running on Proxmox (see the
+      # header comment) — not a service in this compose file.
+      ADAPTER_URL: ${ADAPTER_URL:-http://192.168.1.171:8402}
     ports:
       - '8080:8080'
 
@@ -86,7 +95,11 @@ services:
     entrypoint: ["mcp-server"]
     command: []
     environment:
-      DATABASE_URL: postgres://spisordning:${POSTGRES_PASSWORD}@postgres:5432/spisordning?sslmode=disable
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: '5432'
+      POSTGRES_DB: spisordning
+      POSTGRES_USER: spisordning
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       SPISORNING_MCP_ADDR: ':8081'
     ports:
       - '8081:8081'

@@ -1,0 +1,61 @@
+# spisordning's REAL Proxmox deployment target — distinct from docker-compose.yml, which is
+# local-dev-only (spins up its own ephemeral postgres). This file deploys against
+# spisordning's existing, real database:
+#
+#   main-postgres — VMID 2327, 192.168.1.93:5432, Postgres 16, real household data.
+#   See docs/infrastructure/deployment-and-access.md for how this was found/confirmed and
+#   why it's the one to use. Do NOT add a postgres/migrate service here that creates a new
+#   database — spisordning already has one, and prior deploy attempts creating fresh
+#   instances is exactly the "million instances" problem this file exists to stop.
+#
+# Deploy:
+#   katla stack deploy -node proxmox -compose docker-compose.proxmox.yml -env-file .env.proxmox
+#
+# This intentionally has NO postgres/migrate/willys-adapter services:
+#   - postgres: main-postgres already exists (above) — connect to it, don't create another.
+#   - migrate: main-postgres is currently behind (migrations 000016-000021 pending per
+#     `food-brain migrate status`). Applying those against real household data needs its own
+#     deliberate, confirmed step — CI's persistence integration tests are currently failing
+#     against this same migration chain, so don't run `migrate up` here until that's
+#     understood. Run it manually (same POSTGRES_* vars as below) once ready.
+#   - willys-adapter: already running standalone (stack:willys-adapter, VMID 2335,
+#     192.168.1.171:8402, live Willys session) — see docker-compose.yml's header comment.
+
+services:
+  food-brain:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: 192.168.1.93
+      POSTGRES_PORT: '5432'
+      POSTGRES_DB: spisordning
+      POSTGRES_USER: spisordning
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      TZ: Europe/Stockholm
+      MEALIE_BASE_URL: ${MEALIE_BASE_URL:-http://hlab-mealie:9000}
+      MEALIE_API_TOKEN: ${MEALIE_API_TOKEN:-}
+      OLLA_OPENAI_BASE_URL: ${OLLA_OPENAI_BASE_URL:-}
+      SKOLMATEN_BASE_URL: ${SKOLMATEN_BASE_URL:-}
+      ADAPTER_URL: ${ADAPTER_URL:-http://192.168.1.171:8402}
+    ports:
+      - '8080:8080'
+
+  mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    # The image ENTRYPOINT is food-brain; override it to run the MCP server.
+    entrypoint: ["mcp-server"]
+    command: []
+    environment:
+      POSTGRES_HOST: 192.168.1.93
+      POSTGRES_PORT: '5432'
+      POSTGRES_DB: spisordning
+      POSTGRES_USER: spisordning
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      SPISORNING_MCP_ADDR: ':8081'
+    ports:
+      - '8081:8081'
