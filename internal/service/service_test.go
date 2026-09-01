@@ -422,6 +422,9 @@ func (f *fakeStore) ListMealPlans(ctx context.Context) ([]persistence.MealPlan, 
 	}
 	return out, nil
 }
+func (f *fakeStore) ListShoppingListItems(_ context.Context, _ domain.ShoppingListID) ([]persistence.ShoppingListItem, error) {
+	return nil, nil
+}
 func (f *fakeStore) CreateRecipeFamily(ctx context.Context, fam persistence.RecipeFamily) error { return nil }
 func (f *fakeStore) GetRecipeFamily(ctx context.Context, id domain.RecipeFamilyID) (persistence.RecipeFamily, error) {
 	return persistence.RecipeFamily{}, persistence.ErrNoRows
@@ -516,6 +519,17 @@ func (f *fakeStore) ListExpiringLots(ctx context.Context, within time.Duration) 
 		{ID: domain.NewInventoryLotID(), IngredientID: domain.IngredientIDForName("mjolk"), LocationID: domain.NewInventoryLocationID(), Quantity: 1, Unit: "L", Confidence: domain.ConfidenceExact, BestBefore: &[]time.Time{time.Now().Add(24 * time.Hour)}[0]},
 	}, nil
 }
+func (f *fakeStore) UpsertFood(_ context.Context, _ persistence.Food) error { return nil }
+func (f *fakeStore) UpsertNutrients(_ context.Context, _ int, _ []persistence.Nutrient) error { return nil }
+func (f *fakeStore) GetFood(_ context.Context, _ int) (persistence.Food, error) { return persistence.Food{}, persistence.ErrNoRows }
+func (f *fakeStore) ListFoods(_ context.Context) ([]persistence.Food, error) { return nil, nil }
+func (f *fakeStore) CountFoods(_ context.Context) (int, error) { return 0, nil }
+func (f *fakeStore) UpsertProductMapping(_ context.Context, _ persistence.ProductMapping) error { return nil }
+func (f *fakeStore) GetProductMappingByGTIN(_ context.Context, _ string) (persistence.ProductMapping, error) { return persistence.ProductMapping{}, persistence.ErrNoRows }
+func (f *fakeStore) GetProductMappingByDabasARIdent(_ context.Context, _ string) (persistence.ProductMapping, error) { return persistence.ProductMapping{}, persistence.ErrNoRows }
+func (f *fakeStore) GetNutritionForFood(_ context.Context, _ int) ([]persistence.Nutrient, error) { return nil, nil }
+func (f *fakeStore) UpsertNutritionSyncStatus(_ context.Context, _ persistence.NutritionSyncStatus) error { return nil }
+func (f *fakeStore) GetNutritionSyncStatus(_ context.Context, _ string) (persistence.NutritionSyncStatus, error) { return persistence.NutritionSyncStatus{}, persistence.ErrNoRows }
 
 // fakeTx is a minimal no-op persistence.Tx for tests.
 type fakeTx struct{}

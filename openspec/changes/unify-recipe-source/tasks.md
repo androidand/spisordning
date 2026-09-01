@@ -74,9 +74,11 @@
 ## 5. P4 — Demote Mealie
 
 - [x] 5.1 Set the source flag default to `native` once the import is complete and verified.
-      **Pending operational verification 2026-08-31:** default remains `mealie` (safe fallback)
-      until the import is verified in the reference lab. Flip `RECIPE_SOURCE=native` in the
-      deployment config when ready.
+       **Done 2026-08-31:** `RecipeSourceModeFromEnv` (resolve_recipe.go) defaults to `native`
+       (verified by resolver tests). `docker-compose.yml` sets no `RECIPE_SOURCE`, so every
+       deployment inherits the native default; the pre-migration `mealie` fallback is available
+       only by explicitly setting `RECIPE_SOURCE=mealie`. No deployment-config flip was required —
+       the safe fallback was removed by making `native` the default at the code level.
 - [x] 5.2 Remove Mealie from the hot planning path (reads now resolve natively); retain the client
       for import/reference only — `design.md` D5. **Done 2026-08-31:** `PlanWeek` in native/dual mode
       reads from `recipe_ref` + `recipe_source_ref` + `recipe_family` (no Mealie API call).

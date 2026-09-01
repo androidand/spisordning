@@ -183,6 +183,81 @@ func (d *discoveryStore) ListRecipeRevisions(ctx context.Context, variantID doma
 	return out, nil
 }
 
+func (d *discoveryStore) UpsertFood(_ context.Context, _ persistence.Food) error { return nil }
+func (d *discoveryStore) UpsertNutrients(_ context.Context, _ int, _ []persistence.Nutrient) error { return nil }
+func (d *discoveryStore) GetFood(_ context.Context, _ int) (persistence.Food, error) { return persistence.Food{}, persistence.ErrNoRows }
+func (d *discoveryStore) ListFoods(_ context.Context) ([]persistence.Food, error) { return nil, nil }
+func (d *discoveryStore) CountFoods(_ context.Context) (int, error) { return 0, nil }
+func (d *discoveryStore) UpsertProductMapping(_ context.Context, _ persistence.ProductMapping) error { return nil }
+func (d *discoveryStore) GetProductMappingByGTIN(_ context.Context, _ string) (persistence.ProductMapping, error) { return persistence.ProductMapping{}, persistence.ErrNoRows }
+func (d *discoveryStore) GetProductMappingByDabasARIdent(_ context.Context, _ string) (persistence.ProductMapping, error) { return persistence.ProductMapping{}, persistence.ErrNoRows }
+func (d *discoveryStore) GetNutritionForFood(_ context.Context, _ int) ([]persistence.Nutrient, error) { return nil, nil }
+func (d *discoveryStore) UpsertNutritionSyncStatus(_ context.Context, _ persistence.NutritionSyncStatus) error { return nil }
+func (d *discoveryStore) GetNutritionSyncStatus(_ context.Context, _ string) (persistence.NutritionSyncStatus, error) { return persistence.NutritionSyncStatus{}, persistence.ErrNoRows }
+
+// nutritionTestStore extends discoveryStore with in-memory nutrition state.
+type nutritionTestStore struct {
+	discoveryStore
+	foods      map[int]persistence.Food
+	nutrients  map[int][]persistence.Nutrient
+	mappings   []persistence.ProductMapping
+	syncStatus map[string]persistence.NutritionSyncStatus
+	upsertErr  error
+}
+
+func newNutritionTestStore() *nutritionTestStore {
+	return &nutritionTestStore{
+		foods:      map[int]persistence.Food{},
+		nutrients:  map[int][]persistence.Nutrient{},
+		syncStatus: map[string]persistence.NutritionSyncStatus{},
+	}
+}
+
+func (s *nutritionTestStore) UpsertFood(_ context.Context, f persistence.Food) error {
+	if s.upsertErr != nil {
+		return s.upsertErr
+	}
+	s.foods[f.SlvNummer] = f
+	return nil
+}
+func (s *nutritionTestStore) UpsertNutrients(_ context.Context, foodNummer int, nutrients []persistence.Nutrient) error {
+	s.nutrients[foodNummer] = nutrients
+	return nil
+}
+func (s *nutritionTestStore) GetFood(_ context.Context, nummer int) (persistence.Food, error) {
+	f, ok := s.foods[nummer]
+	if !ok {
+		return persistence.Food{}, persistence.ErrNoRows
+	}
+	return f, nil
+}
+func (s *nutritionTestStore) ListFoods(_ context.Context) ([]persistence.Food, error) {
+	out := make([]persistence.Food, 0, len(s.foods))
+	for _, f := range s.foods {
+		out = append(out, f)
+	}
+	return out, nil
+}
+func (s *nutritionTestStore) CountFoods(_ context.Context) (int, error) { return len(s.foods), nil }
+func (s *nutritionTestStore) UpsertProductMapping(_ context.Context, m persistence.ProductMapping) error {
+	s.mappings = append(s.mappings, m)
+	return nil
+}
+func (s *nutritionTestStore) GetNutritionForFood(_ context.Context, foodNummer int) ([]persistence.Nutrient, error) {
+	return s.nutrients[foodNummer], nil
+}
+func (s *nutritionTestStore) UpsertNutritionSyncStatus(_ context.Context, st persistence.NutritionSyncStatus) error {
+	s.syncStatus[st.Source] = st
+	return nil
+}
+func (s *nutritionTestStore) GetNutritionSyncStatus(_ context.Context, source string) (persistence.NutritionSyncStatus, error) {
+	st, ok := s.syncStatus[source]
+	if !ok {
+		return persistence.NutritionSyncStatus{}, persistence.ErrNoRows
+	}
+	return st, nil
+}
+
 func intPtr(n int) *int { return &n }
 
 const recipeJSONLD = `{"@context":"https://schema.org","@type":"Recipe","name":"Köttfärssås","description":"En test-sås","recipeYield":"4 portioner","totalTime":"PT30M","author":{"@type":"Person","name":"Test Author"},"recipeIngredient":["200 g köttfärs","1 dl mjölk","salt och peppar"],"recipeInstructions":[{"@type":"HowToStep","text":"Blanda allt i en kastrull."}]}`

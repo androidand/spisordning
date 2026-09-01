@@ -561,6 +561,50 @@ type InspirationSuggestion struct {
 	TotalIngredients     int      `json:"total_ingredients"`
 }
 
+// JottedListInput defines model for JottedListInput.
+type JottedListInput struct {
+	Items []JottedListItem `json:"items"`
+}
+
+// JottedListItem defines model for JottedListItem.
+type JottedListItem struct {
+	Item     *string  `json:"item,omitempty"`
+	Quantity *float32 `json:"quantity,omitempty"`
+	Unit     *string  `json:"unit,omitempty"`
+}
+
+// JottedListItemRecommendation defines model for JottedListItemRecommendation.
+type JottedListItemRecommendation struct {
+	Cheapest *struct {
+		Available         *bool   `json:"available,omitempty"`
+		Error             *string `json:"error,omitempty"`
+		Price             *string `json:"price,omitempty"`
+		PriceMinor        *int    `json:"price_minor,omitempty"`
+		ProductName       *string `json:"product_name,omitempty"`
+		Retailer          *string `json:"retailer,omitempty"`
+		RetailerProductId *string `json:"retailer_product_id,omitempty"`
+	} `json:"cheapest,omitempty"`
+	IngredientId *string  `json:"ingredient_id,omitempty"`
+	Label        *string  `json:"label,omitempty"`
+	Quantity     *float32 `json:"quantity,omitempty"`
+	Results      *[]struct {
+		Available         *bool   `json:"available,omitempty"`
+		Error             *string `json:"error,omitempty"`
+		Price             *string `json:"price,omitempty"`
+		PriceMinor        *int    `json:"price_minor,omitempty"`
+		ProductName       *string `json:"product_name,omitempty"`
+		Retailer          *string `json:"retailer,omitempty"`
+		RetailerProductId *string `json:"retailer_product_id,omitempty"`
+	} `json:"results,omitempty"`
+	Unit       *string `json:"unit,omitempty"`
+	Unresolved *bool   `json:"unresolved,omitempty"`
+}
+
+// JottedListRecommendation defines model for JottedListRecommendation.
+type JottedListRecommendation struct {
+	Items []JottedListItemRecommendation `json:"items"`
+}
+
 // MealEvent defines model for MealEvent.
 type MealEvent struct {
 	CreatedAt      time.Time          `json:"created_at"`
@@ -784,6 +828,9 @@ type PlanRunInput struct {
 
 	// Days number of dinners (default: 7)
 	Days *int `json:"days,omitempty"`
+
+	// School skolmaten school slug; dinner planning dedups against that school's weekly menu when set
+	School *string `json:"school,omitempty"`
 
 	// Week ISO week, e.g. 2026-W31 (default: next week)
 	Week *string `json:"week,omitempty"`
@@ -1312,3 +1359,6 @@ type AddShoppingListItemJSONRequestBody = ShoppingListItemNew
 
 // ToggleShoppingListItemJSONRequestBody defines body for ToggleShoppingListItem for application/json ContentType.
 type ToggleShoppingListItemJSONRequestBody ToggleShoppingListItemJSONBody
+
+// SuggestJottedListJSONRequestBody defines body for SuggestJottedList for application/json ContentType.
+type SuggestJottedListJSONRequestBody = JottedListInput

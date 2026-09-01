@@ -112,6 +112,7 @@ func (s *importStore) GetMealEvent(_ context.Context, _ domain.MealEventID) (per
 	return persistence.MealEvent{}, persistence.ErrNoRows
 }
 func (s *importStore) ListMealPlans(_ context.Context) ([]persistence.MealPlan, error) { return nil, nil }
+func (s *importStore) ListShoppingListItems(_ context.Context, _ domain.ShoppingListID) ([]persistence.ShoppingListItem, error) { return nil, nil }
 func (s *importStore) GetIngredientMapping(_ context.Context, _ string) (persistence.IngredientMapping, error) {
 	return persistence.IngredientMapping{}, persistence.ErrNoRows
 }
@@ -307,6 +308,17 @@ func (s *importStore) UpsertRecipeSourceRef(_ context.Context, r persistence.Rec
 func (s *importStore) ListUnmappedMealieRecipes(_ context.Context) ([]string, error) {
 	return s.unmapped, nil
 }
+func (s *importStore) UpsertFood(_ context.Context, _ persistence.Food) error { return nil }
+func (s *importStore) UpsertNutrients(_ context.Context, _ int, _ []persistence.Nutrient) error { return nil }
+func (s *importStore) GetFood(_ context.Context, _ int) (persistence.Food, error) { return persistence.Food{}, persistence.ErrNoRows }
+func (s *importStore) ListFoods(_ context.Context) ([]persistence.Food, error) { return nil, nil }
+func (s *importStore) CountFoods(_ context.Context) (int, error) { return 0, nil }
+func (s *importStore) UpsertProductMapping(_ context.Context, _ persistence.ProductMapping) error { return nil }
+func (s *importStore) GetProductMappingByGTIN(_ context.Context, _ string) (persistence.ProductMapping, error) { return persistence.ProductMapping{}, persistence.ErrNoRows }
+func (s *importStore) GetProductMappingByDabasARIdent(_ context.Context, _ string) (persistence.ProductMapping, error) { return persistence.ProductMapping{}, persistence.ErrNoRows }
+func (s *importStore) GetNutritionForFood(_ context.Context, _ int) ([]persistence.Nutrient, error) { return nil, nil }
+func (s *importStore) UpsertNutritionSyncStatus(_ context.Context, _ persistence.NutritionSyncStatus) error { return nil }
+func (s *importStore) GetNutritionSyncStatus(_ context.Context, _ string) (persistence.NutritionSyncStatus, error) { return persistence.NutritionSyncStatus{}, persistence.ErrNoRows }
 
 // stubMealieClient implements the minimal Mealie interface for import tests.
 type stubMealieClient struct {

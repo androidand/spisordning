@@ -50,14 +50,21 @@
 
 ## 5. Data model design
 
-- [ ] 5.1 Design `foods` table schema: `slv_nummer` (PK), `namn`, `vetenskapligtNamn`,
-      `livsmedels_typ`, `projekt`, `version`, synced_at
-- [ ] 5.2 Design `nutrients` table schema: `food_nummer` (FK), `eurofir_kod`,
-      `namn`, `varde`, `enhet`, `metodtyp`, synced_at
-- [ ] 5.3 Design `product_mappings` table: `gtin` (nullable), `slv_nummer` (nullable),
-      `dabas_arident` (nullable), `canonical_ingredient_id` (FK), mapped_at
-- [ ] 5.4 Define the cross-reference strategy: SLV nummer is the canonical key;
-      Dabas GTINs and Aridents map to it; Matpriskollen keys map via GTIN
+- [x] 5.1 Design `foods` table schema: `slv_nummer` (PK), `namn`, `vetenskapligtNamn`,
+       `livsmedels_typ`, `projekt`, `version`, synced_at
+- [x] 5.2 Design `nutrients` table schema: `food_nummer` (FK), `eurofir_kod`,
+       `namn`, `varde`, `enhet`, `metodtyp`, synced_at
+- [x] 5.3 Design `product_mappings` table: `gtin` (nullable), `slv_nummer` (nullable),
+       `dabas_arident` (nullable), `canonical_ingredient_id` (FK), mapped_at
+- [x] 5.4 Define the cross-reference strategy: SLV nummer is the canonical key;
+       Dabas GTINs and Aridents map to it; Matpriskollen keys map via GTIN
+       **Done 2026-09-01:** migration `000021_nutrition.sql` implements all three tables
+       (`foods` PK on `slv_nummer`; `nutrients` FK → foods, PK (food_nummer, namn, enhet));
+       `product_mappings` with nullable GTIN/Dabas-AR-ident/`slv_nummer`/`canonical_ingredient_id`
+       (FK → ingredient). Cross-reference strategy §5.4: `slv_nummer` is the canonical key;
+       Dabas GTINs + Aridents resolve through `product_mappings` → foods; Matpriskollen keys
+       (GTIN) resolve the same way. `canonical_ingredient_id` is the planner wiring point for
+       task 7.2.
 
 ## 6. Sync job
 

@@ -109,6 +109,7 @@ func buildMCPDeps(logger *slog.Logger) mcptools.Dependencies {
 	deps.Reactions = adapter
 	deps.Requirements = adapter
 	deps.ShoppingList = adapter
+	deps.Coverage = adapter
 	deps.Compare = adapter
 	deps.Wishlist = adapter
 	deps.Discovery = adapter

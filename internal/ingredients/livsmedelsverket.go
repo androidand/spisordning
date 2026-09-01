@@ -17,6 +17,7 @@ import (
 )
 
 // Språk controls the language of returned names. 1=Swedish, 2=English.
+// Sprak is the ASCII alias for Språk (avoids non-ASCII identifiers in some tooling).
 type Språk int
 
 const (

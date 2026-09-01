@@ -663,22 +663,39 @@ paths:
                 items: { $ref: '#/components/schemas/ShoppingCart' }
 
   /shopping-lists/{listId}/push/to-cart:
-    parameters:
-      - $ref: '#/components/parameters/ShoppingListId'
-    post:
-      summary: Create a cart checkpoint from a pushed shopping list
-      operationId: toCart
-      tags: [shopping]
-      parameters:
-        - name: retailer
-          in: query
-          schema: { type: string, default: willys }
-      responses:
-        '201':
-          description: cart checkpoint created
-          content:
-            application/json: { schema: { $ref: '#/components/schemas/ShoppingCart' } }
-        '404': { $ref: '#/components/responses/NotFound' }
+     parameters:
+       - $ref: '#/components/parameters/ShoppingListId'
+     post:
+       summary: Create a cart checkpoint from a pushed shopping list
+       operationId: toCart
+       tags: [shopping]
+       parameters:
+         - name: retailer
+           in: query
+           schema: { type: string, default: willys }
+       responses:
+         '201':
+           description: cart checkpoint created
+           content:
+             application/json: { schema: { $ref: '#/components/schemas/ShoppingCart' } }
+         '404': { $ref: '#/components/responses/NotFound' }
+
+  /shopping/suggest:
+     post:
+       summary: Price a jotted free-text shopping list across retailers
+       operationId: suggestJottedList
+       tags: [shopping]
+       requestBody:
+         required: true
+         content:
+           application/json:
+             schema: { $ref: '#/components/schemas/JottedListInput' }
+       responses:
+         '200':
+           description: price comparison for the jotted list
+           content:
+             application/json: { schema: { $ref: '#/components/schemas/JottedListRecommendation' } }
+         '400': { $ref: '#/components/responses/NotFound' }
 
   /orders:
     get:
@@ -1898,6 +1915,7 @@ components:
         week: { type: string, description: "ISO week, e.g. 2026-W31 (default: next week)" }
         days: { type: integer, minimum: 1, maximum: 10, description: "number of dinners (default: 7)" }
         create_wishlist: { type: boolean, description: "resolve products and create Willys wishlist" }
+        school: { type: string, description: "skolmaten school slug; dinner planning dedups against that school's weekly menu when set" }
 
     PlanRunResult:
       type: object
@@ -1957,6 +1975,61 @@ components:
         label: { type: string, nullable: true }
         quantity: { type: number }
         unit: { type: string }
+
+    JottedListItem:
+      type: object
+      properties:
+        item: { type: string }
+        quantity: { type: number }
+        unit: { type: string }
+
+    JottedListInput:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/JottedListItem' }
+
+    JottedListItemRecommendation:
+      type: object
+      properties:
+        label: { type: string }
+        quantity: { type: number }
+        unit: { type: string }
+        ingredient_id: { type: string, nullable: true }
+        unresolved: { type: boolean }
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              retailer: { type: string }
+              available: { type: boolean }
+              retailer_product_id: { type: string, nullable: true }
+              product_name: { type: string, nullable: true }
+              price_minor: { type: integer, nullable: true }
+              price: { type: string, nullable: true }
+              error: { type: string, nullable: true }
+        cheapest:
+          type: object
+          nullable: true
+          properties:
+            retailer: { type: string }
+            available: { type: boolean }
+            retailer_product_id: { type: string, nullable: true }
+            product_name: { type: string, nullable: true }
+            price_minor: { type: integer, nullable: true }
+            price: { type: string, nullable: true }
+            error: { type: string, nullable: true }
+
+    JottedListRecommendation:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/JottedListItemRecommendation' }
 
     RetailerListBinding:
       type: object

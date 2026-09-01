@@ -219,6 +219,8 @@ func RegisterHandlers(mux *http.ServeMux, deps Dependencies) {
 	if deps.PriceComparison != nil {
 		h := compareHandler{svc: deps.PriceComparison}
 		mux.HandleFunc("POST /compare", h.compare)
+		hj := jottedListHandler{svc: deps.PriceComparison}
+		mux.HandleFunc("POST /shopping/suggest", hj.suggest)
 	}
 	if deps.Favorites != nil {
 		h := favoritesHandler{svc: deps.Favorites}

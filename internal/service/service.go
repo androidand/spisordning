@@ -44,6 +44,7 @@ type Store interface {
 	ListDecisions(ctx context.Context, planID domain.MealPlanID) ([]persistence.MealPlanDecision, error)
 	InsertShoppingRequirement(ctx context.Context, r persistence.ShoppingRequirement) error
 	ListShoppingRequirements(ctx context.Context, planID domain.MealPlanID) ([]persistence.ShoppingRequirement, error)
+	ListShoppingListItems(ctx context.Context, listID domain.ShoppingListID) ([]persistence.ShoppingListItem, error)
 	UpsertIngredientMapping(ctx context.Context, m persistence.IngredientMapping) error
 	UpsertIngredient(ctx context.Context, i persistence.Ingredient) error
 	AddRecipeIngredient(ctx context.Context, ri persistence.RecipeIngredient) error
@@ -110,7 +111,19 @@ type Store interface {
 	ListImportCandidates(ctx context.Context, status *string) ([]persistence.ImportCandidate, error)
 	ListCandidateIngredients(ctx context.Context, candidateID domain.RecipeImportCandidateID) ([]persistence.ImportCandidateIngredient, error)
 	SetCandidateStatus(ctx context.Context, id domain.RecipeImportCandidateID, status string) error
-	SetCandidatePromoted(ctx context.Context, id domain.RecipeImportCandidateID, variantID domain.RecipeVariantID) error
+ 	SetCandidatePromoted(ctx context.Context, id domain.RecipeImportCandidateID, variantID domain.RecipeVariantID) error
+ 	// Nutrition operations (research-nutrition-data-sources).
+ 	UpsertFood(ctx context.Context, f persistence.Food) error
+ 	UpsertNutrients(ctx context.Context, foodNummer int, nutrients []persistence.Nutrient) error
+ 	GetFood(ctx context.Context, nummer int) (persistence.Food, error)
+ 	ListFoods(ctx context.Context) ([]persistence.Food, error)
+ 	CountFoods(ctx context.Context) (int, error)
+ 	UpsertProductMapping(ctx context.Context, m persistence.ProductMapping) error
+ 	GetProductMappingByGTIN(ctx context.Context, gtin string) (persistence.ProductMapping, error)
+ 	GetProductMappingByDabasARIdent(ctx context.Context, arident string) (persistence.ProductMapping, error)
+ 	GetNutritionForFood(ctx context.Context, foodNummer int) ([]persistence.Nutrient, error)
+ 	UpsertNutritionSyncStatus(ctx context.Context, s persistence.NutritionSyncStatus) error
+ 	GetNutritionSyncStatus(ctx context.Context, source string) (persistence.NutritionSyncStatus, error)
 }
 
 // txConn is the minimal transaction surface the Meals service needs.

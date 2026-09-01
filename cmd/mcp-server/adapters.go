@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/androidand/spisordning/internal/config"
+	"github.com/androidand/spisordning/internal/coverage"
 	"github.com/androidand/spisordning/internal/domain"
 	"github.com/androidand/spisordning/internal/dto"
 	"github.com/androidand/spisordning/internal/mcptools"
@@ -701,6 +702,42 @@ func (a mcpStoreAdapter) CreateShoppingList(ctx context.Context, in mcptools.Cre
 		Status: "active",
 		Items:  len(in.Items),
 	}, nil
+}
+
+// CheckCoverage compares a filled shopping list against a plan's persisted
+// shopping requirements and reports per-ingredient coverage. It delegates to the
+// application-layer coverage service, which is the single source of truth for
+// the covered/short/missing computation.
+func (a mcpStoreAdapter) CheckCoverage(ctx context.Context, in mcptools.CheckCoverageInput) (mcptools.CoverageReport, error) {
+	listID, err := domain.ParseShoppingListID(in.ShoppingListID)
+	if err != nil {
+		return mcptools.CoverageReport{}, fmt.Errorf("check coverage: invalid shopping_list_id: %w", err)
+	}
+	planID, err := domain.ParseMealPlanID(in.PlanID)
+	if err != nil {
+		return mcptools.CoverageReport{}, fmt.Errorf("check coverage: invalid plan_id: %w", err)
+	}
+	rep, err := service.NewCoverageService(a.db).CheckCoverage(ctx, listID, planID)
+	if err != nil {
+		return mcptools.CoverageReport{}, err
+	}
+	out := mcptools.CoverageReport{
+		ShortCount:     rep.ShortCount,
+		MissingCount:   rep.MissingCount,
+		NotPlanDerived: rep.NotPlanDerived,
+	}
+	for _, l := range rep.Lines {
+		out.Lines = append(out.Lines, mcptools.CoverageLine{
+			IngredientID:   l.Key.IngredientID,
+			IngredientName: l.Name,
+			Unit:           l.Key.Unit,
+			Status:         coverage.StatusString(l.Status),
+			Required:       l.Required,
+			Supplied:       l.Supplied,
+			Shortfall:      l.Shortfall,
+		})
+	}
+	return out, nil
 }
 
 // resolveShoppingIngredientID resolves a shopping requirement to a canonical

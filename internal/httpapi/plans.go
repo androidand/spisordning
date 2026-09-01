@@ -16,6 +16,11 @@ type PlanRunInput struct {
 	Week           string `json:"week,omitempty"`
 	Days           int    `json:"days,omitempty"`
 	CreateWishlist bool   `json:"create_wishlist,omitempty"`
+	// School is an optional skolmaten school slug. When set, dinner planning
+	// dedups candidates against that school's weekly menu. Empty disables the
+	// signal. Defaults to the SKOLMATEN_SCHOOL config value when the caller
+	// omits it.
+	School string `json:"school,omitempty"`
 }
 
 // PlanRunResult is the response body for POST /plans/run (api/openapi.yaml PlanRunResult).

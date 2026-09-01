@@ -169,6 +169,9 @@ func (s *planStore) ListMealPlans(_ context.Context) ([]persistence.MealPlan, er
 	}
 	return nil, nil
 }
+func (s *planStore) ListShoppingListItems(_ context.Context, _ domain.ShoppingListID) ([]persistence.ShoppingListItem, error) {
+	return nil, nil
+}
 
 func (s *planStore) SetMealPlanStatus(_ context.Context, id domain.MealPlanID, status string) error {
 	if s.mealPlan.ID == id {
@@ -368,6 +371,17 @@ func (s *planStore) CreateShoppingListWithItems(_ context.Context, _ persistence
 func (s *planStore) CreateOrUpdateRetailerListBinding(_ context.Context, _ persistence.RetailerListBinding) error {
 	return nil
 }
+func (s *planStore) UpsertFood(_ context.Context, _ persistence.Food) error { return nil }
+func (s *planStore) UpsertNutrients(_ context.Context, _ int, _ []persistence.Nutrient) error { return nil }
+func (s *planStore) GetFood(_ context.Context, _ int) (persistence.Food, error) { return persistence.Food{}, persistence.ErrNoRows }
+func (s *planStore) ListFoods(_ context.Context) ([]persistence.Food, error) { return nil, nil }
+func (s *planStore) CountFoods(_ context.Context) (int, error) { return 0, nil }
+func (s *planStore) UpsertProductMapping(_ context.Context, _ persistence.ProductMapping) error { return nil }
+func (s *planStore) GetProductMappingByGTIN(_ context.Context, _ string) (persistence.ProductMapping, error) { return persistence.ProductMapping{}, persistence.ErrNoRows }
+func (s *planStore) GetProductMappingByDabasARIdent(_ context.Context, _ string) (persistence.ProductMapping, error) { return persistence.ProductMapping{}, persistence.ErrNoRows }
+func (s *planStore) GetNutritionForFood(_ context.Context, _ int) ([]persistence.Nutrient, error) { return nil, nil }
+func (s *planStore) UpsertNutritionSyncStatus(_ context.Context, _ persistence.NutritionSyncStatus) error { return nil }
+func (s *planStore) GetNutritionSyncStatus(_ context.Context, _ string) (persistence.NutritionSyncStatus, error) { return persistence.NutritionSyncStatus{}, persistence.ErrNoRows }
 
 func TestPlanWeek_NativeMode_NoMealie(t *testing.T) {
 	famA := domain.NewRecipeFamilyID()

@@ -101,6 +101,9 @@ func (s *testStore) RecordObservation(_ context.Context, o persistence.Preferenc
 func (s *testStore) CreateMealEvent(_ context.Context, _ domain.RecipeRefID, _ time.Time, _ *domain.MealPlanID, _ *time.Time) (domain.MealEventID, error) {
 	return domain.MealEventID{}, nil
 }
+func (s *testStore) ListShoppingListItems(_ context.Context, _ domain.ShoppingListID) ([]persistence.ShoppingListItem, error) {
+	return nil, nil
+}
 func (s *testStore) AddMealReaction(_ context.Context, r persistence.MealReaction) error { return nil }
 func (s *testStore) ListMealReactions(_ context.Context, _ domain.MealEventID) ([]persistence.MealReaction, error) {
 	return nil, nil
@@ -304,6 +307,17 @@ func (s *testStore) UpsertRecipeSourceRef(_ context.Context, r persistence.Recip
 func (s *testStore) ListUnmappedMealieRecipes(_ context.Context) ([]string, error) {
 	return nil, nil
 }
+func (s *testStore) UpsertFood(_ context.Context, _ persistence.Food) error { return nil }
+func (s *testStore) UpsertNutrients(_ context.Context, _ int, _ []persistence.Nutrient) error { return nil }
+func (s *testStore) GetFood(_ context.Context, _ int) (persistence.Food, error) { return persistence.Food{}, persistence.ErrNoRows }
+func (s *testStore) ListFoods(_ context.Context) ([]persistence.Food, error) { return nil, nil }
+func (s *testStore) CountFoods(_ context.Context) (int, error) { return 0, nil }
+func (s *testStore) UpsertProductMapping(_ context.Context, _ persistence.ProductMapping) error { return nil }
+func (s *testStore) GetProductMappingByGTIN(_ context.Context, _ string) (persistence.ProductMapping, error) { return persistence.ProductMapping{}, persistence.ErrNoRows }
+func (s *testStore) GetProductMappingByDabasARIdent(_ context.Context, _ string) (persistence.ProductMapping, error) { return persistence.ProductMapping{}, persistence.ErrNoRows }
+func (s *testStore) GetNutritionForFood(_ context.Context, _ int) ([]persistence.Nutrient, error) { return nil, nil }
+func (s *testStore) UpsertNutritionSyncStatus(_ context.Context, _ persistence.NutritionSyncStatus) error { return nil }
+func (s *testStore) GetNutritionSyncStatus(_ context.Context, _ string) (persistence.NutritionSyncStatus, error) { return persistence.NutritionSyncStatus{}, persistence.ErrNoRows }
 
 func TestResolveRecipe_MealieMode(t *testing.T) {
 	db := &testStore{}

@@ -249,6 +249,9 @@ type resolverFakeStore struct {
 func (f *resolverFakeStore) GetOrCreateMealPlan(_ context.Context, weekStart time.Time) (persistence.MealPlan, error) {
 	return persistence.MealPlan{ID: f.planID, WeekStart: weekStart, Status: "draft"}, nil
 }
+func (f *resolverFakeStore) ListShoppingListItems(_ context.Context, _ domain.ShoppingListID) ([]persistence.ShoppingListItem, error) {
+	return nil, nil
+}
 func (f *resolverFakeStore) GetRecipeRefByMealieID(_ context.Context, mealieRecipeID string) (persistence.RecipeRef, error) {
 	for _, r := range f.recipeRefs {
 		if r.MealieRecipeID == mealieRecipeID {
@@ -346,6 +349,17 @@ func (f *resolverFakeStore) ListShoppingRequirements(_ context.Context, _ domain
 }
 func (f *resolverFakeStore) UpsertIngredientMapping(_ context.Context, _ persistence.IngredientMapping) error { return nil }
 func (f *resolverFakeStore) UpsertIngredient(_ context.Context, _ persistence.Ingredient) error { return nil }
+func (f *resolverFakeStore) UpsertFood(_ context.Context, _ persistence.Food) error { return nil }
+func (f *resolverFakeStore) UpsertNutrients(_ context.Context, _ int, _ []persistence.Nutrient) error { return nil }
+func (f *resolverFakeStore) GetFood(_ context.Context, _ int) (persistence.Food, error) { return persistence.Food{}, persistence.ErrNoRows }
+func (f *resolverFakeStore) ListFoods(_ context.Context) ([]persistence.Food, error) { return nil, nil }
+func (f *resolverFakeStore) CountFoods(_ context.Context) (int, error) { return 0, nil }
+func (f *resolverFakeStore) UpsertProductMapping(_ context.Context, _ persistence.ProductMapping) error { return nil }
+func (f *resolverFakeStore) GetProductMappingByGTIN(_ context.Context, _ string) (persistence.ProductMapping, error) { return persistence.ProductMapping{}, persistence.ErrNoRows }
+func (f *resolverFakeStore) GetProductMappingByDabasARIdent(_ context.Context, _ string) (persistence.ProductMapping, error) { return persistence.ProductMapping{}, persistence.ErrNoRows }
+func (f *resolverFakeStore) GetNutritionForFood(_ context.Context, _ int) ([]persistence.Nutrient, error) { return nil, nil }
+func (f *resolverFakeStore) UpsertNutritionSyncStatus(_ context.Context, _ persistence.NutritionSyncStatus) error { return nil }
+func (f *resolverFakeStore) GetNutritionSyncStatus(_ context.Context, _ string) (persistence.NutritionSyncStatus, error) { return persistence.NutritionSyncStatus{}, persistence.ErrNoRows }
 func (f *resolverFakeStore) AddRecipeIngredient(_ context.Context, _ persistence.RecipeIngredient) error { return nil }
 func (f *resolverFakeStore) BeginTx(_ context.Context) (persistence.Tx, error) { return nil, nil }
 func (f *resolverFakeStore) CreateInventoryLocation(_ context.Context, _ persistence.InventoryLocation) error {

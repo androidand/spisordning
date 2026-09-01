@@ -37,6 +37,8 @@ type RetailerPriceResult struct {
 // ItemComparison is the cross-retailer comparison for one requirement.
 type ItemComparison struct {
 	Ingredient string                `json:"ingredient"`
+	// Label echoes the original free-text line that produced this comparison.
+	Label    string                `json:"label,omitempty"`
 	Results    []RetailerPriceResult `json:"results"`
 	Cheapest   *RetailerPriceResult  `json:"cheapest,omitempty"`
 	Unresolved bool                  `json:"unresolved"`

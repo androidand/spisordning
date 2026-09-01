@@ -3,6 +3,7 @@ package mcptools_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -384,6 +385,38 @@ func TestRegisterTools_NilServiceOmitsTool(t *testing.T) {
 			tool.Name == "get_plan" || tool.Name == "list_plans" || tool.Name == "set_plan_decision" {
 			t.Fatalf("unexpected tool %q registered for a nil service", tool.Name)
 		}
+	}
+}
+
+// TestResolveJottedList_Discoverable asserts the AI-facing surface advertises
+// resolve_jotted_list when Compare is wired and omits it when it is not, so an
+// agent listing tools sees it only where it can actually be called.
+func TestResolveJottedList_Discoverable(t *testing.T) {
+	has := func(cs *mcp.ClientSession) (bool, *mcp.Tool) {
+		res, err := cs.ListTools(context.Background(), &mcp.ListToolsParams{})
+		if err != nil {
+			t.Fatalf("list tools: %v", err)
+		}
+		for _, tool := range res.Tools {
+			if tool.Name == "resolve_jotted_list" {
+				return true, tool
+			}
+		}
+		return false, nil
+	}
+
+	csOn := connectServer(t, mcptools.Dependencies{Compare: &fakeCompareSvc{}})
+	present, tool := has(csOn)
+	if !present {
+		t.Fatal("resolve_jotted_list not advertised when Compare is wired")
+	}
+	if strings.TrimSpace(tool.Description) == "" {
+		t.Fatal("resolve_jotted_list registered with an empty description")
+	}
+
+	csOff := connectServer(t, mcptools.Dependencies{})
+	if off, _ := has(csOff); off {
+		t.Fatal("resolve_jotted_list advertised without a Compare service")
 	}
 }
 

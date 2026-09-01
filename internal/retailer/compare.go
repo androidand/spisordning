@@ -35,8 +35,11 @@ type RetailerResult struct {
 type ItemComparison struct {
 	// Requirement is the canonical requirement being compared.
 	Requirement domain.ShoppingRequirement
-	// Results has one entry per retailer, in RetailerOrder.
-	Results []RetailerResult
+	// Label echoes the free-text line that produced this comparison, so a
+	// handwritten list keeps a match between what the person wrote and the
+	// result row — useful especially for unresolved lines.
+	Label    string
+	Results  []RetailerResult
 	// Cheapest is the available result with the lowest PriceValue, or nil when
 	// no retailer has a comparable price.
 	Cheapest *RetailerResult

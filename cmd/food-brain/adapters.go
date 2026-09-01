@@ -85,7 +85,7 @@ func buildDependencies() httpapi.Dependencies {
 	// Dashboard aggregates tonight + pantry + expiring into one read model. The
 	// tonight provider adapts storeAdapter.GetTonight (httpapi view) to the
 	// service-layer tonightView so the service layer never imports httpapi.
-	adapter := storeAdapter{db: store, adapterURL: cfg.AdapterURL}
+	adapter := storeAdapter{db: store, adapterURL: cfg.AdapterURL, school: cfg.SkolmatenSchool}
 	deps.Dashboard = service.NewDashboard(store, dashboardTonightProvider{adapter}, deps.Pantry)
 	deps.IngredientAlias = service.NewIngredientAlias(store)
 	deps.Inspiration = service.NewInspiration(store)
@@ -121,7 +121,7 @@ func buildDependencies() httpapi.Dependencies {
 	// lists/items/push, and orders. It supersedes the old dto.PlanningService
 	// wiring for /plans (this Plans field is a strict superset — adds
 	// POST /plans/run and GET /plans/{id}/candidates).
-	adapters := storeAdapter{db: store, adapterURL: cfg.AdapterURL}
+	adapters := storeAdapter{db: store, adapterURL: cfg.AdapterURL, school: cfg.SkolmatenSchool}
 	deps.Tonight = adapters
 	deps.Reactions = adapters
 	deps.Plans = adapters
@@ -230,6 +230,7 @@ func toHTTPResult(r retailer.RetailerResult) httpapi.RetailerPriceResult {
 type storeAdapter struct {
 	db         *persistence.Store
 	adapterURL string
+	school     string
 }
 
 // dashboardTonightProvider adapts storeAdapter.GetTonight (which returns the
@@ -510,13 +511,24 @@ func (a storeAdapter) ListShoppingRequirements(ctx context.Context, planID strin
 	return out, nil
 }
 
+// resolvePlanSchool picks the skolmaten school slug for a plan run: the caller's
+// request wins, otherwise the configured default (SKOLMATEN_SCHOOL) applies, and
+// empty means the school-dedup signal stays off.
+func resolvePlanSchool(req httpapi.PlanRunInput, configured string) string {
+	if req.School != "" {
+		return req.School
+	}
+	return configured
+}
+
 func (a storeAdapter) RunPlan(ctx context.Context, in httpapi.PlanRunInput) (httpapi.PlanRunResult, error) {
+	school := resolvePlanSchool(in, a.school)
 	result, err := RunPlan(ctx, RunPlanInput{
 		Week:           in.Week,
 		Days:           in.Days,
 		CreateWishlist: in.CreateWishlist,
 		Family:         "family.json",
-		School:         "",
+		School:         school,
 	})
 	if err != nil {
 		return httpapi.PlanRunResult{}, fmt.Errorf("plan run: %w", err)
@@ -530,12 +542,13 @@ func (a storeAdapter) RunPlan(ctx context.Context, in httpapi.PlanRunInput) (htt
 }
 
 func (a storeAdapter) RunPlanWithProgress(ctx context.Context, in httpapi.PlanRunInput, progress func(httpapi.PlanProgress)) (httpapi.PlanRunResult, error) {
+	school := resolvePlanSchool(in, a.school)
 	result, err := RunPlan(ctx, RunPlanInput{
 		Week:           in.Week,
 		Days:           in.Days,
 		CreateWishlist: in.CreateWishlist,
 		Family:         "family.json",
-		School:         "",
+		School:         school,
 		Progress: func(phase, message string) {
 			progress(httpapi.PlanProgress{Phase: phase, Message: message, At: time.Now()})
 		},

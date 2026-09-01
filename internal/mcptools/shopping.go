@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/androidand/spisordning/internal/domain"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -23,6 +24,26 @@ type CreateShoppingListInput struct {
 type ComparePricesInput struct {
 	// Requirements are the canonical lines to compare across retailers.
 	Requirements []ShoppingRequirement `json:"requirements"`
+}
+
+// JottedListInput is the input for the resolve_jotted_list tool: free-text
+// shopping lines the person jotted by hand (no recipe to derive them from).
+type JottedListInput struct {
+	// Items are the free-text lines to price. Each carries a human label, a
+	// quantity, and a unit separately so the amount is forwarded to the
+	// comparison rather than swallowed into the name.
+	Items []JottedListItem `json:"items"`
+}
+
+// JottedListItem is one free-text line a person jotted for shopping.
+type JottedListItem struct {
+	// Item is the human-written label, e.g. "kycklingfilé". It is normalized
+	// to a canonical ingredient name before the comparison runs.
+	Item string `json:"item"`
+	// Quantity is the amount, forwarded to the comparison as-is.
+	Quantity float64 `json:"quantity"`
+	// Unit is the unit of quantity, forwarded to the comparison as-is.
+	Unit string `json:"unit"`
 }
 
 // PushWishlistItem is one resolved line to push to a retailer wishlist.
@@ -72,6 +93,8 @@ type RetailerPriceResult struct {
 // ItemComparison is the cross-retailer comparison for one requirement.
 type ItemComparison struct {
 	Ingredient string                `json:"ingredient"`
+	// Label echoes the original free-text line that produced this comparison.
+	Label    string                `json:"label,omitempty"`
 	Results    []RetailerPriceResult `json:"results"`
 	Cheapest   *RetailerPriceResult  `json:"cheapest,omitempty"`
 	Unresolved bool                  `json:"unresolved"`
@@ -96,6 +119,14 @@ type PushWishlistResult struct {
 // ShoppingListService creates a spisordning shopping list from requirements.
 type ShoppingListService interface {
 	CreateShoppingList(ctx context.Context, in CreateShoppingListInput) (CreateShoppingListResult, error)
+}
+
+// CoverageService checks whether a filled shopping list satisfies the
+// ingredient needs of a meal plan (see the check_shopping_coverage tool). The
+// MCP surface returns the MCP CoverageReport shape; the application-layer
+// implementation translates the pure coverage.Report into it.
+type CoverageService interface {
+	CheckCoverage(ctx context.Context, in CheckCoverageInput) (CoverageReport, error)
 }
 
 // PriceComparisonService compares prices across retailers for a set of
@@ -143,6 +174,44 @@ func comparePricesHandler(s PriceComparisonService) mcp.ToolHandlerFor[ComparePr
 	}
 }
 
+// resolveJottedListInput is the MCP wire shape for resolve_jotted_list; the
+// handler maps each free-text item onto a canonical compare requirement.
+func resolveJottedListHandler(s PriceComparisonService) mcp.ToolHandlerFor[JottedListInput, PriceComparison] {
+	return func(ctx context.Context, _ *mcp.CallToolRequest, in JottedListInput) (*mcp.CallToolResult, PriceComparison, error) {
+		if len(in.Items) == 0 {
+			return nil, PriceComparison{}, fmt.Errorf("resolve_jotted_list: at least one item is required")
+		}
+		reqs := make([]ShoppingRequirement, 0, len(in.Items))
+		for _, it := range in.Items {
+			reqs = append(reqs, ShoppingRequirement{
+				Ingredient: domain.CanonicalIngredientID(it.Item),
+				Quantity:   it.Quantity,
+				Unit:       it.Unit,
+			})
+		}
+		res, err := s.ComparePrices(ctx, reqs)
+		if err != nil {
+			return nil, PriceComparison{}, err
+		}
+		labels := make([]string, len(in.Items))
+		for i, it := range in.Items {
+			labels[i] = it.Item
+		}
+		echoMCPLabels(res.Items, labels)
+		return nil, res, nil
+	}
+}
+
+// echoMCPLabels sets each result item's Label from the corresponding input
+// free-text line. Mirrors the REST surface's echoLabels.
+func echoMCPLabels(items []ItemComparison, labels []string) {
+	for i := range items {
+		if i < len(labels) {
+			items[i].Label = labels[i]
+		}
+	}
+}
+
 func pushWishlistHandler(s WishlistService) mcp.ToolHandlerFor[PushWishlistInput, PushWishlistResult] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in PushWishlistInput) (*mcp.CallToolResult, PushWishlistResult, error) {
 		if in.Retailer != "willys" && in.Retailer != "ica" {
@@ -162,6 +231,46 @@ func pushWishlistHandler(s WishlistService) mcp.ToolHandlerFor[PushWishlistInput
 		res, err := s.PushToWishlist(ctx, in)
 		if err != nil {
 			return nil, PushWishlistResult{}, err
+		}
+		return nil, res, nil
+	}
+}
+
+// CheckCoverageInput is the input for the check_shopping_coverage tool.
+type CheckCoverageInput struct {
+	ShoppingListID string `json:"shopping_list_id"`
+	PlanID         string `json:"plan_id"`
+}
+
+// CoverageLine is the verdict for one required line. Status is one of
+// "covered", "short", or "missing". Shortfall is positive when supplied <
+// required and zero when covered.
+type CoverageLine struct {
+	IngredientID   string  `json:"ingredient_id"`
+	IngredientName string  `json:"ingredient_name"`
+	Unit           string  `json:"unit"`
+	Status         string  `json:"status"`
+	Required       float64 `json:"required"`
+	Supplied       float64 `json:"supplied"`
+	Shortfall      float64 `json:"shortfall"`
+}
+
+// CoverageReport is the per-ingredient verdict for a list vs. a plan.
+type CoverageReport struct {
+	ShortCount     int           `json:"short_count"`
+	MissingCount   int           `json:"missing_count"`
+	NotPlanDerived int           `json:"not_plan_derived"`
+	Lines          []CoverageLine `json:"lines"`
+}
+
+func checkCoverageHandler(s CoverageService) mcp.ToolHandlerFor[CheckCoverageInput, CoverageReport] {
+	return func(ctx context.Context, _ *mcp.CallToolRequest, in CheckCoverageInput) (*mcp.CallToolResult, CoverageReport, error) {
+		if strings.TrimSpace(in.ShoppingListID) == "" || strings.TrimSpace(in.PlanID) == "" {
+			return nil, CoverageReport{}, fmt.Errorf("check_shopping_coverage: shopping_list_id and plan_id are both required")
+		}
+		res, err := s.CheckCoverage(ctx, in)
+		if err != nil {
+			return nil, CoverageReport{}, err
 		}
 		return nil, res, nil
 	}

@@ -7,8 +7,9 @@
 // Layers:
 //
 //	domain       internal/domain, internal/recipefamily, internal/scoring,
-//	             internal/openapi, internal/ambient, internal/availability
-//	application  internal/planning                                — use-case logic
+	//	             internal/openapi, internal/ambient, internal/availability,
+	//	             internal/coverage        — pure covered/short/missing verdicts
+	//	application  internal/planning                                — use-case logic
 //	service      internal/service                          — app services
 //	contract     internal/dto                                     — shared DTOs + service interfaces
 //	config       internal/config                                  — runtime configuration
@@ -59,7 +60,7 @@ type prefix struct {
 var layerPrefixes = []prefix{
 	{Cmd, []string{"cmd", "cmd/mcp-server"}},
 	{Test, []string{"internal/architecturetest"}},
-	{Domain, []string{"internal/domain", "internal/recipefamily", "internal/scoring", "internal/openapi", "internal/ambient", "internal/availability"}},
+	{Domain, []string{"internal/domain", "internal/recipefamily", "internal/scoring", "internal/openapi", "internal/ambient", "internal/availability", "internal/coverage"}},
 	{Application, []string{"internal/planning"}},
 	{Service, []string{"internal/service"}},
 	{Contract, []string{"internal/dto"}},

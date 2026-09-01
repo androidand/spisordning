@@ -117,6 +117,7 @@ type Dependencies struct {
 	Reactions         MealReactionService
 	Requirements      RequirementsService
 	ShoppingList      ShoppingListService
+	Coverage          CoverageService
 	Compare           PriceComparisonService
 	Wishlist          WishlistService
 	RecipeStructuring RecipeStructuringService
@@ -175,17 +176,27 @@ func RegisterTools(s *mcp.Server, deps Dependencies) {
 			Description: "Return the canonical shopping requirements (ingredient + amount per line) for the given recipe ids, so they can be sent to a retailer adapter for product resolution.",
 		}, requirementsHandler(deps.Requirements))
 	}
-	if deps.ShoppingList != nil {
-		mcp.AddTool(s, &mcp.Tool{
-			Name:        "create_shopping_list",
-			Description: "Create a new spisordning shopping list from a set of canonical shopping requirements (ingredient + amount per line). Returns the new list id.",
-		}, createShoppingListHandler(deps.ShoppingList))
-	}
+		if deps.ShoppingList != nil {
+			mcp.AddTool(s, &mcp.Tool{
+				Name:        "create_shopping_list",
+				Description: "Create a new spisordning shopping list from a set of canonical shopping requirements (ingredient + amount per line). Returns the new list id.",
+			}, createShoppingListHandler(deps.ShoppingList))
+		}
+		if deps.Coverage != nil {
+			mcp.AddTool(s, &mcp.Tool{
+				Name:        "check_shopping_coverage",
+				Description: "Check whether a filled shopping list covers the ingredient needs of a meal plan. Given a shopping_list_id and a plan_id, returns per-ingredient coverage (covered/short/missing) with the shortfall amount, so an agent can tell whether the basket is short a line before pushing it to a retailer wishlist.",
+			}, checkCoverageHandler(deps.Coverage))
+		}
 	if deps.Compare != nil {
 		mcp.AddTool(s, &mcp.Tool{
 			Name:        "compare_shopping_prices",
 			Description: "Compare the price of a set of shopping requirements across retailers (Willys and ICA). Returns per-item each retailer's product + price, the cheapest, and per-retailer availability. A stale or unavailable retailer degrades to available:false instead of failing the call.",
 		}, comparePricesHandler(deps.Compare))
+		mcp.AddTool(s, &mcp.Tool{
+			Name:        "resolve_jotted_list",
+			Description: "Price a handwritten shopping list of free-text items across retailers (Willys and ICA). Each item is a human label with an optional quantity and unit; the list is mapped to canonical requirements and compared the same way compare_shopping_prices does. Items no retailer recognizes come back unresolved rather than rejected.",
+		}, resolveJottedListHandler(deps.Compare))
 	}
 	if deps.Wishlist != nil {
 		mcp.AddTool(s, &mcp.Tool{
