@@ -13,7 +13,8 @@ func TestMealsAndPreferences_ParticipantAndReviewRoundTrip(t *testing.T) {
 	truncateTables(t, ctx, s, "meal_review", "meal_participant", "meal_reaction", "meal_event", "recipe_ref", "person")
 
 	// Seed a person + recipe so FKs resolve.
-	if err := s.CreatePerson(ctx, Person{ID: domain.NewPersonID().String(), Name: "Andreas", Weight: 1.0}); err != nil {
+	andreasID := domain.NewPersonID()
+	if err := s.CreatePerson(ctx, Person{ID: andreasID.String(), Name: "Andreas", Weight: 1.0}); err != nil {
 		t.Fatalf("CreatePerson: %v", err)
 	}
 	if err := s.UpsertRecipeRef(ctx, RecipeRef{MealieRecipeID: "r-pasta", Title: "Pasta", Effort: 2}); err != nil {
@@ -30,7 +31,6 @@ func TestMealsAndPreferences_ParticipantAndReviewRoundTrip(t *testing.T) {
 	}
 
 	// Add a participant (attends without reacting).
-	andreasID := domain.NewPersonID()
 	if err := s.AddMealParticipant(ctx, MealParticipant{MealEventID: eid, PersonID: andreasID}); err != nil {
 		t.Fatalf("AddMealParticipant: %v", err)
 	}
@@ -80,10 +80,10 @@ func TestMealsAndPreferences_RecipeRatingAggregation(t *testing.T) {
 	// Two people with different weights.
 	mumID := domain.NewPersonID()
 	kidID := domain.NewPersonID()
-	if err := s.CreatePerson(ctx, Person{ID: domain.NewPersonID().String(), Name: "Mum", Weight: 1.0}); err != nil {
+	if err := s.CreatePerson(ctx, Person{ID: mumID.String(), Name: "Mum", Weight: 1.0}); err != nil {
 		t.Fatalf("CreatePerson: %v", err)
 	}
-	if err := s.CreatePerson(ctx, Person{ID: domain.NewPersonID().String(), Name: "Kid", Weight: 2.0}); err != nil {
+	if err := s.CreatePerson(ctx, Person{ID: kidID.String(), Name: "Kid", Weight: 2.0}); err != nil {
 		t.Fatalf("CreatePerson: %v", err)
 	}
 	if err := s.UpsertRecipeRef(ctx, RecipeRef{MealieRecipeID: "r-pasta", Title: "Pasta", Effort: 2}); err != nil {
@@ -226,7 +226,8 @@ func TestMealsAndPreferences_ParticipantUniqueness(t *testing.T) {
 	ctx := context.Background()
 	truncateTables(t, ctx, s, "meal_participant", "meal_event", "recipe_ref", "person")
 
-	if err := s.CreatePerson(ctx, Person{ID: domain.NewPersonID().String(), Name: "A", Weight: 1.0}); err != nil {
+	paID := domain.NewPersonID()
+	if err := s.CreatePerson(ctx, Person{ID: paID.String(), Name: "A", Weight: 1.0}); err != nil {
 		t.Fatalf("CreatePerson: %v", err)
 	}
 	if err := s.UpsertRecipeRef(ctx, RecipeRef{MealieRecipeID: "r-pasta", Title: "Pasta", Effort: 2}); err != nil {
@@ -235,7 +236,6 @@ func TestMealsAndPreferences_ParticipantUniqueness(t *testing.T) {
 	ref, _ := s.GetRecipeRefByMealieID(ctx, "r-pasta")
 	eid, _ := s.CreateMealEvent(ctx, ref.ID, date(t, "2026-08-15"), nil, nil)
 
-	paID := domain.NewPersonID()
 	// First add is fine.
 	if err := s.AddMealParticipant(ctx, MealParticipant{MealEventID: eid, PersonID: paID}); err != nil {
 		t.Fatalf("first AddMealParticipant: %v", err)

@@ -63,7 +63,7 @@ jobs:
           sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client
           actual=$(PGPASSWORD=change-me psql -h localhost -U spisordning -d spisordning \
             -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' AND table_name <> 'goose_db_version'")
-           expected=54
+           expected=59
           echo "schema tables: $actual (expected $expected)"
           [ "$actual" = "$expected" ]
 

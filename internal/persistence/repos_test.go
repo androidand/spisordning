@@ -32,7 +32,8 @@ func TestPeople_PreferencesAndObservations(t *testing.T) {
 	ctx := context.Background()
 	truncateTables(t, ctx, s, "preference_observation", "person_preference", "person")
 
-	p := Person{ID: domain.NewPersonID().String(), Name: "Test Person", Weight: 2}
+	testPersonID := domain.NewPersonID()
+	p := Person{ID: testPersonID.String(), Name: "Test Person", Weight: 2}
 	if err := s.CreatePerson(ctx, p); err != nil {
 		t.Fatalf("CreatePerson: %v", err)
 	}
@@ -44,7 +45,6 @@ func TestPeople_PreferencesAndObservations(t *testing.T) {
 		t.Errorf("GetPerson = %+v", got)
 	}
 
-	testPersonID := domain.NewPersonID()
 	if err := s.UpsertPreference(ctx, PersonPreference{
 		PersonID: testPersonID, Tag: "pasta", Sentiment: 2, Confidence: 0.9,
 	}); err != nil {
@@ -147,7 +147,8 @@ func TestMeals_ReactionsAndConstraints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRecipeRefByMealieID: %v", err)
 	}
-	if err := s.CreatePerson(ctx, Person{ID: domain.NewPersonID().String(), Name: "Kid", Weight: 1}); err != nil {
+	kidID := domain.NewPersonID()
+	if err := s.CreatePerson(ctx, Person{ID: kidID.String(), Name: "Kid", Weight: 1}); err != nil {
 		t.Fatalf("CreatePerson: %v", err)
 	}
 	served := time.Now().AddDate(0, 0, -3)
@@ -155,7 +156,7 @@ func TestMeals_ReactionsAndConstraints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateMealEvent: %v", err)
 	}
-	if err := s.AddMealReaction(ctx, MealReaction{MealEventID: eid, PersonID: domain.NewPersonID(), Sentiment: 2, Note: "gott"}); err != nil {
+	if err := s.AddMealReaction(ctx, MealReaction{MealEventID: eid, PersonID: kidID, Sentiment: 2, Note: "gott"}); err != nil {
 		t.Fatalf("AddMealReaction: %v", err)
 	}
 	rxns, err := s.ListMealReactions(ctx, eid)
